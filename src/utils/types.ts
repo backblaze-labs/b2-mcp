@@ -103,6 +103,14 @@ export interface B2Config {
   credentialFingerprint?: string;
   /** Non-secret fingerprint that includes the verified caller when one is available. */
   callerFingerprint?: string;
+  /**
+   * Rollout flag for MCP workflow prompts.
+   *
+   * @remarks
+   * Defaults off so rolling deployments do not advertise `prompts/list` from
+   * upgraded replicas before every serving replica supports prompt handlers.
+   */
+  enableMcpPrompts?: boolean;
 }
 
 /** Normalized response from B2 authorization. */

@@ -20,11 +20,12 @@ const VERCEL_SOURCE_BUDGET_BYTES = 1_500_000;
 // Vercel function estimate; emitted build output is still checked separately.
 // The estimate is all source bytes + the full clean-consumer production install
 // (see below), which grew with the reviewed aws-sdk 3.1119.0 and b2-sdk 0.4.0
-// bumps and the stdio discovery-mode source. The whole function estimate lands
-// near 33.44 MB on Linux — of which the dependency install itself is ~32.11 MB
-// (reports/package-budget/metrics.json), not b2-sdk alone — so the budget
-// carries modest headroom above the full estimate.
-const VERCEL_FUNCTION_BUNDLE_BUDGET_BYTES = 33_450_000;
+// bumps, the stdio discovery-mode source, the read-only resource surface, and
+// the prompt workflow source and contract fixtures. The whole function estimate
+// lands near 33.51 MB on Linux — of which the dependency install itself is
+// ~32.24 MB (reports/package-budget/metrics.json), not b2-sdk alone — so the
+// budget carries modest headroom above the full estimate.
+const VERCEL_FUNCTION_BUNDLE_BUDGET_BYTES = 33_700_000;
 
 function readJson(relativePath) {
   return JSON.parse(readFileSync(path.join(root, relativePath), "utf8"));

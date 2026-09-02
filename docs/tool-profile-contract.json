@@ -588,5 +588,148 @@
         "legacy": "tests/fixtures/tool-contract/read-only.legacy.json"
       }
     }
+  },
+  "promptIssue": 166,
+  "promptIssueUrl": "https://github.com/backblaze-labs/b2-mcp/issues/166",
+  "promptProfiles": {
+    "full": {
+      "description": "Complete tool superset for contract review and regression detection across all backing categories; durable-secret producers are sink-backed when a secret sink is active and otherwise remain availability-annotated stubs.",
+      "capabilities": null,
+      "counts": {
+        "total": 5
+      },
+      "names": [
+        "b2_audit_public_exposure",
+        "b2_configure_lifecycle_cost_rules",
+        "b2_provision_locked_bucket",
+        "b2_review_bucket_notifications",
+        "b2_rotate_application_key"
+      ],
+      "requiredTools": {
+        "b2_audit_public_exposure": ["b2_list_buckets"],
+        "b2_configure_lifecycle_cost_rules": ["b2_list_buckets", "s3_put_bucket_lifecycle"],
+        "b2_provision_locked_bucket": ["b2_create_bucket", "b2_list_buckets", "b2_update_bucket"],
+        "b2_review_bucket_notifications": ["b2_get_bucket_notification_rules"],
+        "b2_rotate_application_key": ["b2_create_key", "b2_delete_key", "b2_list_keys"]
+      },
+      "requiredCapabilities": {
+        "b2_audit_public_exposure": [],
+        "b2_configure_lifecycle_cost_rules": [],
+        "b2_provision_locked_bucket": ["writeBucketRetentions"],
+        "b2_review_bucket_notifications": [],
+        "b2_rotate_application_key": []
+      },
+      "hash": "8400224b77ddaf6711cf0b0c6d2d92f1efe0b19c92e37e25c7d21d00464a8f86",
+      "fixture": "tests/fixtures/prompt-contract/full.json"
+    },
+    "live-b2-contract": {
+      "description": "Protected live B2 contract profile: non-master application key with release-evidence capabilities, no key-management grants, and a distinct master key only for Partner/Groups API surface discovery.",
+      "capabilities": [
+        "bypassGovernance",
+        "deleteBuckets",
+        "deleteFiles",
+        "listBuckets",
+        "listFiles",
+        "listKeys",
+        "readBucketEncryption",
+        "readBucketRetentions",
+        "readBuckets",
+        "readFileLegalHolds",
+        "readFileRetentions",
+        "readFiles",
+        "writeBucketEncryption",
+        "writeBucketNotifications",
+        "writeBucketRetentions",
+        "writeBuckets",
+        "writeFileLegalHolds",
+        "writeFileRetentions",
+        "writeFiles"
+      ],
+      "counts": {
+        "total": 4
+      },
+      "names": [
+        "b2_audit_public_exposure",
+        "b2_configure_lifecycle_cost_rules",
+        "b2_provision_locked_bucket",
+        "b2_review_bucket_notifications"
+      ],
+      "requiredTools": {
+        "b2_audit_public_exposure": ["b2_list_buckets"],
+        "b2_configure_lifecycle_cost_rules": ["b2_list_buckets", "s3_put_bucket_lifecycle"],
+        "b2_provision_locked_bucket": ["b2_create_bucket", "b2_list_buckets", "b2_update_bucket"],
+        "b2_review_bucket_notifications": ["b2_get_bucket_notification_rules"]
+      },
+      "requiredCapabilities": {
+        "b2_audit_public_exposure": [],
+        "b2_configure_lifecycle_cost_rules": [],
+        "b2_provision_locked_bucket": ["writeBucketRetentions"],
+        "b2_review_bucket_notifications": []
+      },
+      "hash": "bbc645bbdd9b74ed97624faa581e81ad7d80de7933862c663ed50139e3e3b554",
+      "fixture": "tests/fixtures/prompt-contract/live-b2-contract.json"
+    },
+    "phase1-default": {
+      "description": "Default customer-hosted Phase 1 profile: standard B2 application key, no distinct Partner/master credential, and durable-secret producers exposed as sink-backed tools on local stdio or unavailable stubs when the sink is off.",
+      "capabilities": [
+        "deleteBuckets",
+        "deleteFiles",
+        "deleteKeys",
+        "listBuckets",
+        "listFiles",
+        "listKeys",
+        "readBucketNotifications",
+        "readFiles",
+        "writeBucketNotifications",
+        "writeBuckets",
+        "writeFileLegalHolds",
+        "writeFileRetentions",
+        "writeFiles"
+      ],
+      "counts": {
+        "total": 3
+      },
+      "names": [
+        "b2_audit_public_exposure",
+        "b2_configure_lifecycle_cost_rules",
+        "b2_review_bucket_notifications"
+      ],
+      "requiredTools": {
+        "b2_audit_public_exposure": ["b2_list_buckets"],
+        "b2_configure_lifecycle_cost_rules": ["b2_list_buckets", "s3_put_bucket_lifecycle"],
+        "b2_review_bucket_notifications": ["b2_get_bucket_notification_rules"]
+      },
+      "requiredCapabilities": {
+        "b2_audit_public_exposure": [],
+        "b2_configure_lifecycle_cost_rules": [],
+        "b2_review_bucket_notifications": []
+      },
+      "hash": "9f4a48fe119d5b872332896123cdfcb6f8cfea95ceebf8986594360ef4c4292d",
+      "fixture": "tests/fixtures/prompt-contract/phase1-default.json"
+    },
+    "read-only": {
+      "description": "Deterministic read/list profile for safe production use and contract tests; write/delete/admin handlers are omitted while durable-secret producer names remain unavailable stubs unless a sink-backed admin profile is configured.",
+      "capabilities": [
+        "listBuckets",
+        "listFiles",
+        "listKeys",
+        "readBucketNotifications",
+        "readFiles"
+      ],
+      "counts": {
+        "total": 2
+      },
+      "names": ["b2_audit_public_exposure", "b2_review_bucket_notifications"],
+      "requiredTools": {
+        "b2_audit_public_exposure": ["b2_list_buckets"],
+        "b2_review_bucket_notifications": ["b2_get_bucket_notification_rules"]
+      },
+      "requiredCapabilities": {
+        "b2_audit_public_exposure": [],
+        "b2_review_bucket_notifications": []
+      },
+      "hash": "686610d7c5bf334093888a5e122ec39b40865947535d66da2d9230b2b0c1b381",
+      "fixture": "tests/fixtures/prompt-contract/read-only.json"
+    }
   }
 }

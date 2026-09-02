@@ -10,26 +10,34 @@ import {
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/client/validators/ajv";
 import { buildHttpServer, type HttpServerHandle } from "../../src/http-server";
 import type { CredentialProvider, CredentialResolution } from "../../src/credentials";
+import { createServer, getRegisteredPrompts } from "../../src/server";
+import { B2_WORKFLOW_PROMPT_NAMES } from "../../src/prompts";
 import { readJson, root } from "./support";
 import {
   LEGACY_PROTOCOL_VERSION,
   PROFILE_NAMES,
+  PROMPT_CONTRACT_ISSUE,
+  PROMPT_CONTRACT_ISSUE_URL,
   TOOL_BACKING_BY_NAME,
   TOOL_BACKING_CATEGORIES,
   backingCategoryCounts,
   backingCategoryMapForNames,
   capabilitiesForProfile,
   configForProfile,
+  configForPromptProfile,
   contractSdkVersions,
   countPrefixes,
   destructiveConfirmToolsFromTools,
+  promptFixtureFromRegistered,
   renderProfileReference,
   toolFixtureFromCollected,
   type CollectedToolList,
   type ContractArtifact,
   type Era,
   type JsonObject,
+  type NormalizedPrompt,
   type NormalizedTool,
+  type PromptFixture,
   type ProfileName,
   type ToolFixture,
   type ToolContractPackageJson,
@@ -40,6 +48,7 @@ const packageJson = readJson<ToolContractPackageJson>("package.json");
 const biomeRunner = join(root, "scripts/run-biome.mjs");
 
 const profileNames = Object.keys(contract.profiles) as ProfileName[];
+const promptProfileNames = Object.keys(contract.promptProfiles) as ProfileName[];
 const eras: Era[] = ["modern", "legacy"];
 
 async function listenOnEphemeralPort(handle: HttpServerHandle): Promise<number> {
@@ -109,14 +118,44 @@ async function collectFixture(profile: ProfileName, era: Era): Promise<ToolFixtu
   });
 }
 
+async function collectPromptFixture(profile: ProfileName): Promise<PromptFixture> {
+  const server = createServer(
+    { ...configForPromptProfile(profile), enableMcpPrompts: true },
+    contract.promptProfiles[profile].capabilities,
+  );
+  try {
+    return promptFixtureFromRegistered({
+      contractVersion: contract.contractVersion,
+      issue: contract.promptIssue,
+      profile,
+      mcpRevision: contract.mcpRevision,
+      sdk: contractSdkVersions(packageJson),
+      capabilities: contract.promptProfiles[profile].capabilities,
+      registered: getRegisteredPrompts(server) ?? {},
+    });
+  } finally {
+    await server.close();
+  }
+}
+
 function fixtureFor(profile: ProfileName, era: Era): ToolFixture {
   return readJson<ToolFixture>(contract.profiles[profile].fixtures[era]);
+}
+
+function promptFixtureFor(profile: ProfileName): PromptFixture {
+  return readJson<PromptFixture>(contract.promptProfiles[profile].fixture);
 }
 
 function getTool(fixture: ToolFixture, name: string): NormalizedTool {
   const tool = fixture.tools.find((candidate) => candidate.name === name);
   if (!tool) throw new Error(`Missing fixture tool ${name}`);
   return tool;
+}
+
+function getPrompt(fixture: PromptFixture, name: string): NormalizedPrompt {
+  const prompt = fixture.prompts.find((candidate) => candidate.name === name);
+  if (!prompt) throw new Error(`Missing fixture prompt ${name}`);
+  return prompt;
 }
 
 function visit(
@@ -268,6 +307,41 @@ describe("MCP tool profile fixtures", () => {
   });
 });
 
+describe("MCP prompt profile fixtures", () => {
+  it("publishes the approved prompt profiles and issue traceability", () => {
+    expect(promptProfileNames).toEqual(PROFILE_NAMES);
+    expect(contract.promptIssue).toBe(PROMPT_CONTRACT_ISSUE);
+    expect(contract.promptIssueUrl).toBe(PROMPT_CONTRACT_ISSUE_URL);
+    for (const profile of promptProfileNames) {
+      expect(contract.promptProfiles[profile].capabilities).toEqual(
+        capabilitiesForProfile(profile),
+      );
+    }
+  });
+
+  it.each(promptProfileNames)("%s fixture matches opt-in prompt registration", async (profile) => {
+    await expect(collectPromptFixture(profile)).resolves.toEqual(promptFixtureFor(profile));
+  });
+
+  it("summary artifact is derived from prompt fixtures", () => {
+    for (const profile of promptProfileNames) {
+      const fixture = promptFixtureFor(profile);
+      expect(contract.promptProfiles[profile].counts).toEqual(fixture.counts);
+      expect(contract.promptProfiles[profile].names).toEqual(fixture.names);
+      expect(contract.promptProfiles[profile].requiredTools).toEqual(fixture.requiredTools);
+      expect(contract.promptProfiles[profile].requiredCapabilities).toEqual(
+        fixture.requiredCapabilities,
+      );
+      expect(contract.promptProfiles[profile].capabilities).toEqual(fixture.capabilities);
+      expect(contract.promptProfiles[profile].hash).toBe(fixture.hash);
+    }
+  });
+
+  it("full prompt fixture snapshots every source workflow prompt", () => {
+    expect(promptFixtureFor("full").names).toEqual([...B2_WORKFLOW_PROMPT_NAMES].sort());
+  });
+});
+
 describe("MCP tool profile invariants", () => {
   it.each(profileNames)("%s has deterministic sorted names and prefix counts", (profile) => {
     const fixture = fixtureFor(profile, "modern");
@@ -416,6 +490,42 @@ describe("MCP tool profile invariants", () => {
   });
 });
 
+describe("MCP prompt profile invariants", () => {
+  it.each(promptProfileNames)("%s has deterministic sorted prompt names", (profile) => {
+    const fixture = promptFixtureFor(profile);
+    expect(fixture.names).toEqual([...fixture.names].sort());
+    expect(fixture.prompts.map((prompt) => prompt.name)).toEqual(fixture.names);
+    expect(fixture.counts.total).toBe(fixture.names.length);
+  });
+
+  it.each(promptProfileNames)("%s declares prompt schema and requirement metadata", (profile) => {
+    const fixture = promptFixtureFor(profile);
+    const validator = new AjvJsonSchemaValidator();
+    for (const name of fixture.names) {
+      const prompt = getPrompt(fixture, name);
+      expect(prompt.argsSchema.$schema).toBe("https://json-schema.org/draft/2020-12/schema");
+      expect(prompt.argsSchema.type).toBe("object");
+      expect(prompt.requiredTools.length).toBeGreaterThan(0);
+      expect(fixture.requiredTools[name]).toEqual(prompt.requiredTools);
+      expect(fixture.requiredCapabilities[name]).toEqual(prompt.requiredCapabilities);
+      assertBoundedRefs(prompt.argsSchema);
+      expect(() => validator.getValidator(prompt.argsSchema as JsonSchemaType)).not.toThrow();
+    }
+  });
+
+  it("prompt fixtures publish input schemas for defaulted optional arguments", () => {
+    const full = promptFixtureFor("full");
+    const auditRequired = (getPrompt(full, "b2_audit_public_exposure").argsSchema.required ??
+      []) as string[];
+    const lifecycleRequired = (getPrompt(full, "b2_configure_lifecycle_cost_rules").argsSchema
+      .required ?? []) as string[];
+
+    expect(auditRequired).not.toContain("limit");
+    expect(auditRequired).not.toContain("includeRemediationPlan");
+    expect(lifecycleRequired).not.toContain("unfinishedLargeFileCancelDays");
+  });
+});
+
 describe("MCP advertised capability contract", () => {
   it.each(profileNames)(
     "modern %s uses private cache hints and implemented capabilities",
@@ -426,10 +536,12 @@ describe("MCP advertised capability contract", () => {
       expect(fixture.modern?.discover.cacheScope).toBe(contract.approvedCacheHint.cacheScope);
       expect(fixture.modern?.discover.supportedVersions).toEqual([contract.mcpRevision]);
       expect(fixture.modern?.discover.capabilities).toEqual({
+        prompts: { listChanged: true },
         resources: { listChanged: true },
         tools: { listChanged: true },
       });
       expect(Object.keys(fixture.modern?.discover.capabilities ?? {}).sort()).toEqual([
+        "prompts",
         "resources",
         "tools",
       ]);
@@ -478,6 +590,7 @@ describe("Tool profile reference drift", () => {
     const files = [
       "docs/tool-profile-contract.json",
       ...profileNames.flatMap((profile) => Object.values(contract.profiles[profile].fixtures)),
+      ...promptProfileNames.map((profile) => contract.promptProfiles[profile].fixture),
     ].sort();
 
     expectRepoFormatted(files);

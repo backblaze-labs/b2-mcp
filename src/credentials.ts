@@ -269,6 +269,10 @@ function configFromMaterial(material: CredentialMaterial, options: ConfigOptions
       transport: options.transport,
       preflight: options.transport === "stdio",
     }),
+    // MCP workflow prompts are on by default. Set B2_ENABLE_MCP_PROMPTS=false to
+    // disable them — e.g. during a rolling HTTP upgrade so replicas do not
+    // advertise prompts/list before every replica can serve prompts/get.
+    enableMcpPrompts: process.env.B2_ENABLE_MCP_PROMPTS !== "false",
   };
   config.credentialFingerprint = fingerprintConfig(config);
   return config;

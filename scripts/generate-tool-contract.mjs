@@ -9,6 +9,7 @@ const require = createRequire(import.meta.url);
 
 const { Client, StreamableHTTPClientTransport } = require("@modelcontextprotocol/client");
 const { buildHttpServer } = require("../dist/http-server.js");
+const { createServer, getRegisteredPrompts } = require("../dist/server.js");
 const {
   APPROVED_CACHE_SCOPE,
   APPROVED_TTL_MS,
@@ -17,6 +18,8 @@ const {
   MCP_REVISION,
   PROFILE_DESCRIPTIONS,
   PROFILE_NAMES,
+  PROMPT_CONTRACT_ISSUE,
+  PROMPT_CONTRACT_ISSUE_URL,
   TOOL_BACKING_CATEGORIES,
   TOOL_CONTRACT_ISSUE,
   TOOL_CONTRACT_ISSUE_URL,
@@ -24,12 +27,14 @@ const {
   backingCategoryMapForNames,
   capabilitiesForProfile,
   configForProfile,
+  configForPromptProfile,
   confirmToolsFrom,
   contractSdkVersions,
   countPrefixes,
   destructiveConfirmToolsFromTools,
   fixtureHash,
   normalizeTool,
+  promptFixtureFromRegistered,
   renderProfileReference,
   requiredFieldsByTool,
   stable,
@@ -126,6 +131,26 @@ async function collectToolsList(profile, era) {
   }
 }
 
+async function collectPromptFixture(profile) {
+  const server = createServer(
+    { ...configForPromptProfile(profile), enableMcpPrompts: true },
+    capabilitiesForProfile(profile),
+  );
+  try {
+    return promptFixtureFromRegistered({
+      contractVersion: CONTRACT_VERSION,
+      issue: PROMPT_CONTRACT_ISSUE,
+      profile,
+      mcpRevision: MCP_REVISION,
+      sdk: sdkVersions,
+      capabilities: capabilitiesForProfile(profile),
+      registered: getRegisteredPrompts(server) ?? {},
+    });
+  } finally {
+    await server.close().catch(() => undefined);
+  }
+}
+
 function writeJson(path, value) {
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
 }
@@ -147,17 +172,28 @@ function formatGeneratedJson(paths) {
 
 async function main() {
   const fixturesDir = join(root, "tests/fixtures/tool-contract");
+  const promptFixturesDir = join(root, "tests/fixtures/prompt-contract");
   mkdirSync(fixturesDir, { recursive: true });
+  mkdirSync(promptFixturesDir, { recursive: true });
 
   const fixtures = {};
   for (const profile of PROFILE_NAMES) {
     fixtures[`${profile}.modern`] = await collectToolsList(profile, "modern");
     fixtures[`${profile}.legacy`] = await collectToolsList(profile, "legacy");
   }
+  const promptFixtures = {};
+  for (const profile of PROFILE_NAMES) {
+    promptFixtures[profile] = await collectPromptFixture(profile);
+  }
 
   const generatedJsonPaths = [];
   for (const [key, fixture] of Object.entries(fixtures)) {
     const fixturePath = join(fixturesDir, `${key}.json`);
+    writeJson(fixturePath, fixture);
+    generatedJsonPaths.push(fixturePath);
+  }
+  for (const [profile, fixture] of Object.entries(promptFixtures)) {
+    const fixturePath = join(promptFixturesDir, `${profile}.json`);
     writeJson(fixturePath, fixture);
     generatedJsonPaths.push(fixturePath);
   }
@@ -185,6 +221,24 @@ async function main() {
       ];
     }),
   );
+  const promptProfiles = Object.fromEntries(
+    PROFILE_NAMES.map((profile) => {
+      const fixture = promptFixtures[profile];
+      return [
+        profile,
+        {
+          description: PROFILE_DESCRIPTIONS[profile],
+          capabilities: capabilitiesForProfile(profile),
+          counts: fixture.counts,
+          names: fixture.names,
+          requiredTools: fixture.requiredTools,
+          requiredCapabilities: fixture.requiredCapabilities,
+          hash: fixture.hash,
+          fixture: `tests/fixtures/prompt-contract/${profile}.json`,
+        },
+      ];
+    }),
+  );
 
   const contract = {
     contractVersion: CONTRACT_VERSION,
@@ -199,6 +253,9 @@ async function main() {
     backingCategories: TOOL_BACKING_CATEGORIES,
     toolBacking: backingCategoryMapForNames(fixtures["full.modern"].names),
     profiles,
+    promptIssue: PROMPT_CONTRACT_ISSUE,
+    promptIssueUrl: PROMPT_CONTRACT_ISSUE_URL,
+    promptProfiles,
   };
 
   const contractPath = join(root, "docs/tool-profile-contract.json");

@@ -31,6 +31,8 @@ import {
   MODERN_PROTOCOL_VERSION,
   closeClient,
   connectHttpClient,
+  getPromptText,
+  listPromptNames,
   modernBody,
   modernHeaders,
 } from "./support/clients";
@@ -118,6 +120,7 @@ function elicitationCallToolBody(
 
 describe("HTTP handler (MCP 2026-07-28)", () => {
   it("serves discover, list, and representative calls through the SDK HTTP client", async () => {
+    process.env.B2_ENABLE_MCP_PROMPTS = "true";
     const { client, requests } = await connectHttpClient(port, {
       era: "modern",
       headers: creds,
@@ -135,6 +138,14 @@ describe("HTTP handler (MCP 2026-07-28)", () => {
       const toolNames = listed.tools.map((tool) => tool.name);
       expect(toolNames).toContain("b2_list_buckets");
       expect(toolNames).toContain("s3_list_objects_v2");
+
+      const promptNames = await listPromptNames(client);
+      expect(promptNames).toContain("b2_configure_lifecycle_cost_rules");
+      const lifecyclePrompt = await getPromptText(client, "b2_configure_lifecycle_cost_rules", {
+        bucketName: "protocol-http-modern",
+      });
+      expect(lifecyclePrompt).toContain("s3_put_bucket_lifecycle");
+      expect(lifecyclePrompt).toContain("destructive gate");
 
       const bucketName = "protocol-http-modern";
       expect(
@@ -162,6 +173,14 @@ describe("HTTP handler (MCP 2026-07-28)", () => {
         true,
       );
       expect(requests.some((record) => record.headers["mcp-method"] === "tools/list")).toBe(true);
+      expect(requests.some((record) => record.headers["mcp-method"] === "prompts/list")).toBe(true);
+      expect(
+        requests.some(
+          (record) =>
+            record.headers["mcp-method"] === "prompts/get" &&
+            record.headers["mcp-name"] === "b2_configure_lifecycle_cost_rules",
+        ),
+      ).toBe(true);
       expect(
         requests.some(
           (record) =>

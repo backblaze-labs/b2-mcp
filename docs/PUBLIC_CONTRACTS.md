@@ -16,8 +16,8 @@ current with code, CI, and GitHub release metadata.
 | [`SDK_ADOPTION_CONTRACT.md`](SDK_ADOPTION_CONTRACT.md) | Gonza              | Official B2 SDK adoption and Native B2 SDK/AWS S3 SDK/custom tool parity matrix | #71, #132                    |
 | [`TYPESCRIPT_7_MIGRATION.md`](TYPESCRIPT_7_MIGRATION.md) | Gonza              | TypeScript 7 native compiler migration decision and trigger              | #114                         |
 | [`V1_SCOPE.md`](V1_SCOPE.md)                           | Gonza              | Phase 1 product, runtime, release, SDK, and protocol decision record    | #55, #71, #106               |
-| [`TOOL_CONTRACT.md`](TOOL_CONTRACT.md)                 | Gonza              | Tool-profile contract policy, backing taxonomy, and fixture requirements | #49, #59                     |
-| [`TOOL_PROFILES.md`](TOOL_PROFILES.md)                 | Gonza              | Generated Phase 1 tool-profile reference with availability annotations  | #49                          |
+| [`TOOL_CONTRACT.md`](TOOL_CONTRACT.md)                 | Gonza              | Tool/prompt profile contract policy, backing taxonomy, and fixture requirements | #49, #59, #166               |
+| [`TOOL_PROFILES.md`](TOOL_PROFILES.md)                 | Gonza              | Generated Phase 1 tool and opt-in prompt profile reference              | #49, #166                    |
 | [`TESTING.md`](TESTING.md)                             | Sophie / QK        | Deterministic PR gates, contract evidence, and live B2 smoke policy     | #50, #51, #52, #60, #61, #63 |
 | [`EVALS.md`](EVALS.md)                                 | Sophie / QK        | LLM eval local and CI runbook                                           | #251                         |
 | [`SECURITY_REVIEW.md`](SECURITY_REVIEW.md)             | Sophie / QK        | Pre-public secret scanning, provenance, and legal review checklist      | #62, #66, #67                |

@@ -16,12 +16,16 @@ import {
   createMcpServer,
   getMcpClientCapabilities,
   getMcpNegotiatedProtocolVersion,
+  getRegisteredTools,
+  PromptRegistrationAdapter,
+  promptRequiredToolsAvailable,
   ToolRegistrationAdapter,
   type McpServer,
+  type PromptCallback,
   type ToolCallback,
   type ToolRegistrar,
 } from "./mcp.js";
-export { getRegisteredTools } from "./mcp.js";
+export { getRegisteredPrompts, getRegisteredTools } from "./mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import type { B2Config, SecretSinkConfig } from "./utils/types.js";
@@ -82,6 +86,7 @@ import { registerS3MultipartTools } from "./s3/multipart.js";
 import { registerS3PresignedTools } from "./s3/presigned.js";
 import { registerS3ExtraTools } from "./s3/extras.js";
 import { isDestructiveTool } from "./utils/destructive-gate.js";
+import { registerB2WorkflowPrompts } from "./prompts.js";
 
 const COMPATIBILITY_STUB_CONFIRM_DESC =
   "Confirm this destructive/irreversible compatibility stub. Required if this tool is re-enabled with a real handler under the default destructive policy.";
@@ -150,6 +155,7 @@ function registerDurableSecretCompatibilityStubs(
         description:
           "Compatibility stub for a durable-secret-producing B2 operation that is unavailable because the secret sink is off.",
         inputSchema,
+        availability: "unavailable",
         force: true,
       },
       async () =>
@@ -285,6 +291,9 @@ export function createServer(
       ].join("\n"),
       cacheHints: {
         "server/discover": { ttlMs: 30_000, cacheScope: "private" },
+        ...(config.enableMcpPrompts === true
+          ? { "prompts/list": { ttlMs: 30_000, cacheScope: "private" } }
+          : {}),
         "tools/list": { ttlMs: 30_000, cacheScope: "private" },
       },
       requestState: {
@@ -431,7 +440,19 @@ export function createServer(
     credentialsMissing: options.credentialsMissing,
     failClosedUnknownCapabilities,
   });
-  logger.info({ toolCount, version: VERSION, outputFormat }, "server.ready");
+  let promptCount = 0;
+  if (config.enableMcpPrompts === true) {
+    const tools = getRegisteredTools(server) ?? {};
+    const promptRegistrar = new PromptRegistrationAdapter(server, {
+      shouldRegister: (_name, { requiredTools, requiredCapabilities }) =>
+        promptRequiredToolsAvailable(requiredTools, tools) &&
+        (!filterActive || requiredCapabilities.every((capability) => capsSet?.has(capability))),
+      wrapCallback: (name, callback) => createAuditedPromptCallback(name, callback, config),
+    });
+    registerB2WorkflowPrompts(promptRegistrar);
+    promptCount = promptRegistrar.commit();
+  }
+  logger.info({ toolCount, promptCount, version: VERSION, outputFormat }, "server.ready");
 
   // Discovery mode: reject every tools/call ahead of the SDK's input-schema
   // validation so required-argument tools also return missing_credentials, while
@@ -898,6 +919,70 @@ export function createAuditedToolCallback(
           err: safeErr.message,
         },
         "tool.error",
+      );
+      throw safeErr;
+    }
+  };
+}
+
+/**
+ * Wrap a prompt handler to emit a side-effect-free `prompt.get` audit event.
+ *
+ * @remarks
+ * Prompt arguments are model-visible user input, but logs still record only
+ * top-level argument keys. Values are intentionally omitted to avoid leaking
+ * bucket names, credential identifiers, webhook details, or free-form text.
+ *
+ * @param name - MCP prompt name being wrapped.
+ * @param original - Original prompt callback registered by a prompt module.
+ * @param config - Server configuration used for redaction and credential labels.
+ *
+ * @returns The wrapped prompt callback.
+ */
+export function createAuditedPromptCallback(
+  name: string,
+  original: PromptCallback,
+  config: B2Config,
+): PromptCallback {
+  const keyFingerprint = config.credentialFingerprint ?? fingerprintConfig(config);
+
+  return async function auditedPromptCallback(args: any, extra: any) {
+    const start = Date.now();
+    const argKeys = argKeysOf(args);
+    try {
+      const result = await runWithSanitizerOptions(sanitizerOptionsFromConfig(config), () =>
+        original(args, extra),
+      );
+      const durationMs = Date.now() - start;
+      const resultType =
+        (result as { resultType?: unknown })?.resultType === "input_required"
+          ? "input_required"
+          : "complete";
+      logger.info(
+        {
+          prompt: name,
+          credential: keyFingerprint,
+          argKeys,
+          durationMs,
+          error: false,
+          resultType,
+        },
+        "prompt.get",
+      );
+      return result;
+    } catch (err) {
+      const safeErr = sanitizeError(err, sanitizerOptionsFromConfig(config));
+      const durationMs = Date.now() - start;
+      logger.warn(
+        {
+          prompt: name,
+          credential: keyFingerprint,
+          argKeys,
+          durationMs,
+          error: true,
+          err: safeErr.message,
+        },
+        "prompt.error",
       );
       throw safeErr;
     }

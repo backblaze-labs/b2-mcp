@@ -270,3 +270,68 @@ Profile hash: `9873510da79d6862df6aa9b9d0bb55d4646f09b6daf6d89646f197b3845411c0`
 - `s3_list_object_versions`
 - `s3_list_objects_v2`
 - `s3_list_parts`
+
+# MCP Prompt Profiles
+
+Prompt contract issue: [#166](https://github.com/backblaze-labs/b2-mcp/issues/166)
+
+MCP workflow prompts are on by default. Set `B2_ENABLE_MCP_PROMPTS=false` to disable them — for example during a rolling HTTP upgrade so replicas do not advertise `prompts/list` before every replica can serve `prompts/get`. These generated fixtures pin the prompt surface.
+
+The `full` prompt profile enables an inline dummy secret sink so sink-dependent key-rotation prompts are included in the external contract.
+
+| Profile | Prompts | Hash prefix |
+| --- | ---: | --- |
+| `full` | 5 | `8400224b77dd` |
+| `live-b2-contract` | 4 | `bbc645bbdd9b` |
+| `phase1-default` | 3 | `9f4a48fe119d` |
+| `read-only` | 2 | `686610d7c5bf` |
+
+## `full` Prompt Surface
+
+Complete tool superset for contract review and regression detection across all backing categories; durable-secret producers are sink-backed when a secret sink is active and otherwise remain availability-annotated stubs.
+
+Prompt profile hash: `8400224b77ddaf6711cf0b0c6d2d92f1efe0b19c92e37e25c7d21d00464a8f86`
+
+### MCP Prompts
+
+- `b2_audit_public_exposure`
+- `b2_configure_lifecycle_cost_rules`
+- `b2_provision_locked_bucket`
+- `b2_review_bucket_notifications`
+- `b2_rotate_application_key`
+
+## `live-b2-contract` Prompt Surface
+
+Protected live B2 contract profile: non-master application key with release-evidence capabilities, no key-management grants, and a distinct master key only for Partner/Groups API surface discovery.
+
+Prompt profile hash: `bbc645bbdd9b74ed97624faa581e81ad7d80de7933862c663ed50139e3e3b554`
+
+### MCP Prompts
+
+- `b2_audit_public_exposure`
+- `b2_configure_lifecycle_cost_rules`
+- `b2_provision_locked_bucket`
+- `b2_review_bucket_notifications`
+
+## `phase1-default` Prompt Surface
+
+Default customer-hosted Phase 1 profile: standard B2 application key, no distinct Partner/master credential, and durable-secret producers exposed as sink-backed tools on local stdio or unavailable stubs when the sink is off.
+
+Prompt profile hash: `9f4a48fe119d5b872332896123cdfcb6f8cfea95ceebf8986594360ef4c4292d`
+
+### MCP Prompts
+
+- `b2_audit_public_exposure`
+- `b2_configure_lifecycle_cost_rules`
+- `b2_review_bucket_notifications`
+
+## `read-only` Prompt Surface
+
+Deterministic read/list profile for safe production use and contract tests; write/delete/admin handlers are omitted while durable-secret producer names remain unavailable stubs unless a sink-backed admin profile is configured.
+
+Prompt profile hash: `686610d7c5bf334093888a5e122ec39b40865947535d66da2d9230b2b0c1b381`
+
+### MCP Prompts
+
+- `b2_audit_public_exposure`
+- `b2_review_bucket_notifications`

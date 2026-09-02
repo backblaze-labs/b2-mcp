@@ -15,7 +15,11 @@ export const JSON_HEADERS = {
   accept: "application/json, text/event-stream",
 };
 
-export const HTTP_ENV_KEYS = ["B2_REGISTER_ALL_TOOLS", "B2_HTTP_CREDENTIAL_MODE"] as const;
+export const HTTP_ENV_KEYS = [
+  "B2_REGISTER_ALL_TOOLS",
+  "B2_HTTP_CREDENTIAL_MODE",
+  "B2_ENABLE_MCP_PROMPTS",
+] as const;
 
 export type SavedEnv = Record<string, string | undefined>;
 
@@ -33,6 +37,7 @@ export function restoreEnv(saved: SavedEnv): void {
 export function setDefaultHttpTestEnv(): void {
   process.env.B2_REGISTER_ALL_TOOLS = "true";
   process.env.B2_HTTP_CREDENTIAL_MODE = "headers";
+  delete process.env.B2_ENABLE_MCP_PROMPTS;
 }
 
 export function request(
