@@ -85,13 +85,14 @@ type StdioClientConnection = {
 
 async function connectStdioClient(
   versionNegotiation: ClientOptions["versionNegotiation"],
+  env: NodeJS.ProcessEnv = {},
 ): Promise<StdioClientConnection> {
   requireBuiltEntrypoints();
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [SIMULATOR_ENTRYPOINT, "stdio"],
     cwd: ROOT,
-    env: stdioEnv(),
+    env: stdioEnv(env),
     stderr: "pipe",
   });
   let stderr = "";
@@ -103,12 +104,16 @@ async function connectStdioClient(
   return { client, transport, stderr: () => stderr };
 }
 
-export async function connectModernStdioClient(): Promise<StdioClientConnection> {
-  return connectStdioClient({ mode: { pin: MODERN_PROTOCOL_VERSION } });
+export async function connectModernStdioClient(
+  env: NodeJS.ProcessEnv = {},
+): Promise<StdioClientConnection> {
+  return connectStdioClient({ mode: { pin: MODERN_PROTOCOL_VERSION } }, env);
 }
 
-export async function connectLegacyStdioClient(): Promise<StdioClientConnection> {
-  return connectStdioClient({ mode: "legacy" });
+export async function connectLegacyStdioClient(
+  env: NodeJS.ProcessEnv = {},
+): Promise<StdioClientConnection> {
+  return connectStdioClient({ mode: "legacy" }, env);
 }
 
 export interface RecordedHttpRequest {
@@ -158,6 +163,24 @@ export async function connectHttpClient(
   });
   await client.connect(transport);
   return { client, transport, requests };
+}
+
+export async function listPromptNames(client: Client): Promise<string[]> {
+  const listed = await client.listPrompts(undefined, { cacheMode: "refresh" });
+  return listed.prompts.map((prompt) => prompt.name);
+}
+
+export async function getPromptText(
+  client: Client,
+  name: string,
+  args: Record<string, string> = {},
+): Promise<string> {
+  const result = await client.getPrompt({ name, arguments: args });
+  return result.messages
+    .map((message) =>
+      message.content.type === "text" ? message.content.text : JSON.stringify(message.content),
+    )
+    .join("\n");
 }
 
 export async function closeClient(client: Client): Promise<void> {

@@ -7,7 +7,12 @@ import {
   ROOT,
   protocolEnv,
 } from "../support/protocol";
-import { closeClient, connectModernStdioClient } from "./support/clients";
+import {
+  closeClient,
+  connectModernStdioClient,
+  getPromptText,
+  listPromptNames,
+} from "./support/clients";
 
 function resultOf(frame: any): any {
   expect(frame.error).toBeUndefined();
@@ -173,7 +178,7 @@ describe("stdio transport (MCP 2026-07-28)", () => {
   });
 
   it("serves discover, list, and representative tool calls through the SDK client", async () => {
-    const { client } = await connectModernStdioClient();
+    const { client } = await connectModernStdioClient({ B2_ENABLE_MCP_PROMPTS: "true" });
     try {
       expect(client.getProtocolEra()).toBe("modern");
       expect(client.getNegotiatedProtocolVersion()).toBe(MODERN_PROTOCOL_VERSION);
@@ -181,12 +186,21 @@ describe("stdio transport (MCP 2026-07-28)", () => {
       const discover = client.getDiscoverResult() ?? (await client.discover());
       expect(discover.supportedVersions).toContain(MODERN_PROTOCOL_VERSION);
       expect(discover.capabilities.tools).toBeDefined();
+      expect(discover.capabilities.prompts).toBeDefined();
       expect(client.getServerVersion()?.name).toBe("backblaze-b2");
 
       const listed = await client.listTools(undefined, { cacheMode: "refresh" });
       const toolNames = listed.tools.map((tool) => tool.name);
       expect(toolNames).toContain("b2_list_buckets");
       expect(toolNames).toContain("s3_list_objects_v2");
+
+      const promptNames = await listPromptNames(client);
+      expect(promptNames).toContain("b2_review_bucket_notifications");
+      const notificationPrompt = await getPromptText(client, "b2_review_bucket_notifications", {
+        bucketId: "bucket-id",
+      });
+      expect(notificationPrompt).toContain("b2_get_bucket_notification_rules");
+      expect(notificationPrompt).toContain("destructive gate");
 
       const bucketName = "protocol-stdio-modern";
       const create = await client.callTool({

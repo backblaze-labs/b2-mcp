@@ -92,6 +92,7 @@ describe("package surface policy", () => {
   }>("package.json");
   const toolContract = readJson<{
     profiles: Record<string, { fixtures: Record<string, string> }>;
+    promptProfiles: Record<string, { fixture: string }>;
   }>("docs/tool-profile-contract.json");
   const skillsPack = readJson<{
     packageFiles: string[];
@@ -132,6 +133,11 @@ describe("package surface policy", () => {
     );
     for (const fixturePath of Object.values(toolContract.profiles).flatMap((profile) =>
       Object.values(profile.fixtures),
+    )) {
+      expect(files).toContain(fixturePath);
+    }
+    for (const fixturePath of Object.values(toolContract.promptProfiles).map(
+      (profile) => profile.fixture,
     )) {
       expect(files).toContain(fixturePath);
     }

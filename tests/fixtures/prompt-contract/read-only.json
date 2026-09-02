@@ -1,0 +1,80 @@
+{
+  "contractVersion": 1,
+  "issue": 166,
+  "profile": "read-only",
+  "transport": "in-process",
+  "mcpRevision": "2026-07-28",
+  "sdk": {
+    "@backblaze-labs/b2-sdk": "0.4.0",
+    "@modelcontextprotocol/client": "2.0.0",
+    "@modelcontextprotocol/server": "2.0.0"
+  },
+  "capabilities": ["listBuckets", "listFiles", "listKeys", "readBucketNotifications", "readFiles"],
+  "counts": {
+    "total": 2
+  },
+  "names": ["b2_audit_public_exposure", "b2_review_bucket_notifications"],
+  "requiredTools": {
+    "b2_audit_public_exposure": ["b2_list_buckets"],
+    "b2_review_bucket_notifications": ["b2_get_bucket_notification_rules"]
+  },
+  "requiredCapabilities": {
+    "b2_audit_public_exposure": [],
+    "b2_review_bucket_notifications": []
+  },
+  "prompts": [
+    {
+      "name": "b2_audit_public_exposure",
+      "descriptionSha256": "73602395d16cbaa2250f27c641d8a013f2528c2efe268557d07456fb701ec4de",
+      "argsSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "includeRemediationPlan": {
+            "default": "true",
+            "description": "Whether to include proposed remediation steps for public buckets.",
+            "enum": ["true", "false"],
+            "type": "string"
+          },
+          "limit": {
+            "default": "100",
+            "description": "Maximum buckets to inspect, from 1 to 1000.",
+            "pattern": "^(?:[1-9][0-9]{0,2}|1000)$",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "requiredTools": ["b2_list_buckets"],
+      "requiredCapabilities": [],
+      "title": "Audit public B2 exposure"
+    },
+    {
+      "name": "b2_review_bucket_notifications",
+      "descriptionSha256": "b8870cce01526eabad5340496279591a822869a781490a33b76a0e792869970f",
+      "argsSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "bucketId": {
+            "description": "B2 bucket ID whose notification rules to review.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "expectedEventTypes": {
+            "description": "Optional comma-separated event types the bucket should notify on.",
+            "type": "string"
+          },
+          "objectNamePrefix": {
+            "description": "Optional object prefix that notification rules should cover.",
+            "type": "string"
+          }
+        },
+        "required": ["bucketId"],
+        "type": "object"
+      },
+      "requiredTools": ["b2_get_bucket_notification_rules"],
+      "requiredCapabilities": [],
+      "title": "Review B2 notifications"
+    }
+  ],
+  "hash": "686610d7c5bf334093888a5e122ec39b40865947535d66da2d9230b2b0c1b381"
+}

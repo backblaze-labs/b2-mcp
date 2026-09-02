@@ -1,5 +1,10 @@
 import { LEGACY_PROTOCOL_VERSION, RawStdioSession } from "../support/protocol";
-import { closeClient, connectLegacyStdioClient } from "./support/clients";
+import {
+  closeClient,
+  connectLegacyStdioClient,
+  getPromptText,
+  listPromptNames,
+} from "./support/clients";
 
 function resultOf(frame: any): any {
   expect(frame.error).toBeUndefined();
@@ -16,7 +21,7 @@ describe("stdio transport legacy protocol fallback (2025 era)", () => {
   });
 
   it("serves initialize, tools/list, and representative tool calls through the SDK client", async () => {
-    const { client } = await connectLegacyStdioClient();
+    const { client } = await connectLegacyStdioClient({ B2_ENABLE_MCP_PROMPTS: "true" });
     try {
       expect(client.getProtocolEra()).toBe("legacy");
       expect(client.getNegotiatedProtocolVersion()).toBe(LEGACY_PROTOCOL_VERSION);
@@ -26,6 +31,12 @@ describe("stdio transport legacy protocol fallback (2025 era)", () => {
       const toolNames = listed.tools.map((tool) => tool.name);
       expect(toolNames).toContain("b2_list_buckets");
       expect(toolNames).toContain("s3_list_objects_v2");
+
+      const promptNames = await listPromptNames(client);
+      expect(promptNames).toContain("b2_audit_public_exposure");
+      const auditPrompt = await getPromptText(client, "b2_audit_public_exposure", { limit: "25" });
+      expect(auditPrompt).toContain("b2_list_buckets");
+      expect(auditPrompt).toContain("25");
 
       const bucketName = "protocol-stdio-legacy";
       const create = await client.callTool({

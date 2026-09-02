@@ -588,5 +588,148 @@
         "legacy": "tests/fixtures/tool-contract/read-only.legacy.json"
       }
     }
+  },
+  "promptIssue": 166,
+  "promptIssueUrl": "https://github.com/backblaze-labs/b2-mcp/issues/166",
+  "promptProfiles": {
+    "full": {
+      "description": "Complete guided-workflow prompt surface: every B2 workflow launcher is advertised, including the write- and admin-capable prompts, for contract review and regression detection.",
+      "capabilities": null,
+      "counts": {
+        "total": 5
+      },
+      "names": [
+        "b2_audit_public_exposure",
+        "b2_configure_lifecycle_cost_rules",
+        "b2_provision_locked_bucket",
+        "b2_review_bucket_notifications",
+        "b2_rotate_application_key"
+      ],
+      "requiredTools": {
+        "b2_audit_public_exposure": ["b2_list_buckets"],
+        "b2_configure_lifecycle_cost_rules": ["b2_list_buckets", "s3_put_bucket_lifecycle"],
+        "b2_provision_locked_bucket": ["b2_create_bucket", "b2_list_buckets", "b2_update_bucket"],
+        "b2_review_bucket_notifications": ["b2_get_bucket_notification_rules"],
+        "b2_rotate_application_key": ["b2_create_key", "b2_delete_key", "b2_list_keys"]
+      },
+      "requiredCapabilities": {
+        "b2_audit_public_exposure": [],
+        "b2_configure_lifecycle_cost_rules": [],
+        "b2_provision_locked_bucket": ["writeBucketRetentions"],
+        "b2_review_bucket_notifications": [],
+        "b2_rotate_application_key": []
+      },
+      "hash": "c52599d06cdabc7017a82ac69bd71a0ae920984c652ab0517b29b6cd215c5e20",
+      "fixture": "tests/fixtures/prompt-contract/full.json"
+    },
+    "live-b2-contract": {
+      "description": "Prompt surface for the protected live B2 contract profile: workflow launchers right-sized to the non-master application key's release-evidence capabilities.",
+      "capabilities": [
+        "bypassGovernance",
+        "deleteBuckets",
+        "deleteFiles",
+        "listBuckets",
+        "listFiles",
+        "listKeys",
+        "readBucketEncryption",
+        "readBucketRetentions",
+        "readBuckets",
+        "readFileLegalHolds",
+        "readFileRetentions",
+        "readFiles",
+        "writeBucketEncryption",
+        "writeBucketNotifications",
+        "writeBucketRetentions",
+        "writeBuckets",
+        "writeFileLegalHolds",
+        "writeFileRetentions",
+        "writeFiles"
+      ],
+      "counts": {
+        "total": 4
+      },
+      "names": [
+        "b2_audit_public_exposure",
+        "b2_configure_lifecycle_cost_rules",
+        "b2_provision_locked_bucket",
+        "b2_review_bucket_notifications"
+      ],
+      "requiredTools": {
+        "b2_audit_public_exposure": ["b2_list_buckets"],
+        "b2_configure_lifecycle_cost_rules": ["b2_list_buckets", "s3_put_bucket_lifecycle"],
+        "b2_provision_locked_bucket": ["b2_create_bucket", "b2_list_buckets", "b2_update_bucket"],
+        "b2_review_bucket_notifications": ["b2_get_bucket_notification_rules"]
+      },
+      "requiredCapabilities": {
+        "b2_audit_public_exposure": [],
+        "b2_configure_lifecycle_cost_rules": [],
+        "b2_provision_locked_bucket": ["writeBucketRetentions"],
+        "b2_review_bucket_notifications": []
+      },
+      "hash": "7378ab9a0c3e4fe419b9d458adb120311f336fcaae7e19715621f67a8bb35179",
+      "fixture": "tests/fixtures/prompt-contract/live-b2-contract.json"
+    },
+    "phase1-default": {
+      "description": "Prompt surface for the default customer-hosted Phase 1 profile: workflow launchers right-sized to a standard B2 application key with no distinct Partner/master credential.",
+      "capabilities": [
+        "deleteBuckets",
+        "deleteFiles",
+        "deleteKeys",
+        "listBuckets",
+        "listFiles",
+        "listKeys",
+        "readBucketNotifications",
+        "readFiles",
+        "writeBucketNotifications",
+        "writeBuckets",
+        "writeFileLegalHolds",
+        "writeFileRetentions",
+        "writeFiles"
+      ],
+      "counts": {
+        "total": 3
+      },
+      "names": [
+        "b2_audit_public_exposure",
+        "b2_configure_lifecycle_cost_rules",
+        "b2_review_bucket_notifications"
+      ],
+      "requiredTools": {
+        "b2_audit_public_exposure": ["b2_list_buckets"],
+        "b2_configure_lifecycle_cost_rules": ["b2_list_buckets", "s3_put_bucket_lifecycle"],
+        "b2_review_bucket_notifications": ["b2_get_bucket_notification_rules"]
+      },
+      "requiredCapabilities": {
+        "b2_audit_public_exposure": [],
+        "b2_configure_lifecycle_cost_rules": [],
+        "b2_review_bucket_notifications": []
+      },
+      "hash": "0257b2a65d29aeaa1d7a37ea63f13aa9c549d654e8de5e6f3c4b705db6eb48e1",
+      "fixture": "tests/fixtures/prompt-contract/phase1-default.json"
+    },
+    "read-only": {
+      "description": "Read-only guided-workflow prompt surface: only launchers whose required tools are read/list operations are advertised; write, delete, and admin workflows are omitted.",
+      "capabilities": [
+        "listBuckets",
+        "listFiles",
+        "listKeys",
+        "readBucketNotifications",
+        "readFiles"
+      ],
+      "counts": {
+        "total": 2
+      },
+      "names": ["b2_audit_public_exposure", "b2_review_bucket_notifications"],
+      "requiredTools": {
+        "b2_audit_public_exposure": ["b2_list_buckets"],
+        "b2_review_bucket_notifications": ["b2_get_bucket_notification_rules"]
+      },
+      "requiredCapabilities": {
+        "b2_audit_public_exposure": [],
+        "b2_review_bucket_notifications": []
+      },
+      "hash": "686610d7c5bf334093888a5e122ec39b40865947535d66da2d9230b2b0c1b381",
+      "fixture": "tests/fixtures/prompt-contract/read-only.json"
+    }
   }
 }

@@ -175,6 +175,7 @@
     "skills/b2-lifecycle-cost-hygiene/SKILL.md",
     "skills/b2-migration/SKILL.md",
     "skills/b2-object-lock/SKILL.md",
+    "tests/fixtures/prompt-contract/*.json",
     "tests/fixtures/tool-contract/*.json",
     "README.md",
     "CHANGELOG.md",

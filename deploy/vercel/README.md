@@ -82,6 +82,7 @@ Set these in Vercel Project Settings, not in source:
 | `B2_REGISTER_ALL_TOOLS` | `false` |
 | `B2_ALLOW_LOCAL_FILES` | `false` |
 | `B2_MCP_OUTPUT_FORMAT` | `json` until every client validates `toon` |
+| `B2_ENABLE_MCP_PROMPTS` | `false` (off by default); set `true` once every replica runs prompt-capable code. Gates registration and advertisement together, so flip it atomically across the fleet (or use sticky routing) |
 | `B2_MCP_PUBLIC_URL` | Final public `https://.../mcp` URL |
 | OAuth issuer/resource/audience | Exact operator values, no wildcard audience |
 | `B2_OAUTH_ALLOWED_SUBJECTS` | Exactly one subject for the supported single-tenant `server` mode |

@@ -1,6 +1,8 @@
 import crypto from "crypto";
-import type { B2Config } from "./utils/types.js";
+import { z } from "zod";
+import type { RegisteredPromptMap, RegisteredPromptRecord } from "./mcp.js";
 import { DESTRUCTIVE_TOOL_NAMES } from "./utils/destructive-gate.js";
+import type { B2Config } from "./utils/types.js";
 
 export { DESTRUCTIVE_TOOL_NAMES };
 
@@ -10,6 +12,10 @@ export const CONTRACT_VERSION = 1;
 export const TOOL_CONTRACT_ISSUE = 49;
 /** GitHub issue URL for the tool contract baseline. */
 export const TOOL_CONTRACT_ISSUE_URL = "https://github.com/backblaze-labs/b2-mcp/issues/49";
+/** Issue that introduced the generated MCP prompt contract. */
+export const PROMPT_CONTRACT_ISSUE = 166;
+/** GitHub issue URL for the generated MCP prompt contract. */
+export const PROMPT_CONTRACT_ISSUE_URL = "https://github.com/backblaze-labs/b2-mcp/issues/166";
 /** Preferred modern MCP protocol revision captured by contract fixtures. */
 export const MCP_REVISION = "2026-07-28";
 /** Legacy MCP protocol revision retained for compatibility fixtures. */
@@ -148,6 +154,22 @@ export interface NormalizedTool {
   _meta?: JsonObject;
 }
 
+/** Normalized public prompt definition persisted in contract fixtures. */
+export interface NormalizedPrompt {
+  /** Stable MCP prompt name. */
+  name: string;
+  /** Optional title exposed to MCP clients. */
+  title?: string;
+  /** SHA-256 of the prompt description text. */
+  descriptionSha256: string;
+  /** JSON Schema for prompt arguments. */
+  argsSchema: JsonObject;
+  /** Available tool handlers the prompt workflow requires. */
+  requiredTools: string[];
+  /** Additional B2 capabilities the prompt workflow requires. */
+  requiredCapabilities: string[];
+}
+
 /** Full deterministic fixture for one profile and protocol era. */
 export interface ToolFixture {
   contractVersion: number;
@@ -181,6 +203,36 @@ export interface ToolFixture {
   hash: string;
 }
 
+/** Full deterministic fixture for one prompt profile. */
+export interface PromptFixture {
+  /** Contract schema version. */
+  contractVersion: number;
+  /** GitHub issue number that introduced the prompt contract. */
+  issue: number;
+  /** Capability profile represented by the fixture. */
+  profile: ProfileName;
+  /** Fixture collection path. */
+  transport: "in-process";
+  /** MCP revision associated with this prompt surface. */
+  mcpRevision: string;
+  /** SDK dependency versions used by the package. */
+  sdk: Record<string, string>;
+  /** B2 capability input used for this profile, or `null` for the full surface. */
+  capabilities: string[] | null;
+  /** Prompt count summary. */
+  counts: { total: number };
+  /** Sorted prompt names. */
+  names: string[];
+  /** Required available tools per prompt. */
+  requiredTools: Record<string, string[]>;
+  /** Required B2 capabilities per prompt. */
+  requiredCapabilities: Record<string, string[]>;
+  /** Normalized prompt definitions. */
+  prompts: NormalizedPrompt[];
+  /** Stable hash of prompt names and normalized prompt definitions. */
+  hash: string;
+}
+
 /** Profile summary included in the generated contract reference artifact. */
 export interface ContractProfile {
   description: string;
@@ -195,6 +247,26 @@ export interface ContractProfile {
   fixtures: Record<Era, string>;
 }
 
+/** Profile summary included in the generated prompt contract reference artifact. */
+export interface ContractPromptProfile {
+  /** Human-readable description of the profile. */
+  description: string;
+  /** B2 capability input used for this profile, or `null` for the full surface. */
+  capabilities: string[] | null;
+  /** Prompt count summary. */
+  counts: PromptFixture["counts"];
+  /** Sorted prompt names. */
+  names: string[];
+  /** Required available tools per prompt. */
+  requiredTools: Record<string, string[]>;
+  /** Required B2 capabilities per prompt. */
+  requiredCapabilities: Record<string, string[]>;
+  /** Stable hash of prompt names and normalized prompt definitions. */
+  hash: string;
+  /** Fixture path for the generated prompt profile. */
+  fixture: string;
+}
+
 /** Top-level generated contract artifact. */
 export interface ContractArtifact {
   contractVersion: number;
@@ -206,6 +278,9 @@ export interface ContractArtifact {
   backingCategories: typeof TOOL_BACKING_CATEGORIES;
   toolBacking: Record<string, ToolBackingCategory>;
   profiles: Record<ProfileName, ContractProfile>;
+  promptIssue: number;
+  promptIssueUrl: string;
+  promptProfiles: Record<ProfileName, ContractPromptProfile>;
 }
 
 /** Package metadata subset used to pin dependency versions in artifacts. */
@@ -255,6 +330,24 @@ export interface ToolFixtureFromCollectedOptions {
   collected: CollectedToolList;
 }
 
+/** Inputs required to convert registered prompts into a stable fixture. */
+export interface PromptFixtureFromRegisteredOptions {
+  /** Contract schema version. */
+  contractVersion: number;
+  /** GitHub issue number that introduced the prompt contract. */
+  issue: number;
+  /** Capability profile represented by the fixture. */
+  profile: ProfileName;
+  /** MCP revision associated with this prompt surface. */
+  mcpRevision: string;
+  /** SDK dependency versions used by the package. */
+  sdk: Record<string, string>;
+  /** B2 capability input used for this profile, or `null` for the full surface. */
+  capabilities: string[] | null;
+  /** Prompt registry from a server with MCP prompts explicitly enabled. */
+  registered: RegisteredPromptMap;
+}
+
 /** Human-readable descriptions for each generated tool contract profile. */
 export const PROFILE_DESCRIPTIONS: Record<ProfileName, string> = {
   full: "Complete tool superset for contract review and regression detection across all backing categories; durable-secret producers are sink-backed when a secret sink is active and otherwise remain availability-annotated stubs.",
@@ -264,6 +357,26 @@ export const PROFILE_DESCRIPTIONS: Record<ProfileName, string> = {
     "Default customer-hosted Phase 1 profile: standard B2 application key, no distinct Partner/master credential, and durable-secret producers exposed as sink-backed tools on local stdio or unavailable stubs when the sink is off.",
   "read-only":
     "Deterministic read/list profile for safe production use and contract tests; write/delete/admin handlers are omitted while durable-secret producer names remain unavailable stubs unless a sink-backed admin profile is configured.",
+};
+
+/**
+ * Human-readable descriptions for each generated prompt contract profile.
+ *
+ * @remarks
+ * Prompt profiles describe the guided-workflow surface, not the tool surface,
+ * so they must not reuse the tool-profile wording. Prompts are thin launchers
+ * with no durable-secret producers of their own; each profile advertises only
+ * the prompts whose `requiredTools`/`requiredCapabilities` are enabled for that
+ * credential.
+ */
+export const PROMPT_PROFILE_DESCRIPTIONS: Record<ProfileName, string> = {
+  full: "Complete guided-workflow prompt surface: every B2 workflow launcher is advertised, including the write- and admin-capable prompts, for contract review and regression detection.",
+  "live-b2-contract":
+    "Prompt surface for the protected live B2 contract profile: workflow launchers right-sized to the non-master application key's release-evidence capabilities.",
+  "phase1-default":
+    "Prompt surface for the default customer-hosted Phase 1 profile: workflow launchers right-sized to a standard B2 application key with no distinct Partner/master credential.",
+  "read-only":
+    "Read-only guided-workflow prompt surface: only launchers whose required tools are read/list operations are advertised; write, delete, and admin workflows are omitted.",
 };
 
 /** Stable profile ordering used by contract generation. */
@@ -280,6 +393,9 @@ export const CONTRACT_TEST_CONFIG: B2Config = {
   region: "us-west-004",
   allowLocalFiles: true,
   fileRoot: null,
+  // Prompts are off by default; the frozen tool contract explicitly enables
+  // them so it always advertises the full prompts capability surface.
+  enableMcpPrompts: true,
 };
 
 /**
@@ -296,6 +412,23 @@ export function configForProfile(profile: ProfileName): B2Config {
     masterKeyId: "contract-master-key-id",
     masterKey: "contract-master-key-secret",
   };
+}
+
+/**
+ * Resolve the B2 configuration for a generated prompt contract profile.
+ *
+ * @remarks
+ * Prompt fixtures intentionally enable an inline secret sink for the full
+ * profile so the generated external contract snapshots key-rotation prompts
+ * that are only advertised when `b2_create_key` has a real handler.
+ *
+ * @param profile - Contract profile being collected.
+ *
+ * @returns B2 config with dummy deterministic credentials and prompt-only sink policy.
+ */
+export function configForPromptProfile(profile: ProfileName): B2Config {
+  if (profile !== "full") return configForProfile(profile);
+  return { ...configForProfile(profile), secretSink: { mode: "inline" } };
 }
 
 /**
@@ -461,6 +594,27 @@ export function normalizeTool(tool: {
 }
 
 /**
+ * Normalize one registered MCP prompt for stable fixture comparison.
+ *
+ * @param prompt - Registered prompt record from the repository registrar.
+ *
+ * @returns Stable normalized prompt fixture.
+ */
+export function normalizePrompt(prompt: RegisteredPromptRecord): NormalizedPrompt {
+  const normalized: NormalizedPrompt = {
+    name: prompt.name,
+    descriptionSha256: sha256(prompt.description ?? ""),
+    argsSchema: stable(
+      z.toJSONSchema(prompt.argsSchema ?? z.object({}), { io: "input" }),
+    ) as JsonObject,
+    requiredTools: [...prompt.requiredTools].sort(),
+    requiredCapabilities: [...prompt.requiredCapabilities].sort(),
+  };
+  if (prompt.title !== undefined) normalized.title = prompt.title;
+  return normalized;
+}
+
+/**
  * Extract sorted required input fields for each tool.
  *
  * @param tools - Tool payloads to inspect.
@@ -472,6 +626,36 @@ export function requiredFieldsByTool(
 ): Record<string, string[]> {
   return Object.fromEntries(
     tools.map((tool) => [tool.name, [...(tool.inputSchema?.required ?? [])].sort()]),
+  );
+}
+
+/**
+ * Extract sorted required tool names for each prompt.
+ *
+ * @param prompts - Prompt records to inspect.
+ *
+ * @returns Map from prompt name to required available tool names.
+ */
+export function requiredToolsByPrompt(
+  prompts: readonly NormalizedPrompt[],
+): Record<string, string[]> {
+  return Object.fromEntries(
+    prompts.map((prompt) => [prompt.name, [...prompt.requiredTools].sort()]),
+  );
+}
+
+/**
+ * Extract sorted required B2 capabilities for each prompt.
+ *
+ * @param prompts - Prompt records to inspect.
+ *
+ * @returns Map from prompt name to required B2 capability names.
+ */
+export function requiredCapabilitiesByPrompt(
+  prompts: readonly NormalizedPrompt[],
+): Record<string, string[]> {
+  return Object.fromEntries(
+    prompts.map((prompt) => [prompt.name, [...prompt.requiredCapabilities].sort()]),
   );
 }
 
@@ -541,6 +725,17 @@ export function destructiveConfirmToolsFromTools(
  */
 export function fixtureHash(fixture: Pick<ToolFixture, "names" | "tools">): string {
   return sha256(JSON.stringify({ names: fixture.names, tools: fixture.tools }));
+}
+
+/**
+ * Compute the stable hash for a prompt fixture's public names and schemas.
+ *
+ * @param fixture - Fixture fields that define the public prompt surface.
+ *
+ * @returns SHA-256 fixture hash.
+ */
+export function promptFixtureHash(fixture: Pick<PromptFixture, "names" | "prompts">): string {
+  return sha256(JSON.stringify({ names: fixture.names, prompts: fixture.prompts }));
 }
 
 function numberValue(value: unknown, fallback: number): number {
@@ -620,6 +815,45 @@ export function toolFixtureFromCollected({
 }
 
 /**
+ * Convert registered prompt records into a stable contract fixture.
+ *
+ * @param options - Collection metadata and registered prompt records.
+ *
+ * @returns Complete prompt fixture with stable ordering and hash.
+ */
+export function promptFixtureFromRegistered({
+  contractVersion,
+  issue,
+  profile,
+  mcpRevision,
+  sdk,
+  capabilities,
+  registered,
+}: PromptFixtureFromRegisteredOptions): PromptFixture {
+  const prompts = Object.values(registered)
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map(normalizePrompt);
+  const names = prompts.map((prompt) => prompt.name);
+  const fixture: PromptFixture = {
+    contractVersion,
+    issue,
+    profile,
+    transport: "in-process",
+    mcpRevision,
+    sdk,
+    capabilities,
+    counts: { total: names.length },
+    names,
+    requiredTools: requiredToolsByPrompt(prompts),
+    requiredCapabilities: requiredCapabilitiesByPrompt(prompts),
+    prompts,
+    hash: "",
+  };
+  fixture.hash = promptFixtureHash(fixture);
+  return fixture;
+}
+
+/**
  * Render the generated markdown profile reference.
  *
  * @param contract - Contract artifact to render.
@@ -680,6 +914,30 @@ export function renderProfileReference(contract: ContractArtifact): string {
     })
     .join("\n\n");
 
+  const promptRows = Object.entries(contract.promptProfiles)
+    .map(
+      ([profile, data]) =>
+        `| \`${profile}\` | ${data.counts.total} | \`${data.hash.slice(0, 12)}\` |`,
+    )
+    .join("\n");
+
+  const promptSections = Object.entries(contract.promptProfiles)
+    .map(([profile, data]) => {
+      const prompts = data.names.map((name) => `- \`${name}\``).join("\n");
+      return [
+        `## \`${profile}\` Prompt Surface`,
+        "",
+        data.description,
+        "",
+        `Prompt profile hash: \`${data.hash}\``,
+        "",
+        "### MCP Prompts",
+        "",
+        prompts || "_None._",
+      ].join("\n");
+    })
+    .join("\n\n");
+
   return [
     "<!-- Generated by scripts/generate-tool-contract.mjs. Do not edit by hand. -->",
     "",
@@ -694,6 +952,20 @@ export function renderProfileReference(contract: ContractArtifact): string {
     rows,
     "",
     sections,
+    "",
+    "# MCP Prompt Profiles",
+    "",
+    `Prompt contract issue: [#${contract.promptIssue}](${contract.promptIssueUrl})`,
+    "",
+    "MCP workflow prompts are off by default. Set `B2_ENABLE_MCP_PROMPTS=true` to enable them once every replica runs prompt-capable code. The flag gates handler registration and `prompts/list` advertisement together, so flip it atomically across the fleet (or use sticky routing) rather than as a decoupled two-phase rollout: a mixed flag state could advertise prompts on one replica while a sibling still lacks a `prompts/get` handler. These generated fixtures pin the prompt surface when enabled.",
+    "",
+    "The `full` prompt profile enables an inline dummy secret sink so sink-dependent key-rotation prompts are included in the external contract.",
+    "",
+    "| Profile | Prompts | Hash prefix |",
+    "| --- | ---: | --- |",
+    promptRows,
+    "",
+    promptSections,
     "",
   ].join("\n");
 }

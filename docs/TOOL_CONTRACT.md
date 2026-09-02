@@ -3,8 +3,9 @@
 Owner: Gonza (`@goanpeca`). Quality reviewer: Sophie / Quality Keeper (QK)
 (`@sophiecarreras`).
 
-Status: frozen for Phase 1. Issue #49 owns the deterministic fixtures,
-machine-readable contract artifact, and generated profile reference.
+Status: frozen for Phase 1. Issue #49 owns the deterministic tool fixtures,
+machine-readable contract artifact, and generated profile reference. Issue #166
+extends the same generated artifact with opt-in MCP prompt profile fixtures.
 
 ## Phase 1 Source Of Truth
 
@@ -14,9 +15,13 @@ The frozen machine-readable contract is
 human-readable reference is [`TOOL_PROFILES.md`](TOOL_PROFILES.md). The
 deterministic `tools/list` fixtures are checked in under
 [`../tests/fixtures/tool-contract`](../tests/fixtures/tool-contract).
+The prompt fixtures (prompts are off by default; set `B2_ENABLE_MCP_PROMPTS=true` to enable) are checked in under
+[`../tests/fixtures/prompt-contract`](../tests/fixtures/prompt-contract).
 Each profile entry records the capability input that generated it; each fixture
 hash covers the sorted tool names and normalized tool definitions, including
 model-visible schema and parameter descriptions.
+Prompt fixture hashes cover sorted prompt names, argument JSON schemas,
+required available tools, and prompt-specific B2 capability prerequisites.
 The artifact and fixtures also identify the resolved MCP SDK packages and
 `@backblaze-labs/b2-sdk` version used to produce the snapshot.
 Every tool belongs to exactly one backing category: Native B2 SDK
@@ -39,6 +44,7 @@ The public contract defines:
 - structured tool-result text format policy;
 - destructive and protection-weakening confirmation rules;
 - secret-producing tool policy;
+- opt-in prompt names, argument schemas, and workflow prerequisites;
 - compatibility rules for stale cached `tools/list` profiles.
 
 ## Structured Result Text Contract
