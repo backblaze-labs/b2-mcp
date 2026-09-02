@@ -1291,7 +1291,7 @@
                   "type": "integer",
                   "minimum": -9007199254740991,
                   "maximum": 9007199254740991,
-                  "description": "Part number from 1-10000; provide each uploaded part once."
+                  "description": "Integer part number for this ETag; provide each uploaded part once."
                 },
                 "etag": {
                   "type": "string",

@@ -1265,7 +1265,7 @@
                   "type": "string"
                 },
                 "partNumber": {
-                  "description": "Part number from 1-10000; provide each uploaded part once.",
+                  "description": "Integer part number for this ETag; provide each uploaded part once.",
                   "maximum": 9007199254740991,
                   "minimum": -9007199254740991,
                   "type": "integer"
@@ -2066,5 +2066,5 @@
     "toolsListCacheHint": null,
     "discover": null
   },
-  "hash": "71f3f1dc68fa8816b78fafe5ce32be9914db98de019d7a1d549db72263719302"
+  "hash": "40b093eae92d0831b0b6b1b7a97425146da4d1194190fa2979643de34c464070"
 }

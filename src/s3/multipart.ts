@@ -153,7 +153,7 @@ export function registerS3MultipartTools(
               partNumber: z
                 .number()
                 .int()
-                .describe("Part number from 1-10000; provide each uploaded part once."),
+                .describe("Integer part number for this ETag; provide each uploaded part once."),
               etag: z
                 .string()
                 .describe(
