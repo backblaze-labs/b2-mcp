@@ -1356,7 +1356,7 @@
     },
     {
       "name": "s3_get_bucket_lifecycle",
-      "descriptionSha256": "05d14c385dc16238f4e93e1b58f111ad2a8a729437fcfdab071cacb4430ebca5",
+      "descriptionSha256": "1332684e386564decb3d7e976bdcef5e7fc84c4a19330bc59f405864ded596f3",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -1801,7 +1801,7 @@
                   "type": "object"
                 },
                 "id": {
-                  "description": "A unique identifier for the rule.",
+                  "description": "Optional unique identifier for the rule.",
                   "type": "string"
                 },
                 "noncurrentVersionExpiration": {
@@ -1821,7 +1821,7 @@
                   "type": "string"
                 }
               },
-              "required": ["id", "status"],
+              "required": ["status"],
               "type": "object"
             },
             "type": "array"
@@ -1969,5 +1969,5 @@
       "resultType": "complete"
     }
   },
-  "hash": "eebce35d5d7cc62265a4c2802cc6334f28caa7b24de513e039a30bc65f07f9be"
+  "hash": "fac489e7cfb38cfad384e02f1cc60ce25da9a45c5bf8a8b8cb3445b85a4c4230"
 }

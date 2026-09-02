@@ -1005,6 +1005,11 @@ describe("s3_put_bucket_lifecycle", () => {
         filter: { prefix: "logs/" },
         expiration: { days: 90 },
       },
+      {
+        status: "Enabled",
+        filter: { prefix: "archive/" },
+        expiration: { days: 365 },
+      },
     ];
     const result = await callTool(server, "s3_put_bucket_lifecycle", {
       bucket: "my-bucket",
@@ -1018,6 +1023,8 @@ describe("s3_put_bucket_lifecycle", () => {
     expect(command.input.LifecycleConfiguration.Rules[0].Status).toBe("Enabled");
     expect(command.input.LifecycleConfiguration.Rules[0].Filter.Prefix).toBe("logs/");
     expect(command.input.LifecycleConfiguration.Rules[0].Expiration.Days).toBe(90);
+    expect(command.input.LifecycleConfiguration.Rules[1].ID).toBeUndefined();
+    expect(command.input.LifecycleConfiguration.Rules[1].Filter.Prefix).toBe("archive/");
   });
 
   it("clears lifecycle configuration when rules is empty", async () => {

@@ -58,7 +58,7 @@ export function registerS3BucketTools(
     "s3_get_bucket_lifecycle",
     {
       description:
-        "Read S3 lifecycle rules from a B2 bucket through the S3-compatible endpoint. Returns normalized MCP field casing; provider rules without an ID omit id and need a caller-supplied id before reuse with s3_put_bucket_lifecycle. No configuration returns configured: false and rules: [].",
+        "Read S3 lifecycle rules from a B2 bucket through the S3-compatible endpoint. Returns rules in the same normalized shape accepted by s3_put_bucket_lifecycle; no configuration returns configured: false and rules: [].",
       inputSchema: {
         bucket: z.string().describe("The bucket name."),
       },
@@ -82,7 +82,7 @@ export function registerS3BucketTools(
         rules: z
           .array(
             z.object({
-              id: z.string().describe("A unique identifier for the rule."),
+              id: z.string().optional().describe("Optional unique identifier for the rule."),
               status: z.enum(["Enabled", "Disabled"]),
               filter: z
                 .object({

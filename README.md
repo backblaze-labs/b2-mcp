@@ -556,7 +556,7 @@ configured and the account is authorized for the Partner API.
 | `s3_get_presigned_url`                                                                   | Available    | Short-lived presigned PUT/GET bearer URL (browser/CORS handoff)                                  |
 | `s3_head_bucket`                                                                         | Available    | Check bucket exists/reachable on the S3 endpoint                                                 |
 | `s3_get_bucket_location`                                                                 | Available    | Bucket region / location constraint                                                              |
-| `s3_get_bucket_lifecycle`                                                                | Available    | Read lifecycle rules in normalized MCP casing; ID-less provider rules omit `id`                  |
+| `s3_get_bucket_lifecycle`                                                                | Available    | Read lifecycle rules in the normalized `s3_put_bucket_lifecycle` shape                           |
 | `s3_put_bucket_lifecycle`                                                                | Available    | Lifecycle rules incl. `AbortIncompleteMultipartUpload`                                           |
 
 </details>

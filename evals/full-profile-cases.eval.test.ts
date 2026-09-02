@@ -72,6 +72,7 @@ function installDeterministicS3Boundary(): void {
   vi.spyOn(B2S3PeerClient.prototype, "headBucket").mockRejectedValue(unknownForbidden());
   vi.spyOn(B2S3PeerClient.prototype, "headObject").mockRejectedValue(unknownForbidden());
   vi.spyOn(B2S3PeerClient.prototype, "getBucketLocation").mockRejectedValue(invalidAccessKey());
+  vi.spyOn(B2S3PeerClient.prototype, "getBucketLifecycle").mockRejectedValue(invalidAccessKey());
   vi.spyOn(B2S3PeerClient.prototype, "putObject").mockRejectedValue(invalidAccessKey());
   vi.spyOn(B2S3PeerClient.prototype, "getObject").mockRejectedValue(invalidAccessKey());
   vi.spyOn(B2S3PeerClient.prototype, "deleteObject").mockRejectedValue(invalidAccessKey());

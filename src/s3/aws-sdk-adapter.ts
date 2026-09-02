@@ -82,14 +82,14 @@ export interface B2S3LifecycleAbortIncompleteMultipartUpload {
   daysAfterInitiation: number;
 }
 
-/** S3 lifecycle rule subset returned by the B2 MCP read tool. */
-export interface B2S3ReadableLifecycleRule {
+/** S3 lifecycle rule subset supported by the B2 MCP tool surface. */
+export interface B2S3LifecycleRule {
   /**
-   * Rule identifier supplied by S3 lifecycle APIs.
+   * Optional rule identifier supplied to S3 lifecycle APIs.
    *
    * @remarks
-   * Provider responses can omit an ID. Such rules are returned without `id`
-   * and need a caller-supplied ID before reuse with `s3_put_bucket_lifecycle`.
+   * Provider responses can omit an ID. Such rules remain reusable with
+   * `s3_put_bucket_lifecycle`, which also accepts an omitted ID.
    */
   id?: string;
   /** Whether the lifecycle rule is active. */
@@ -102,12 +102,6 @@ export interface B2S3ReadableLifecycleRule {
   noncurrentVersionExpiration?: B2S3LifecycleNoncurrentVersionExpiration;
   /** Optional cleanup action for incomplete multipart uploads. */
   abortIncompleteMultipartUpload?: B2S3LifecycleAbortIncompleteMultipartUpload;
-}
-
-/** S3 lifecycle rule subset accepted by the B2 MCP write tool. */
-export interface B2S3LifecycleRule extends B2S3ReadableLifecycleRule {
-  /** Rule identifier supplied to S3 lifecycle APIs. */
-  id: string;
 }
 
 /** Completed multipart part supplied to S3 CompleteMultipartUpload. */
@@ -460,8 +454,8 @@ export interface B2S3BucketLifecycleResult {
   bucket: string;
   /** Whether the provider currently has a lifecycle configuration document. */
   configured: boolean;
-  /** Normalized lifecycle rules in MCP field casing; provider ID-less rules omit `id`. */
-  rules: B2S3ReadableLifecycleRule[];
+  /** Normalized lifecycle rules in the field casing accepted by the write tool. */
+  rules: B2S3LifecycleRule[];
 }
 
 /** Options for creating a multipart upload. */
@@ -812,7 +806,7 @@ function badRequest(message: string): never {
   throw Object.assign(new Error(message), { status: 400, code: "bad_request" });
 }
 
-function normalizeS3LifecycleRule(rule: LifecycleRule): B2S3ReadableLifecycleRule {
+function normalizeS3LifecycleRule(rule: LifecycleRule): B2S3LifecycleRule {
   const expiration: B2S3LifecycleExpiration = {};
   if (rule.Expiration?.Days !== undefined) expiration.days = rule.Expiration.Days;
   if (rule.Expiration?.ExpiredObjectDeleteMarker !== undefined) {
@@ -844,7 +838,7 @@ function normalizeS3LifecycleRule(rule: LifecycleRule): B2S3ReadableLifecycleRul
 
 function toAwsS3LifecycleRule(rule: B2S3LifecycleRule): LifecycleRule {
   return {
-    ID: rule.id,
+    ...(rule.id !== undefined ? { ID: rule.id } : {}),
     Status: rule.status,
     Filter: rule.filter ? { Prefix: rule.filter.prefix ?? "" } : { Prefix: "" },
     Expiration: rule.expiration

@@ -1481,7 +1481,7 @@
     },
     {
       "name": "s3_get_bucket_lifecycle",
-      "description": "Read S3 lifecycle rules from a B2 bucket through the S3-compatible endpoint. Returns normalized MCP field casing; provider rules without an ID omit id and need a caller-supplied id before reuse with s3_put_bucket_lifecycle. No configuration returns configured: false and rules: [].",
+      "description": "Read S3 lifecycle rules from a B2 bucket through the S3-compatible endpoint. Returns rules in the same normalized shape accepted by s3_put_bucket_lifecycle; no configuration returns configured: false and rules: [].",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -1890,7 +1890,7 @@
               "properties": {
                 "id": {
                   "type": "string",
-                  "description": "A unique identifier for the rule."
+                  "description": "Optional unique identifier for the rule."
                 },
                 "status": {
                   "type": "string",
@@ -1944,7 +1944,7 @@
                   "required": ["daysAfterInitiation"]
                 }
               },
-              "required": ["id", "status"]
+              "required": ["status"]
             },
             "description": "Rules to set; [] clears the configuration."
           },
