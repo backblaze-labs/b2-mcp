@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { spawnSync } from "child_process";
@@ -359,6 +359,48 @@ describe("release scripts", () => {
     // The npx launcher must stay pinned to the exact release so the advertised
     // MCPB bundle runs reproducible code, not whatever npm publishes later.
     expect(mcpb.server.mcp_config.args).toContain(`@backblaze-labs/b2-mcp@${packageJson.version}`);
+  });
+
+  it("packs a valid .mcpb bundle with the pinned mcpb CLI", () => {
+    const packageVersion = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
+    const outFile = join(root, "dist-mcpb", "b2-mcp.mcpb");
+    rmSync(outFile, { force: true });
+    const result = spawnSync(process.execPath, ["scripts/build-mcpb.mjs"], {
+      cwd: root,
+      encoding: "utf8",
+    });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(`build-mcpb: packed`);
+    expect(result.stdout).toContain(`b2-mcp@${packageVersion}`);
+    expect(existsSync(outFile)).toBe(true);
+    // A .mcpb is a zip archive; verify the magic bytes and that the packed
+    // manifest is present in the archive's file listing.
+    const archive = readFileSync(outFile);
+    expect(archive.subarray(0, 2).toString("latin1")).toBe("PK");
+    expect(archive.includes(Buffer.from("manifest.json"))).toBe(true);
+  });
+
+  it("refuses to pack when mcpb/manifest.json version drifts from package.json", () => {
+    const fixtureRoot = mkdtempSync(join(tmpdir(), "b2-mcp-build-mcpb-"));
+    try {
+      writeFileSync(
+        join(fixtureRoot, "package.json"),
+        `${JSON.stringify({ name: "@backblaze-labs/b2-mcp", version: "0.2.0" }, null, 2)}\n`,
+      );
+      mkdirSync(join(fixtureRoot, "mcpb"), { recursive: true });
+      writeFileSync(
+        join(fixtureRoot, "mcpb", "manifest.json"),
+        `${JSON.stringify({ manifest_version: "0.3", name: "b2-mcp", version: "0.1.0" }, null, 2)}\n`,
+      );
+      const result = spawnSync(process.execPath, [join(root, "scripts/build-mcpb.mjs")], {
+        cwd: fixtureRoot,
+        encoding: "utf8",
+      });
+      expect(result.status).toBe(2);
+      expect(result.stderr).toContain("does not match package.json");
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
   });
 
   it("keeps smithery.yaml in sync with the server.json env contract", () => {
