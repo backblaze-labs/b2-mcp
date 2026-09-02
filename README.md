@@ -22,6 +22,7 @@
 [![Smithery](https://img.shields.io/badge/Smithery-b2--mcp-6f4cff?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iI2ZmZiI+PHBhdGggZD0iTTEyIDJMMiA3djEwbDEwIDUgMTAtNVY3eiIvPjwvc3ZnPg==)](https://smithery.ai/server/@backblaze-labs/b2-mcp)
 [![LobeHub](https://img.shields.io/badge/LobeHub-b2--mcp-5b5fc7?logo=lobehub&logoColor=white)](https://lobehub.com/mcp/backblaze-labs-b2-mcp)
 [![Glama](https://glama.ai/mcp/servers/@backblaze-labs/b2-mcp/badges/score.svg)](https://glama.ai/mcp/servers/@backblaze-labs/b2-mcp)
+[![Verified by M8ven](https://m8ven.ai/badge/mcp/backblaze-labs-b2-mcp-92j1t6)](https://m8ven.ai/verified?check=https%3A%2F%2Fgithub.com%2Fbackblaze-labs%2Fb2-mcp)
 
 A [Model Context Protocol](https://modelcontextprotocol.io) server for [Backblaze B2 Cloud Storage](https://www.backblaze.com/cloud-storage). It lets any MCP-compatible AI client (Claude, and others) operate B2 through a focused, safe set of tools, currently incubating in Backblaze-Labs.
 
