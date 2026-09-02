@@ -98,4 +98,46 @@ describe("stdio transport legacy protocol fallback (2025 era)", () => {
     expect(JSON.stringify(s3Call)).toContain("objects");
     expect(raw.stdoutLines.join("\n")).not.toMatch(/Mcp-Session-Id/i);
   });
+
+  it("rejects every discovery-mode call with missing_credentials before schema validation", async () => {
+    raw = new RawStdioSession();
+    // No credentials: the stdio bootstrap enters discovery mode and registers the
+    // full surface, but every tools/call must short-circuit with missing_credentials.
+    raw.start({}, { omitCredentials: true });
+
+    resultOf(
+      await raw.request("initialize", {
+        protocolVersion: LEGACY_PROTOCOL_VERSION,
+        capabilities: {},
+        clientInfo: { name: "b2-mcp-discovery", version: "1.0.0" },
+      }),
+    );
+    raw.send({ jsonrpc: "2.0", method: "notifications/initialized", params: {} });
+
+    // tools/list keeps the real schemas, so s3_head_bucket still advertises its
+    // required `bucket` argument that would otherwise fail validation first.
+    const listed = resultOf(await raw.request("tools/list"));
+    const headBucket = listed.tools.find(
+      (tool: { name: string }) => tool.name === "s3_head_bucket",
+    );
+    expect(headBucket).toBeDefined();
+    expect(headBucket.inputSchema.required).toContain("bucket");
+
+    // Called with {} a required-argument tool would normally return a schema
+    // validation error; discovery mode must return missing_credentials instead,
+    // proving the interception runs ahead of the SDK's input-schema validation.
+    const headCall = resultOf(
+      await raw.request("tools/call", { name: "s3_head_bucket", arguments: {} }),
+    );
+    expect(headCall.isError).toBe(true);
+    const headText = JSON.stringify(headCall);
+    expect(headText).toContain("missing_credentials");
+    expect(headText).not.toContain("validation");
+
+    const listCall = resultOf(
+      await raw.request("tools/call", { name: "b2_list_buckets", arguments: {} }),
+    );
+    expect(listCall.isError).toBe(true);
+    expect(JSON.stringify(listCall)).toContain("missing_credentials");
+  });
 });

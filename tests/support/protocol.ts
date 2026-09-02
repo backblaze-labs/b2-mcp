@@ -48,11 +48,18 @@ export class RawStdioSession {
   readonly stderrChunks: string[] = [];
   readonly frames: JSONRPCMessage[] = [];
 
-  start(extraEnv: NodeJS.ProcessEnv = {}): void {
+  start(extraEnv: NodeJS.ProcessEnv = {}, options: { omitCredentials?: boolean } = {}): void {
     requireBuiltEntrypoints();
+    const env = protocolEnv(extraEnv);
+    if (options.omitCredentials) {
+      // Force credential-less startup so the stdio bootstrap enters discovery
+      // mode (the entrypoint injects its own placeholders and B2_REGISTER_ALL_TOOLS).
+      delete env.B2_APPLICATION_KEY_ID;
+      delete env.B2_APPLICATION_KEY;
+    }
     this.child = spawn(process.execPath, [SIMULATOR_ENTRYPOINT, "stdio"], {
       cwd: ROOT,
-      env: protocolEnv(extraEnv),
+      env,
       stdio: ["pipe", "pipe", "pipe"],
     });
     this.child.stdout.on("data", (chunk) => this.captureStdout(chunk.toString()));
