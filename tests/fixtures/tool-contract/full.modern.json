@@ -2035,6 +2035,9 @@
     "discover": {
       "supportedVersions": ["2026-07-28"],
       "capabilities": {
+        "resources": {
+          "listChanged": true
+        },
         "tools": {
           "listChanged": true
         }
