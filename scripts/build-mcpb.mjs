@@ -11,7 +11,6 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
-const MCPB_CLI = "@anthropic-ai/mcpb@2.1.2";
 const root = process.cwd();
 const outDir = path.join(root, "dist-mcpb");
 const outFile = path.join(outDir, "b2-mcp.mcpb");
@@ -29,7 +28,10 @@ if (manifestVersion !== packageVersion) {
 }
 
 mkdirSync(outDir, { recursive: true });
-execFileSync("npx", ["-y", MCPB_CLI, "pack", "mcpb", outFile], {
+// Invoke the lockfile-resolved mcpb binary (pinned as an exact dev dependency)
+// so the packer's full dependency graph is frozen with the rest of the repo,
+// rather than re-resolving transitive deps via `npx -y` on each release.
+execFileSync("pnpm", ["exec", "mcpb", "pack", "mcpb", outFile], {
   cwd: root,
   stdio: "inherit",
 });

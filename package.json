@@ -121,6 +121,7 @@
     "zod": "4.4.3"
   },
   "devDependencies": {
+    "@anthropic-ai/mcpb": "2.1.2",
     "@biomejs/biome": "2.5.10",
     "@microsoft/tsdoc-config": "0.18.1",
     "@modelcontextprotocol/client": "2.0.0",
