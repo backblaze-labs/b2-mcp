@@ -120,6 +120,7 @@ function elicitationCallToolBody(
 
 describe("HTTP handler (MCP 2026-07-28)", () => {
   it("serves discover, list, and representative calls through the SDK HTTP client", async () => {
+    const priorEnablePrompts = process.env.B2_ENABLE_MCP_PROMPTS;
     process.env.B2_ENABLE_MCP_PROMPTS = "true";
     const { client, requests } = await connectHttpClient(port, {
       era: "modern",
@@ -190,6 +191,11 @@ describe("HTTP handler (MCP 2026-07-28)", () => {
       ).toBe(true);
       expect(requests.every((record) => record.headers["mcp-session-id"] === undefined)).toBe(true);
     } finally {
+      if (priorEnablePrompts === undefined) {
+        delete process.env.B2_ENABLE_MCP_PROMPTS;
+      } else {
+        process.env.B2_ENABLE_MCP_PROMPTS = priorEnablePrompts;
+      }
       await closeClient(client);
     }
   });
