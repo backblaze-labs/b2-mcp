@@ -57,3 +57,7 @@ overrides:
   vercel>undici: 6.28.0
   'minimatch@3.1.5>brace-expansion': 1.1.18
   nanoid: 3.3.18
+  # Dev-only transitive deps (via ajv/vercel); force patched builds off the
+  # fast-uri host-confusion/SSRF advisories and the qs array-limit/DoS advisories.
+  fast-uri: '>=3.1.6 <4'
+  qs: '>=6.16.0'
