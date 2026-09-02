@@ -123,8 +123,10 @@ const BUCKET_INFO_MAX_PAIRS = 10;
 const BUCKET_INFO_KEY_MAX_BYTES = 50;
 const BUCKET_INFO_VALUES_MAX_BYTES = 10_000;
 const BUCKET_INFO_KEY_PATTERN = /^[A-Za-z0-9._`~!#$%^&*'|+-]+$/;
-const BUCKET_INFO_DESCRIPTION =
-  "Custom metadata: <=10 pairs. Keys: 1-50 UTF-8 bytes, chars A-Z a-z 0-9 . _ ` ~ ! # $ % ^ & * ' | + -, no b2- prefix. Values total <=10,000 UTF-8 bytes. On update, omit to leave unchanged.";
+const BUCKET_INFO_BASE_DESCRIPTION =
+  "Custom metadata: <=10 pairs. Keys: 1-50 UTF-8 bytes, chars A-Z a-z 0-9 . _ ` ~ ! # $ % ^ & * ' | + -, no b2- prefix. Values total <=10,000 UTF-8 bytes.";
+const CREATE_BUCKET_INFO_DESCRIPTION = `${BUCKET_INFO_BASE_DESCRIPTION} Omit to create the bucket without custom metadata.`;
+const UPDATE_BUCKET_INFO_DESCRIPTION = `${BUCKET_INFO_BASE_DESCRIPTION} Omit to leave current metadata unchanged.`;
 
 const CORS_RULES_MAX_COUNT = 100;
 const CORS_RULE_MAX_BYTES = 1_000;
@@ -132,8 +134,10 @@ const CORS_FIELD_MAX_ITEMS = 100;
 const CORS_STRING_MAX_CHARS = CORS_RULE_MAX_BYTES - 1;
 const CORS_RULE_NAME_PATTERN = /^[A-Za-z0-9-]+$/;
 const CORS_RULE_NAME_DESCRIPTION = "Unique name: 6-63 letters, digits, hyphens; no b2- prefix.";
-const CORS_RULES_DESCRIPTION =
-  "CORS rules: <=100. allowedOrigins/allowedOperations require 1-100 non-empty strings; allowedHeaders/exposeHeaders allow <=100. Strings <=999 chars. Per-rule UTF-8 total <1,000. Names unique. On update, provided rules replace the existing set; omit to leave unchanged.";
+const CORS_RULES_BASE_DESCRIPTION =
+  "CORS rules: <=100. allowedOrigins/allowedOperations require 1-100 non-empty strings; allowedHeaders/exposeHeaders allow <=100. Strings <=999 chars. Per-rule UTF-8 total <1,000. Names unique.";
+const CREATE_CORS_RULES_DESCRIPTION = `${CORS_RULES_BASE_DESCRIPTION} Omit to create the bucket without CORS rules.`;
+const UPDATE_CORS_RULES_DESCRIPTION = `${CORS_RULES_BASE_DESCRIPTION} On update, provided rules replace the existing set; omit to leave unchanged.`;
 
 const bucketInfoKeySchema = z
   .string()
@@ -145,13 +149,18 @@ const bucketInfoKeySchema = z
   });
 const bucketInfoValueSchema = z.string().max(BUCKET_INFO_VALUES_MAX_BYTES);
 
-const bucketInfoSchema = z
-  .record(bucketInfoKeySchema, bucketInfoValueSchema)
-  .superRefine((value, ctx) => {
-    const message = bucketInfoInputError(value);
-    if (message) ctx.addIssue({ code: "custom", message });
-  })
-  .describe(BUCKET_INFO_DESCRIPTION);
+function bucketInfoSchema(description: string) {
+  return z
+    .record(bucketInfoKeySchema, bucketInfoValueSchema)
+    .superRefine((value, ctx) => {
+      const message = bucketInfoInputError(value);
+      if (message) ctx.addIssue({ code: "custom", message });
+    })
+    .describe(description);
+}
+
+const createBucketInfoSchema = bucketInfoSchema(CREATE_BUCKET_INFO_DESCRIPTION);
+const updateBucketInfoSchema = bucketInfoSchema(UPDATE_BUCKET_INFO_DESCRIPTION);
 
 const corsRuleNameSchema = z
   .string()
@@ -176,14 +185,19 @@ const corsRuleSchema = z.object({
   maxAgeSeconds: z.number(),
 });
 
-const corsRulesSchema = z
-  .array(corsRuleSchema)
-  .max(CORS_RULES_MAX_COUNT)
-  .superRefine((value, ctx) => {
-    const message = corsRulesInputError(value);
-    if (message) ctx.addIssue({ code: "custom", message });
-  })
-  .describe(CORS_RULES_DESCRIPTION);
+function corsRulesSchema(description: string) {
+  return z
+    .array(corsRuleSchema)
+    .max(CORS_RULES_MAX_COUNT)
+    .superRefine((value, ctx) => {
+      const message = corsRulesInputError(value);
+      if (message) ctx.addIssue({ code: "custom", message });
+    })
+    .describe(description);
+}
+
+const createCorsRulesSchema = corsRulesSchema(CREATE_CORS_RULES_DESCRIPTION);
+const updateCorsRulesSchema = corsRulesSchema(UPDATE_CORS_RULES_DESCRIPTION);
 
 const lifecycleRuleSchema = z.object({
   fileNamePrefix: z
@@ -217,20 +231,27 @@ const updateLifecycleRulesSchema = z
     "When provided, replaces the bucket's B2 lifecycle rule set; omit to leave unchanged. Rules that delete hidden versions are destructive in effect and require confirmation under the default policy.",
   );
 
-const defaultServerSideEncryptionSchema = z
-  .object({
-    mode: z
-      .enum(["none", "SSE-B2"])
-      .describe("Use SSE-B2 to make AES256 the bucket default; use none to clear it."),
-    algorithm: z
-      .string()
-      .optional()
-      .describe("Encryption algorithm. B2 supports AES256 for SSE-B2."),
-  })
-  .optional()
-  .describe(
-    "Default server-side encryption for new files in this bucket. Omit on update to leave unchanged.",
-  );
+function defaultServerSideEncryptionSchema(description: string, modeDescription: string) {
+  return z
+    .object({
+      mode: z.enum(["none", "SSE-B2"]).describe(modeDescription),
+      algorithm: z
+        .string()
+        .optional()
+        .describe("Encryption algorithm. B2 supports AES256 for SSE-B2."),
+    })
+    .optional()
+    .describe(description);
+}
+
+const createDefaultServerSideEncryptionSchema = defaultServerSideEncryptionSchema(
+  "Optional default server-side encryption for new files in this bucket. Omit to create the bucket without a bucket default encryption setting.",
+  "Use SSE-B2 to make AES256 the bucket default; use none for no bucket default encryption.",
+);
+const updateDefaultServerSideEncryptionSchema = defaultServerSideEncryptionSchema(
+  "Default server-side encryption for new files in this bucket. Omit on update to leave unchanged.",
+  "Use SSE-B2 to make AES256 the bucket default; use none to clear the bucket default.",
+);
 
 /** DNS resolver signature used by bucket webhook target validation. */
 type WebhookDnsLookup = (host: string) => Promise<Array<{ address: string }>>;
@@ -715,10 +736,10 @@ export function registerBucketTools(
           .describe(
             "Visibility for file downloads: allPrivate requires authorization; allPublic makes objects world-readable by URL.",
           ),
-        bucketInfo: bucketInfoSchema.optional(),
-        corsRules: corsRulesSchema.optional(),
+        bucketInfo: createBucketInfoSchema.optional(),
+        corsRules: createCorsRulesSchema.optional(),
         lifecycleRules: createLifecycleRulesSchema,
-        defaultServerSideEncryption: defaultServerSideEncryptionSchema,
+        defaultServerSideEncryption: createDefaultServerSideEncryptionSchema,
         fileLockEnabled: z
           .boolean()
           .optional()
@@ -795,10 +816,10 @@ export function registerBucketTools(
           .describe(
             "Optional visibility change. allPublic makes objects world-readable by URL and requires confirmation under the default policy; omit to leave unchanged.",
           ),
-        bucketInfo: bucketInfoSchema.optional(),
-        corsRules: corsRulesSchema.optional(),
+        bucketInfo: updateBucketInfoSchema.optional(),
+        corsRules: updateCorsRulesSchema.optional(),
         lifecycleRules: updateLifecycleRulesSchema,
-        defaultServerSideEncryption: defaultServerSideEncryptionSchema,
+        defaultServerSideEncryption: updateDefaultServerSideEncryptionSchema,
         replicationConfiguration: z
           .object({
             asReplicationSource: z

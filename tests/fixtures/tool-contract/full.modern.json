@@ -146,7 +146,7 @@
               "maxLength": 10000,
               "type": "string"
             },
-            "description": "Custom metadata: <=10 pairs. Keys: 1-50 UTF-8 bytes, chars A-Z a-z 0-9 . _ ` ~ ! # $ % ^ & * ' | + -, no b2- prefix. Values total <=10,000 UTF-8 bytes. On update, omit to leave unchanged.",
+            "description": "Custom metadata: <=10 pairs. Keys: 1-50 UTF-8 bytes, chars A-Z a-z 0-9 . _ ` ~ ! # $ % ^ & * ' | + -, no b2- prefix. Values total <=10,000 UTF-8 bytes. Omit to create the bucket without custom metadata.",
             "propertyNames": {
               "maxLength": 50,
               "minLength": 1,
@@ -165,7 +165,7 @@
             "type": "string"
           },
           "corsRules": {
-            "description": "CORS rules: <=100. allowedOrigins/allowedOperations require 1-100 non-empty strings; allowedHeaders/exposeHeaders allow <=100. Strings <=999 chars. Per-rule UTF-8 total <1,000. Names unique. On update, provided rules replace the existing set; omit to leave unchanged.",
+            "description": "CORS rules: <=100. allowedOrigins/allowedOperations require 1-100 non-empty strings; allowedHeaders/exposeHeaders allow <=100. Strings <=999 chars. Per-rule UTF-8 total <1,000. Names unique. Omit to create the bucket without CORS rules.",
             "items": {
               "properties": {
                 "allowedHeaders": {
@@ -230,14 +230,14 @@
             "type": "array"
           },
           "defaultServerSideEncryption": {
-            "description": "Default server-side encryption for new files in this bucket. Omit on update to leave unchanged.",
+            "description": "Optional default server-side encryption for new files in this bucket. Omit to create the bucket without a bucket default encryption setting.",
             "properties": {
               "algorithm": {
                 "description": "Encryption algorithm. B2 supports AES256 for SSE-B2.",
                 "type": "string"
               },
               "mode": {
-                "description": "Use SSE-B2 to make AES256 the bucket default; use none to clear it.",
+                "description": "Use SSE-B2 to make AES256 the bucket default; use none for no bucket default encryption.",
                 "enum": ["none", "SSE-B2"],
                 "type": "string"
               }
@@ -813,7 +813,7 @@
               "maxLength": 10000,
               "type": "string"
             },
-            "description": "Custom metadata: <=10 pairs. Keys: 1-50 UTF-8 bytes, chars A-Z a-z 0-9 . _ ` ~ ! # $ % ^ & * ' | + -, no b2- prefix. Values total <=10,000 UTF-8 bytes. On update, omit to leave unchanged.",
+            "description": "Custom metadata: <=10 pairs. Keys: 1-50 UTF-8 bytes, chars A-Z a-z 0-9 . _ ` ~ ! # $ % ^ & * ' | + -, no b2- prefix. Values total <=10,000 UTF-8 bytes. Omit to leave current metadata unchanged.",
             "propertyNames": {
               "maxLength": 50,
               "minLength": 1,
@@ -946,7 +946,7 @@
                 "type": "string"
               },
               "mode": {
-                "description": "Use SSE-B2 to make AES256 the bucket default; use none to clear it.",
+                "description": "Use SSE-B2 to make AES256 the bucket default; use none to clear the bucket default.",
                 "enum": ["none", "SSE-B2"],
                 "type": "string"
               }
@@ -1266,8 +1266,8 @@
                 },
                 "partNumber": {
                   "description": "Part number from 1-10000; provide each uploaded part once.",
-                  "maximum": 9007199254740991,
-                  "minimum": -9007199254740991,
+                  "maximum": 10000,
+                  "minimum": 1,
                   "type": "integer"
                 }
               },
@@ -2041,7 +2041,7 @@
             "type": "string"
           },
           "partNumber": {
-            "description": "The part number (1–10000).",
+            "description": "The part number (1-10000).",
             "maximum": 10000,
             "minimum": 1,
             "type": "integer"
@@ -2085,5 +2085,5 @@
       "resultType": "complete"
     }
   },
-  "hash": "445811a7d97d36798a5abef1cbb7539b091dfbbb1214331feab4dd18a93e1c9f"
+  "hash": "ced71dda5d6387ed4715fc0adb8985fd342b5ac244bfc01df62f6eecd123dc81"
 }

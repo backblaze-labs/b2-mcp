@@ -10,6 +10,11 @@ import { toolJson, toolError, toolSuccess } from "../utils/errors.js";
 import { B2Config } from "../utils/types.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
 
+function multipartPartNumberSchema(description?: string) {
+  const schema = z.number().int().min(1).max(10000);
+  return description ? schema.describe(description) : schema;
+}
+
 /**
  * Register S3-compatible multipart upload tools.
  *
@@ -89,7 +94,7 @@ export function registerS3MultipartTools(
         key: z.string().describe("The object key."),
         uploadId: z.string().describe("The UploadId from s3_create_multipart_upload."),
         partNumbers: z
-          .array(z.number().int().min(1).max(10000))
+          .array(multipartPartNumberSchema())
           .min(1)
           .max(10000)
           .describe(
@@ -145,10 +150,9 @@ export function registerS3MultipartTools(
         parts: z
           .array(
             z.object({
-              partNumber: z
-                .number()
-                .int()
-                .describe("Part number from 1-10000; provide each uploaded part once."),
+              partNumber: multipartPartNumberSchema(
+                "Part number from 1-10000; provide each uploaded part once.",
+              ),
               etag: z
                 .string()
                 .describe(
@@ -315,7 +319,7 @@ export function registerS3MultipartTools(
         bucket: z.string().describe("The destination bucket name."),
         key: z.string().describe("The destination object key."),
         uploadId: z.string().describe("The UploadId from s3_create_multipart_upload."),
-        partNumber: z.number().int().min(1).max(10000).describe("The part number (1–10000)."),
+        partNumber: multipartPartNumberSchema("The part number (1-10000)."),
         copySource: z
           .string()
           .describe(
