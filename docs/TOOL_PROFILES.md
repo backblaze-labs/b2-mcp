@@ -281,16 +281,16 @@ The `full` prompt profile enables an inline dummy secret sink so sink-dependent 
 
 | Profile | Prompts | Hash prefix |
 | --- | ---: | --- |
-| `full` | 5 | `8400224b77dd` |
-| `live-b2-contract` | 4 | `bbc645bbdd9b` |
-| `phase1-default` | 3 | `9f4a48fe119d` |
+| `full` | 5 | `c52599d06cda` |
+| `live-b2-contract` | 4 | `7378ab9a0c3e` |
+| `phase1-default` | 3 | `0257b2a65d29` |
 | `read-only` | 2 | `686610d7c5bf` |
 
 ## `full` Prompt Surface
 
-Complete tool superset for contract review and regression detection across all backing categories; durable-secret producers are sink-backed when a secret sink is active and otherwise remain availability-annotated stubs.
+Complete guided-workflow prompt surface: every B2 workflow launcher is advertised, including the write-, admin-, and Partner-capable prompts, for contract review and regression detection.
 
-Prompt profile hash: `8400224b77ddaf6711cf0b0c6d2d92f1efe0b19c92e37e25c7d21d00464a8f86`
+Prompt profile hash: `c52599d06cdabc7017a82ac69bd71a0ae920984c652ab0517b29b6cd215c5e20`
 
 ### MCP Prompts
 
@@ -302,9 +302,9 @@ Prompt profile hash: `8400224b77ddaf6711cf0b0c6d2d92f1efe0b19c92e37e25c7d21d0046
 
 ## `live-b2-contract` Prompt Surface
 
-Protected live B2 contract profile: non-master application key with release-evidence capabilities, no key-management grants, and a distinct master key only for Partner/Groups API surface discovery.
+Prompt surface for the protected live B2 contract profile: workflow launchers right-sized to the non-master application key's release-evidence capabilities.
 
-Prompt profile hash: `bbc645bbdd9b74ed97624faa581e81ad7d80de7933862c663ed50139e3e3b554`
+Prompt profile hash: `7378ab9a0c3e4fe419b9d458adb120311f336fcaae7e19715621f67a8bb35179`
 
 ### MCP Prompts
 
@@ -315,9 +315,9 @@ Prompt profile hash: `bbc645bbdd9b74ed97624faa581e81ad7d80de7933862c663ed50139e3
 
 ## `phase1-default` Prompt Surface
 
-Default customer-hosted Phase 1 profile: standard B2 application key, no distinct Partner/master credential, and durable-secret producers exposed as sink-backed tools on local stdio or unavailable stubs when the sink is off.
+Prompt surface for the default customer-hosted Phase 1 profile: workflow launchers right-sized to a standard B2 application key with no distinct Partner/master credential.
 
-Prompt profile hash: `9f4a48fe119d5b872332896123cdfcb6f8cfea95ceebf8986594360ef4c4292d`
+Prompt profile hash: `0257b2a65d29aeaa1d7a37ea63f13aa9c549d654e8de5e6f3c4b705db6eb48e1`
 
 ### MCP Prompts
 
@@ -327,7 +327,7 @@ Prompt profile hash: `9f4a48fe119d5b872332896123cdfcb6f8cfea95ceebf8986594360ef4
 
 ## `read-only` Prompt Surface
 
-Deterministic read/list profile for safe production use and contract tests; write/delete/admin handlers are omitted while durable-secret producer names remain unavailable stubs unless a sink-backed admin profile is configured.
+Read-only guided-workflow prompt surface: only launchers whose required tools are read/list operations are advertised; write, delete, and admin workflows are omitted.
 
 Prompt profile hash: `686610d7c5bf334093888a5e122ec39b40865947535d66da2d9230b2b0c1b381`
 

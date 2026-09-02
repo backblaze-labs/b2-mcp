@@ -593,7 +593,7 @@
   "promptIssueUrl": "https://github.com/backblaze-labs/b2-mcp/issues/166",
   "promptProfiles": {
     "full": {
-      "description": "Complete tool superset for contract review and regression detection across all backing categories; durable-secret producers are sink-backed when a secret sink is active and otherwise remain availability-annotated stubs.",
+      "description": "Complete guided-workflow prompt surface: every B2 workflow launcher is advertised, including the write-, admin-, and Partner-capable prompts, for contract review and regression detection.",
       "capabilities": null,
       "counts": {
         "total": 5
@@ -619,11 +619,11 @@
         "b2_review_bucket_notifications": [],
         "b2_rotate_application_key": []
       },
-      "hash": "8400224b77ddaf6711cf0b0c6d2d92f1efe0b19c92e37e25c7d21d00464a8f86",
+      "hash": "c52599d06cdabc7017a82ac69bd71a0ae920984c652ab0517b29b6cd215c5e20",
       "fixture": "tests/fixtures/prompt-contract/full.json"
     },
     "live-b2-contract": {
-      "description": "Protected live B2 contract profile: non-master application key with release-evidence capabilities, no key-management grants, and a distinct master key only for Partner/Groups API surface discovery.",
+      "description": "Prompt surface for the protected live B2 contract profile: workflow launchers right-sized to the non-master application key's release-evidence capabilities.",
       "capabilities": [
         "bypassGovernance",
         "deleteBuckets",
@@ -666,11 +666,11 @@
         "b2_provision_locked_bucket": ["writeBucketRetentions"],
         "b2_review_bucket_notifications": []
       },
-      "hash": "bbc645bbdd9b74ed97624faa581e81ad7d80de7933862c663ed50139e3e3b554",
+      "hash": "7378ab9a0c3e4fe419b9d458adb120311f336fcaae7e19715621f67a8bb35179",
       "fixture": "tests/fixtures/prompt-contract/live-b2-contract.json"
     },
     "phase1-default": {
-      "description": "Default customer-hosted Phase 1 profile: standard B2 application key, no distinct Partner/master credential, and durable-secret producers exposed as sink-backed tools on local stdio or unavailable stubs when the sink is off.",
+      "description": "Prompt surface for the default customer-hosted Phase 1 profile: workflow launchers right-sized to a standard B2 application key with no distinct Partner/master credential.",
       "capabilities": [
         "deleteBuckets",
         "deleteFiles",
@@ -704,11 +704,11 @@
         "b2_configure_lifecycle_cost_rules": [],
         "b2_review_bucket_notifications": []
       },
-      "hash": "9f4a48fe119d5b872332896123cdfcb6f8cfea95ceebf8986594360ef4c4292d",
+      "hash": "0257b2a65d29aeaa1d7a37ea63f13aa9c549d654e8de5e6f3c4b705db6eb48e1",
       "fixture": "tests/fixtures/prompt-contract/phase1-default.json"
     },
     "read-only": {
-      "description": "Deterministic read/list profile for safe production use and contract tests; write/delete/admin handlers are omitted while durable-secret producer names remain unavailable stubs unless a sink-backed admin profile is configured.",
+      "description": "Read-only guided-workflow prompt surface: only launchers whose required tools are read/list operations are advertised; write, delete, and admin workflows are omitted.",
       "capabilities": [
         "listBuckets",
         "listFiles",

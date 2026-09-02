@@ -5,21 +5,21 @@
  * directly, so destructive operations still re-enter the existing tool gate.
  */
 
+import type { GetPromptResult } from "@modelcontextprotocol/server";
+import {
+  createMcpServer,
+  PromptRegistrationAdapter,
+  promptRequiredToolsAvailable,
+} from "../../src/mcp";
+import { B2_WORKFLOW_PROMPT_NAMES } from "../../src/prompts";
 import {
   createAuditedPromptCallback,
   createServer,
   getRegisteredPrompts,
   getRegisteredTools,
 } from "../../src/server";
-import type { GetPromptResult } from "@modelcontextprotocol/server";
-import { B2_WORKFLOW_PROMPT_NAMES } from "../../src/prompts";
-import type { B2Config } from "../../src/utils/types";
-import {
-  createMcpServer,
-  PromptRegistrationAdapter,
-  promptRequiredToolsAvailable,
-} from "../../src/mcp";
 import { logger } from "../../src/utils/logger";
+import type { B2Config } from "../../src/utils/types";
 
 const config = {
   applicationKeyId: "test",
@@ -230,20 +230,28 @@ describe("Prompt schemas and message templates", () => {
     expect(text).toContain("destructive gate");
   });
 
-  it("rejects positive-integer arguments beyond the JavaScript safe-integer range", () => {
-    const oversized = String(Number.MAX_SAFE_INTEGER + 2); // loses precision through parseInt
-    const infinite = "9".repeat(400); // parseInt coerces to Infinity
+  it("bounds positive-integer arguments with the same pattern it advertises", () => {
+    // The upper bound lives entirely in the emitted JSON Schema `pattern`
+    // (1-to-15 digits), so `prompts/list` and `prompts/get` enforce the same
+    // limit. A `.refine()` ceiling would vanish from the advertised schema.
+    const maxAllowed = "9".repeat(15); // 999999999999999, the largest accepted value
+    const sixteenDigits = "1".repeat(16); // one digit past the advertised pattern
+    const infinite = "9".repeat(400); // parseInt would coerce this to Infinity
 
     const lifecycleShape = getShape(prompts.b2_configure_lifecycle_cost_rules.argsSchema);
-    expect(lifecycleShape.unfinishedLargeFileCancelDays.safeParse(oversized).success).toBe(false);
+    expect(lifecycleShape.unfinishedLargeFileCancelDays.safeParse(maxAllowed).success).toBe(true);
+    expect(lifecycleShape.unfinishedLargeFileCancelDays.safeParse(sixteenDigits).success).toBe(
+      false,
+    );
     expect(lifecycleShape.unfinishedLargeFileCancelDays.safeParse(infinite).success).toBe(false);
     expect(lifecycleShape.unfinishedLargeFileCancelDays.safeParse("7").success).toBe(true);
 
     const lockShape = getShape(prompts.b2_provision_locked_bucket.argsSchema);
-    expect(lockShape.retentionDuration.safeParse(oversized).success).toBe(false);
-    expect(lockShape.retentionDuration.safeParse(String(Number.MAX_SAFE_INTEGER)).success).toBe(
-      true,
-    );
+    expect(lockShape.retentionDuration.safeParse(maxAllowed).success).toBe(true);
+    expect(lockShape.retentionDuration.safeParse(sixteenDigits).success).toBe(false);
+
+    // Every accepted value stays within the JavaScript safe-integer range.
+    expect(Number.parseInt(maxAllowed, 10)).toBeLessThanOrEqual(Number.MAX_SAFE_INTEGER);
   });
 
   it("does not embed confirmation arguments that could bypass destructive gates", async () => {

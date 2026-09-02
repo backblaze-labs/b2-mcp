@@ -74,21 +74,22 @@ function optionalJson(value: unknown): string {
 }
 
 /**
- * Positive-integer string schema bounded to the JavaScript safe-integer range.
+ * Positive-integer string schema whose upper bound is expressed purely in the
+ * advertised JSON Schema `pattern`.
  *
  * @remarks
- * The regex alone accepts arbitrarily long digit strings, which `parseInt`
- * silently coerces to imprecise values or `Infinity`. Rejecting anything above
- * `Number.MAX_SAFE_INTEGER` at validation time keeps the generated workflow
- * arguments representable and safe to hand to the numeric tool schemas.
+ * A bare `^[1-9][0-9]*$` accepts arbitrarily long digit strings, which
+ * `parseInt` silently coerces to imprecise values or `Infinity`. A `.refine()`
+ * would enforce a numeric ceiling at runtime, but that constraint is dropped
+ * when the schema is emitted to JSON Schema for `prompts/list`, so a client
+ * would see an unbounded `pattern` and could send a value that `prompts/get`
+ * then rejects. Encoding the bound as a 1-to-15-digit pattern keeps the
+ * advertised schema and the server-side validation identical: every accepted
+ * value is at most `999999999999999`, comfortably within
+ * `Number.MAX_SAFE_INTEGER` and far larger than any real day/second count.
  */
 function positiveIntArgSchema() {
-  return z
-    .string()
-    .regex(/^[1-9][0-9]*$/)
-    .refine((value) => Number.parseInt(value, 10) <= Number.MAX_SAFE_INTEGER, {
-      message: `Value must be a safe integer at most ${Number.MAX_SAFE_INTEGER}.`,
-    });
+  return z.string().regex(/^[1-9][0-9]{0,14}$/);
 }
 
 function intArg(value: string | undefined, fallback: number): number {

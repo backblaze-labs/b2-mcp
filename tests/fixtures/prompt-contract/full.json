@@ -73,12 +73,12 @@
           },
           "currentVersionsToHideAfterDays": {
             "description": "Optional age in days after which current versions should be hidden.",
-            "pattern": "^[1-9][0-9]*$",
+            "pattern": "^[1-9][0-9]{0,14}$",
             "type": "string"
           },
           "hiddenVersionsToDeleteAfterDays": {
             "description": "Optional age in days after which noncurrent versions should expire.",
-            "pattern": "^[1-9][0-9]*$",
+            "pattern": "^[1-9][0-9]{0,14}$",
             "type": "string"
           },
           "objectNamePrefix": {
@@ -88,7 +88,7 @@
           "unfinishedLargeFileCancelDays": {
             "default": "7",
             "description": "Days after initiation to cancel unfinished multipart uploads.",
-            "pattern": "^[1-9][0-9]*$",
+            "pattern": "^[1-9][0-9]{0,14}$",
             "type": "string"
           }
         },
@@ -113,7 +113,7 @@
           },
           "retentionDuration": {
             "description": "Default retention duration for new objects.",
-            "pattern": "^[1-9][0-9]*$",
+            "pattern": "^[1-9][0-9]{0,14}$",
             "type": "string"
           },
           "retentionMode": {
@@ -191,7 +191,7 @@
           },
           "validDurationInSeconds": {
             "description": "Optional replacement key lifetime in seconds.",
-            "pattern": "^[1-9][0-9]*$",
+            "pattern": "^[1-9][0-9]{0,14}$",
             "type": "string"
           }
         },
@@ -203,5 +203,5 @@
       "title": "Rotate application key"
     }
   ],
-  "hash": "8400224b77ddaf6711cf0b0c6d2d92f1efe0b19c92e37e25c7d21d00464a8f86"
+  "hash": "c52599d06cdabc7017a82ac69bd71a0ae920984c652ab0517b29b6cd215c5e20"
 }

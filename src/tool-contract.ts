@@ -1,8 +1,8 @@
 import crypto from "crypto";
 import { z } from "zod";
 import type { RegisteredPromptMap, RegisteredPromptRecord } from "./mcp.js";
-import type { B2Config } from "./utils/types.js";
 import { DESTRUCTIVE_TOOL_NAMES } from "./utils/destructive-gate.js";
+import type { B2Config } from "./utils/types.js";
 
 export { DESTRUCTIVE_TOOL_NAMES };
 
@@ -357,6 +357,26 @@ export const PROFILE_DESCRIPTIONS: Record<ProfileName, string> = {
     "Default customer-hosted Phase 1 profile: standard B2 application key, no distinct Partner/master credential, and durable-secret producers exposed as sink-backed tools on local stdio or unavailable stubs when the sink is off.",
   "read-only":
     "Deterministic read/list profile for safe production use and contract tests; write/delete/admin handlers are omitted while durable-secret producer names remain unavailable stubs unless a sink-backed admin profile is configured.",
+};
+
+/**
+ * Human-readable descriptions for each generated prompt contract profile.
+ *
+ * @remarks
+ * Prompt profiles describe the guided-workflow surface, not the tool surface,
+ * so they must not reuse the tool-profile wording. Prompts are thin launchers
+ * with no durable-secret producers of their own; each profile advertises only
+ * the prompts whose `requiredTools`/`requiredCapabilities` are enabled for that
+ * credential.
+ */
+export const PROMPT_PROFILE_DESCRIPTIONS: Record<ProfileName, string> = {
+  full: "Complete guided-workflow prompt surface: every B2 workflow launcher is advertised, including the write-, admin-, and Partner-capable prompts, for contract review and regression detection.",
+  "live-b2-contract":
+    "Prompt surface for the protected live B2 contract profile: workflow launchers right-sized to the non-master application key's release-evidence capabilities.",
+  "phase1-default":
+    "Prompt surface for the default customer-hosted Phase 1 profile: workflow launchers right-sized to a standard B2 application key with no distinct Partner/master credential.",
+  "read-only":
+    "Read-only guided-workflow prompt surface: only launchers whose required tools are read/list operations are advertised; write, delete, and admin workflows are omitted.",
 };
 
 /** Stable profile ordering used by contract generation. */

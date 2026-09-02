@@ -90,12 +90,12 @@
           },
           "currentVersionsToHideAfterDays": {
             "description": "Optional age in days after which current versions should be hidden.",
-            "pattern": "^[1-9][0-9]*$",
+            "pattern": "^[1-9][0-9]{0,14}$",
             "type": "string"
           },
           "hiddenVersionsToDeleteAfterDays": {
             "description": "Optional age in days after which noncurrent versions should expire.",
-            "pattern": "^[1-9][0-9]*$",
+            "pattern": "^[1-9][0-9]{0,14}$",
             "type": "string"
           },
           "objectNamePrefix": {
@@ -105,7 +105,7 @@
           "unfinishedLargeFileCancelDays": {
             "default": "7",
             "description": "Days after initiation to cancel unfinished multipart uploads.",
-            "pattern": "^[1-9][0-9]*$",
+            "pattern": "^[1-9][0-9]{0,14}$",
             "type": "string"
           }
         },
@@ -130,7 +130,7 @@
           },
           "retentionDuration": {
             "description": "Default retention duration for new objects.",
-            "pattern": "^[1-9][0-9]*$",
+            "pattern": "^[1-9][0-9]{0,14}$",
             "type": "string"
           },
           "retentionMode": {
@@ -179,5 +179,5 @@
       "title": "Review B2 notifications"
     }
   ],
-  "hash": "bbc645bbdd9b74ed97624faa581e81ad7d80de7933862c663ed50139e3e3b554"
+  "hash": "7378ab9a0c3e4fe419b9d458adb120311f336fcaae7e19715621f67a8bb35179"
 }

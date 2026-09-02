@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-import { createRequire } from "node:module";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -20,6 +20,7 @@ const {
   PROFILE_NAMES,
   PROMPT_CONTRACT_ISSUE,
   PROMPT_CONTRACT_ISSUE_URL,
+  PROMPT_PROFILE_DESCRIPTIONS,
   TOOL_BACKING_CATEGORIES,
   TOOL_CONTRACT_ISSUE,
   TOOL_CONTRACT_ISSUE_URL,
@@ -227,7 +228,7 @@ async function main() {
       return [
         profile,
         {
-          description: PROFILE_DESCRIPTIONS[profile],
+          description: PROMPT_PROFILE_DESCRIPTIONS[profile],
           capabilities: capabilitiesForProfile(profile),
           counts: fixture.counts,
           names: fixture.names,

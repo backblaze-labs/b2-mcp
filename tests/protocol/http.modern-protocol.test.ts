@@ -4,6 +4,8 @@
  * 2026-07-28 envelope and assert protocol behavior stays sessionless.
  */
 
+import { S3Client } from "@aws-sdk/client-s3";
+import { B2Simulator } from "@backblaze-labs/b2-sdk/simulator";
 import {
   CLIENT_CAPABILITIES_META_KEY,
   CLIENT_INFO_META_KEY,
@@ -15,29 +17,27 @@ import {
   type HttpServerOptions,
 } from "../../src/http-server";
 import { invalidateAuthManagerCache } from "../../src/server";
-import { B2Simulator } from "@backblaze-labs/b2-sdk/simulator";
-import { S3Client } from "@aws-sdk/client-s3";
 import {
-  JSON_HEADERS,
   closeHttpServer,
   creds,
+  JSON_HEADERS,
   listenOnLocalhost,
   request,
   restoreEnv,
   saveEnv,
   setDefaultHttpTestEnv,
 } from "../support/http";
+import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
+import { installSdkTransport, withTrustedS3ApiUrl } from "../support/sdk-test-helpers";
 import {
-  MODERN_PROTOCOL_VERSION,
   closeClient,
   connectHttpClient,
   getPromptText,
   listPromptNames,
+  MODERN_PROTOCOL_VERSION,
   modernBody,
   modernHeaders,
 } from "./support/clients";
-import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
-import { installSdkTransport, withTrustedS3ApiUrl } from "../support/sdk-test-helpers";
 
 let handle: HttpServerHandle;
 let port: number;
@@ -190,6 +190,39 @@ describe("HTTP handler (MCP 2026-07-28)", () => {
         ),
       ).toBe(true);
       expect(requests.every((record) => record.headers["mcp-session-id"] === undefined)).toBe(true);
+    } finally {
+      if (priorEnablePrompts === undefined) {
+        delete process.env.B2_ENABLE_MCP_PROMPTS;
+      } else {
+        process.env.B2_ENABLE_MCP_PROMPTS = priorEnablePrompts;
+      }
+      await closeClient(client);
+    }
+  });
+
+  it("omits prompts from discovery and rejects prompt requests when the flag is off", async () => {
+    const priorEnablePrompts = process.env.B2_ENABLE_MCP_PROMPTS;
+    process.env.B2_ENABLE_MCP_PROMPTS = "false";
+    const { client } = await connectHttpClient(port, {
+      era: "modern",
+      headers: creds,
+      cachePartition: "tenant-prompts-off",
+    });
+    try {
+      const discover = client.getDiscoverResult() ?? (await client.discover());
+      // The tool surface stays available; only the prompt capability drops.
+      expect(discover.capabilities.tools).toBeDefined();
+      expect(discover.capabilities.prompts).toBeUndefined();
+
+      // A prompt request must be unavailable end-to-end, not just absent from
+      // the private registry, so the off-switch actually stops rollout drift.
+      // Discovery advertises no prompts, and a direct get is rejected.
+      expect(await listPromptNames(client)).toEqual([]);
+      await expect(
+        getPromptText(client, "b2_configure_lifecycle_cost_rules", {
+          bucketName: "protocol-http-prompts-off",
+        }),
+      ).rejects.toThrow();
     } finally {
       if (priorEnablePrompts === undefined) {
         delete process.env.B2_ENABLE_MCP_PROMPTS;
