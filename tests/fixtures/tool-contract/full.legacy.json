@@ -800,7 +800,7 @@
     },
     {
       "name": "b2_update_bucket",
-      "descriptionSha256": "942fcb2c95b7f7fb01a9ac629d6097e4587e9cc6f945abf1bc980118806097dd",
+      "descriptionSha256": "d7db2868733a59e126556d3006517297c31bb6f1a051807e08ef878586a464ed",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -828,7 +828,7 @@
             "type": "string"
           },
           "confirm": {
-            "description": "Confirm a destructive change (making the bucket public, weakening Object Lock/lifecycle, or changing replication). Required only when the effective server destructive policy is 'confirm'; non-destructive updates do not need it.",
+            "description": "Confirm a gated bucket update: bucketType allPublic, fileLockEnabled false, defaultRetention.mode null, lifecycleRules with daysFromHidingToDeleting, or any replicationConfiguration. Required only when the effective server destructive policy is 'confirm'; non-gated updates do not need it.",
             "type": "boolean"
           },
           "corsRules": {
@@ -2066,5 +2066,5 @@
     "toolsListCacheHint": null,
     "discover": null
   },
-  "hash": "0908aabe29a10a7e113f2cca69e6007c21a8b34d1b3fdcef6481a04a3cd6223e"
+  "hash": "219612f05faad147e3a0d56cf727a2042833d362bee6671fdce29fecd3ced748"
 }

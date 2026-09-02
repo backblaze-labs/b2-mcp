@@ -807,7 +807,7 @@ export function registerBucketTools(
     "b2_update_bucket",
     {
       description:
-        "Update persistent settings on an existing B2 bucket: visibility, metadata, CORS, lifecycle, default encryption, replication, Object Lock, and default retention. Use b2_list_buckets first to inspect the current bucketId/revision and use ifRevisionIs for safer retries; use s3_put_bucket_lifecycle only when you specifically need the S3 lifecycle API shape. Public visibility, Object Lock/default-retention weakening, deletion lifecycle rules, and replication changes are gated by the destructive policy.",
+        "Update persistent settings on an existing B2 bucket: visibility, metadata, CORS, lifecycle, default encryption, replication, Object Lock, and default retention. Use b2_list_buckets first to inspect the current bucketId/revision and use ifRevisionIs for safer retries; use s3_put_bucket_lifecycle only when you specifically need the S3 lifecycle API shape. Gated cases: bucketType allPublic, fileLockEnabled false, defaultRetention.mode null, lifecycleRules with daysFromHidingToDeleting, and any replicationConfiguration update.",
       inputSchema: {
         bucketId: z.string().describe("The exact bucket ID to update, not the bucket name."),
         bucketType: z
@@ -898,7 +898,7 @@ export function registerBucketTools(
           .boolean()
           .optional()
           .describe(
-            "Confirm a destructive change (making the bucket public, weakening Object Lock/lifecycle, or changing replication). Required only when the effective server destructive policy is 'confirm'; non-destructive updates do not need it.",
+            "Confirm a gated bucket update: bucketType allPublic, fileLockEnabled false, defaultRetention.mode null, lifecycleRules with daysFromHidingToDeleting, or any replicationConfiguration. Required only when the effective server destructive policy is 'confirm'; non-gated updates do not need it.",
           ),
       },
     },
