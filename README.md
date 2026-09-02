@@ -603,7 +603,14 @@ Running it safely:
 - **Use a least-privilege key** — a non-master key is correct for normal storage operations. Local stdio can create scoped keys through the file sink; hosted HTTP deployments should create and rotate keys outside the MCP tool flow unless the file sink has been explicitly configured and reviewed. `b2_create_key` refuses key-management grants, unscoped write/delete grants, and over-long or non-expiring keys unless the corresponding policy override is set.
 - **Presigned URLs are different from durable secrets** — `s3_get_presigned_url` and `s3_presign_upload_part` return short-lived bearer capabilities with `expiresIn` / `expiresAt`. Treat the URL as sensitive until expiry, but it is not a long-lived B2 application key.
 - **Local use → stdio** (the Quick Start above). Credentials stay in your client config / environment.
-- **Exposing HTTP → choose a credential mode.** Unset mode remains `headers` for one-release compatibility with existing header clients; B2 credential headers must be present on every MCP request. Set `B2_HTTP_CREDENTIAL_MODE=server` to keep one B2 credential in the server process/customer secret manager, or `principal` to map verified MCP `authInfo` to customer-held credentials.
+- **Exposing HTTP → choose a credential mode.** Unset mode remains `headers`
+  for one-release compatibility with existing header clients. Credential-free
+  discovery requests (`initialize`, `server/discover`, `tools/list`,
+  `resources/list`, `prompts/list`, `ping`) can run without B2 keys so scanners
+  can enumerate the server, but real `tools/call` execution still requires valid
+  credentials. Set `B2_HTTP_CREDENTIAL_MODE=server` to keep one B2 credential in
+  the server process/customer secret manager, or `principal` to map verified MCP
+  `authInfo` to customer-held credentials.
 - **Caller auth stays at your edge.** For `principal` mode, terminate TLS and validate OAuth before the SDK handler receives `authInfo`; strip any trusted identity headers at the edge and only re-add them inside an allowlisted proxy boundary.
 - **MCP SDK v2 packages are pinned.** HTTP and stdio use the official `@modelcontextprotocol/server` v2 package from `github.com/modelcontextprotocol/typescript-sdk`; opt-in TOON output uses a reviewed repo-owned encoder for spec `4.1`, with `@toon-format/toon@4.1.1` retained only as a dev/test decoder oracle.
 - **Never commit credentials** — use env vars / a secrets manager. `.env*` is gitignored.

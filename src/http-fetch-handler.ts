@@ -545,6 +545,13 @@ function toolNameFromParsedBody(body: unknown): string | undefined {
 function mayDispatchToDiscoveryServer(method: string | undefined): boolean {
   return (
     method === "initialize" ||
+    method === "notifications/initialized" ||
+    method === "ping" ||
+    method === "prompts/get" ||
+    method === "prompts/list" ||
+    method === "resources/list" ||
+    method === "resources/read" ||
+    method === "resources/templates/list" ||
     method === "server/discover" ||
     method === "tools/list" ||
     method === "tools/call"

@@ -274,6 +274,14 @@ function callToolBody(name: string, args: Record<string, unknown> = {}, id = 1):
   return modernBody("tools/call", { name, arguments: args }, id);
 }
 
+function initializedNotificationBody(): string {
+  return JSON.stringify({
+    jsonrpc: "2.0",
+    method: "notifications/initialized",
+    params: { _meta: META },
+  });
+}
+
 async function replaceHandle(
   getAuthInfo?: (req: any) => AuthInfo | null,
   overrides: Omit<HttpServerOptions, "getAuthInfo"> = {},
@@ -338,6 +346,40 @@ describe("HTTP transport handler", () => {
     expect(callLog).not.toHaveProperty("argKeys");
     expect(JSON.stringify(infoSpy.mock.calls)).not.toContain(leakedName);
     expect(JSON.stringify(infoSpy.mock.calls)).not.toContain(leakedKey);
+  });
+
+  it("serves non-executing discovery methods without credentials", async () => {
+    process.env.B2_ENABLE_MCP_PROMPTS = "true";
+
+    const prompts = await request(port, "POST", "/mcp", {
+      headers: modernHeaders("prompts/list"),
+      body: modernBody("prompts/list"),
+    });
+    expect(prompts.status).toBe(200);
+    expect(JSON.parse(prompts.body).result.prompts.length).toBeGreaterThan(0);
+
+    const resources = await request(port, "POST", "/mcp", {
+      headers: modernHeaders("resources/list"),
+      body: modernBody("resources/list"),
+    });
+    expect(resources.status).toBe(200);
+    expect(
+      JSON.parse(resources.body).result.resources.map((resource: { uri: string }) => resource.uri),
+    ).toContain("b2://server-config");
+
+    const ping = await request(port, "POST", "/mcp", {
+      headers: modernHeaders("ping"),
+      body: modernBody("ping"),
+    });
+    expect([200, 404]).toContain(ping.status);
+    expect(ping.body).not.toContain("B2 application credentials");
+
+    const initialized = await request(port, "POST", "/mcp", {
+      headers: modernHeaders("notifications/initialized"),
+      body: initializedNotificationBody(),
+    });
+    expect(initialized.status).not.toBe(401);
+    expect(initialized.body).not.toContain("B2 application credentials");
   });
 
   it("returns 200 on /health when default header mode needs no static B2 env", async () => {
