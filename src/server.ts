@@ -587,8 +587,8 @@ export function sweepCapabilityCache(now = Date.now()): void {
  *
  * @remarks
  * HTTP uses this to put only actual capability-authorize work behind shared
- * verification limits. Cached capability results and already in-flight lookups
- * stay on their credential-scoped limiter keys.
+ * verification limits. This inspects only the requested key and leaves global
+ * cleanup to normal fetch and idle sweeps.
  *
  * @param cacheKey - Exact capability cache key to inspect.
  * @param now - Millisecond timestamp used for deterministic tests.
@@ -597,9 +597,9 @@ export function sweepCapabilityCache(now = Date.now()): void {
  */
 export function requiresCapabilityDiscovery(cacheKey: string, now = Date.now()): boolean {
   if (process.env.B2_REGISTER_ALL_TOOLS === "true") return false;
-  sweepCapabilityCache(now);
   const cached = capabilityCache.get(cacheKey);
   if (cached && cached.expiresAt > now) return false;
+  if (cached) capabilityCache.delete(cacheKey);
   return !capabilityInflight.has(cacheKey);
 }
 
