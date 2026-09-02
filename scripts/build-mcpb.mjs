@@ -9,12 +9,18 @@
  * Smithery's Local (MCPB Bundle) publish tab. See docs/DISCOVERABILITY.md.
  */
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 
 const root = process.cwd();
 const outDir = path.join(root, "dist-mcpb");
 const outFile = path.join(outDir, "b2-mcp.mcpb");
+
+// Drop any prior artifact up front so a later validation/pack failure can never
+// leave a stale `.mcpb` (from an earlier version) sitting in the documented
+// upload path.
+mkdirSync(outDir, { recursive: true });
+rmSync(outFile, { force: true });
 
 const packageVersion = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")).version;
 const manifestVersion = JSON.parse(
@@ -28,7 +34,6 @@ if (manifestVersion !== packageVersion) {
   process.exit(2);
 }
 
-mkdirSync(outDir, { recursive: true });
 // Invoke the lockfile-resolved mcpb binary (pinned as an exact dev dependency)
 // so the packer's full dependency graph is frozen with the rest of the repo,
 // rather than re-resolving transitive deps via `npx -y` on each release.

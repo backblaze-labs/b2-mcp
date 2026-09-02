@@ -392,12 +392,18 @@ describe("release scripts", () => {
         join(fixtureRoot, "mcpb", "manifest.json"),
         `${JSON.stringify({ manifest_version: "0.3", name: "b2-mcp", version: "0.1.0" }, null, 2)}\n`,
       );
+      // Seed a stale artifact from a prior build; the failed run must remove it
+      // so the documented upload path never keeps prior-release code.
+      const staleArtifact = join(fixtureRoot, "dist-mcpb", "b2-mcp.mcpb");
+      mkdirSync(join(fixtureRoot, "dist-mcpb"), { recursive: true });
+      writeFileSync(staleArtifact, "stale");
       const result = spawnSync(process.execPath, [join(root, "scripts/build-mcpb.mjs")], {
         cwd: fixtureRoot,
         encoding: "utf8",
       });
       expect(result.status).toBe(2);
       expect(result.stderr).toContain("does not match package.json");
+      expect(existsSync(staleArtifact)).toBe(false);
     } finally {
       rmSync(fixtureRoot, { recursive: true, force: true });
     }
