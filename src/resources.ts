@@ -184,6 +184,29 @@ function credentialFingerprint(config: B2Config): string {
   return config.credentialFingerprint ?? fingerprintConfig(config);
 }
 
+/**
+ * Build sanitizer options that also redact the config's B2 key IDs.
+ *
+ * @remarks
+ * Header/principal credential IDs never reach `process.env`, and
+ * {@link sanitizerOptionsFromConfig} contributes only key secrets. Without the
+ * key IDs a request-controlled URI such as `b2://bucket/<applicationKeyId>`
+ * would write the credential handle verbatim into the resource audit log, so
+ * fold the configured key IDs into the redaction set alongside key secrets.
+ *
+ * @param config - Resolved runtime configuration.
+ *
+ * @returns Sanitizer options redacting configured key secrets and key IDs.
+ */
+function resourceSanitizerOptions(config: B2Config): SanitizerOptions {
+  const base = sanitizerOptionsFromConfig(config);
+  const keyIds = [config.applicationKeyId, config.appKeyId, config.masterKeyId].filter(
+    (id): id is string => typeof id === "string" && id.length >= 8,
+  );
+  if (keyIds.length === 0) return base;
+  return { ...base, secrets: [...(base.secrets ?? []), ...keyIds] };
+}
+
 function providerErrorFields(
   err: unknown,
   sanitizerOptions: SanitizerOptions,
@@ -256,7 +279,7 @@ async function withResourceGuards<T>(
 ): Promise<T> {
   const start = Date.now();
   const signal = (ctx as { mcpReq?: { signal?: AbortSignal } } | undefined)?.mcpReq?.signal;
-  const sanitizerOptions = sanitizerOptionsFromConfig(config);
+  const sanitizerOptions = resourceSanitizerOptions(config);
   const safeUri = sanitizeText(audit.uri, sanitizerOptions);
   try {
     const result = await runWithMcpRequestSignal(signal ?? currentMcpRequestSignal(), () =>
@@ -418,7 +441,7 @@ async function bucketEventNotifications(
   }
 
   const start = Date.now();
-  const sanitizerOptions = sanitizerOptionsFromConfig(options.config);
+  const sanitizerOptions = resourceSanitizerOptions(options.config);
   const safeUri = sanitizeText(uri, sanitizerOptions);
   try {
     const value = redactNotificationSecrets(
