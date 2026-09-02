@@ -129,15 +129,15 @@
                   "description": "Object-key prefix this rule matches; use an empty string to match the bucket."
                 },
                 "daysFromHidingToDeleting": {
-                  "description": "Optional days after a file is hidden before B2 permanently deletes it.",
+                  "description": "Optional days after a file is hidden before B2 permanently deletes it; minimum 1.",
                   "type": "number"
                 },
                 "daysFromUploadingToHiding": {
-                  "description": "Optional days after upload before B2 hides the current file version.",
+                  "description": "Optional days after upload before B2 hides the current file version; minimum 1.",
                   "type": "number"
                 },
                 "daysFromStartingToCancelingUnfinishedLargeFiles": {
-                  "description": "Optional days before B2 cancels unfinished large-file uploads.",
+                  "description": "Optional days before B2 cancels unfinished large-file uploads; minimum 1.",
                   "type": "number"
                 }
               },
@@ -925,15 +925,15 @@
                   "description": "Object-key prefix this rule matches; use an empty string to match the bucket."
                 },
                 "daysFromHidingToDeleting": {
-                  "description": "Optional days after a file is hidden before B2 permanently deletes it.",
+                  "description": "Optional days after a file is hidden before B2 permanently deletes it; minimum 1.",
                   "type": "number"
                 },
                 "daysFromUploadingToHiding": {
-                  "description": "Optional days after upload before B2 hides the current file version.",
+                  "description": "Optional days after upload before B2 hides the current file version; minimum 1.",
                   "type": "number"
                 },
                 "daysFromStartingToCancelingUnfinishedLargeFiles": {
-                  "description": "Optional days before B2 cancels unfinished large-file uploads.",
+                  "description": "Optional days before B2 cancels unfinished large-file uploads; minimum 1.",
                   "type": "number"
                 }
               },

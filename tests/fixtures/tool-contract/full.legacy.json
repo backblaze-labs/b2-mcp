@@ -254,15 +254,15 @@
             "items": {
               "properties": {
                 "daysFromHidingToDeleting": {
-                  "description": "Optional days after a file is hidden before B2 permanently deletes it.",
+                  "description": "Optional days after a file is hidden before B2 permanently deletes it; minimum 1.",
                   "type": "number"
                 },
                 "daysFromStartingToCancelingUnfinishedLargeFiles": {
-                  "description": "Optional days before B2 cancels unfinished large-file uploads.",
+                  "description": "Optional days before B2 cancels unfinished large-file uploads; minimum 1.",
                   "type": "number"
                 },
                 "daysFromUploadingToHiding": {
-                  "description": "Optional days after upload before B2 hides the current file version.",
+                  "description": "Optional days after upload before B2 hides the current file version; minimum 1.",
                   "type": "number"
                 },
                 "fileNamePrefix": {
@@ -288,7 +288,7 @@
     },
     {
       "name": "b2_create_group_member",
-      "descriptionSha256": "bea54a281ce97dab8b8eecdb4827993ff29bf1cc1179eb52f68bdfd0ec3b3219",
+      "descriptionSha256": "68741d07c8dec96e72801be0c0078ca13cc1e5c2f52011abdb4b3fe6a0bdbfb0",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -308,7 +308,7 @@
     },
     {
       "name": "b2_create_key",
-      "descriptionSha256": "bea54a281ce97dab8b8eecdb4827993ff29bf1cc1179eb52f68bdfd0ec3b3219",
+      "descriptionSha256": "68741d07c8dec96e72801be0c0078ca13cc1e5c2f52011abdb4b3fe6a0bdbfb0",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -653,7 +653,7 @@
     },
     {
       "name": "b2_reserve_trial_create_account",
-      "descriptionSha256": "bea54a281ce97dab8b8eecdb4827993ff29bf1cc1179eb52f68bdfd0ec3b3219",
+      "descriptionSha256": "68741d07c8dec96e72801be0c0078ca13cc1e5c2f52011abdb4b3fe6a0bdbfb0",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -967,15 +967,15 @@
             "items": {
               "properties": {
                 "daysFromHidingToDeleting": {
-                  "description": "Optional days after a file is hidden before B2 permanently deletes it.",
+                  "description": "Optional days after a file is hidden before B2 permanently deletes it; minimum 1.",
                   "type": "number"
                 },
                 "daysFromStartingToCancelingUnfinishedLargeFiles": {
-                  "description": "Optional days before B2 cancels unfinished large-file uploads.",
+                  "description": "Optional days before B2 cancels unfinished large-file uploads; minimum 1.",
                   "type": "number"
                 },
                 "daysFromUploadingToHiding": {
-                  "description": "Optional days after upload before B2 hides the current file version.",
+                  "description": "Optional days after upload before B2 hides the current file version; minimum 1.",
                   "type": "number"
                 },
                 "fileNamePrefix": {
@@ -2066,5 +2066,5 @@
     "toolsListCacheHint": null,
     "discover": null
   },
-  "hash": "72ca02e500f23c5b7b9c9549e8ca401479f0d6aac3774d5a53ecd1969a087ac9"
+  "hash": "0908aabe29a10a7e113f2cca69e6007c21a8b34d1b3fdcef6481a04a3cd6223e"
 }

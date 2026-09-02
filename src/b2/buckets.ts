@@ -206,15 +206,15 @@ const lifecycleRuleSchema = z.object({
   daysFromHidingToDeleting: z
     .number()
     .optional()
-    .describe("Optional days after a file is hidden before B2 permanently deletes it."),
+    .describe("Optional days after a file is hidden before B2 permanently deletes it; minimum 1."),
   daysFromUploadingToHiding: z
     .number()
     .optional()
-    .describe("Optional days after upload before B2 hides the current file version."),
+    .describe("Optional days after upload before B2 hides the current file version; minimum 1."),
   daysFromStartingToCancelingUnfinishedLargeFiles: z
     .number()
     .optional()
-    .describe("Optional days before B2 cancels unfinished large-file uploads."),
+    .describe("Optional days before B2 cancels unfinished large-file uploads; minimum 1."),
 });
 
 const createLifecycleRulesSchema = z
