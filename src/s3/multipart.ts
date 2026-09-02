@@ -270,7 +270,7 @@ export function registerS3MultipartTools(
         });
         return toolJson({
           uploads: result.uploads,
-          commonPrefixes: result.commonPrefixes,
+          commonPrefixes: result.commonPrefixes ?? [],
           isTruncated: result.isTruncated,
           nextKeyMarker: result.nextKeyMarker,
           nextUploadIdMarker: result.nextUploadIdMarker,

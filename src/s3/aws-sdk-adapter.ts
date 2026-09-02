@@ -542,8 +542,8 @@ export interface B2S3ListMultipartUploadsOptions {
 export interface B2S3ListMultipartUploadsResult {
   /** Multipart uploads returned on this page. */
   uploads: B2S3MultipartUploadSummary[];
-  /** Common prefixes returned for delimiter-based listing. */
-  commonPrefixes: B2S3CommonPrefix[];
+  /** Common prefixes returned for delimiter-based listing, when present. */
+  commonPrefixes?: B2S3CommonPrefix[];
   /** Whether more uploads are available. */
   isTruncated?: boolean;
   /** Key marker for the next page, when present. */
