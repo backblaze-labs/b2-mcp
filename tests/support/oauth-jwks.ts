@@ -3,8 +3,8 @@ import {
   createPrivateKey,
   createSign,
   generateKeyPairSync,
-  sign as nodeSign,
   type JsonWebKey,
+  sign as nodeSign,
 } from "node:crypto";
 import { introspectionClaims } from "./oauth-introspection";
 
@@ -78,7 +78,7 @@ export function signedJwt(
   };
   const signingInput = `${base64Url(JSON.stringify(header))}.${base64Url(JSON.stringify(claims))}`;
   const privateKey = createPrivateKey({ key: rsaPrivateJwk, format: "jwk" });
-  const signature = createSign("RSA-SHA256").update(signingInput).end().sign(privateKey);
+  const signature = nodeSign("RSA-SHA256", new TextEncoder().encode(signingInput), privateKey);
   return `${signingInput}.${base64Url(signature)}`;
 }
 
