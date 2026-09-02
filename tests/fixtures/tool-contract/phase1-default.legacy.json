@@ -1156,7 +1156,7 @@
     },
     {
       "name": "s3_copy_object",
-      "descriptionSha256": "363910cd742071f6ac91e61d3bb13d577141dab1766f35bca382abd3212e4985",
+      "descriptionSha256": "3d8d0808ab7a817fc1b839e4244901cd5559eb581f402a55e6b67376eb0a2dc4",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -1925,5 +1925,5 @@
     "toolsListCacheHint": null,
     "discover": null
   },
-  "hash": "c5aeb288ab6e0377d7c2da3582caadd0b3312c7bd8a27cb4a06adbc7c6f539ca"
+  "hash": "de997e8002adb8c1c38147202b4a8f8507d98c37ca1870f928eef281b5523e1c"
 }
