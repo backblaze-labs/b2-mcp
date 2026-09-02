@@ -72,7 +72,13 @@ Env schema for the Glama deploy form:
 | `B2_REGION` | no | no | `us-east-005` |
 | `B2_MASTER_KEY_ID` | no | yes | (Partner tools only) |
 | `B2_MASTER_KEY` | no | yes | (Partner tools only) |
-| `B2_HTTP_CREDENTIAL_MODE` | no | no | `headers` |
+| `B2_HTTP_CREDENTIAL_MODE` | yes | no | `server` |
+
+`B2_HTTP_CREDENTIAL_MODE` **must** be `server` for this deployment. In the
+default `headers` mode the HTTP transport ignores env-injected credentials and
+requires B2 credential headers on every request, so Glama's credential-free tool
+scan would receive `401` responses; `server` mode signs requests with the
+env-supplied application key instead.
 
 If Glama's build test cannot enumerate tools without credentials, add
 `B2_REGISTER_ALL_TOOLS=true` (fixed value) for the build only.
