@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- The stdio server no longer exits when started without B2 credentials. It now
+  enters a credential-less discovery mode: the full tool surface is registered
+  so registry/directory services (mcp.so, Glama, LobeHub) can read `tools/list`
+  in a sandbox, a `server.stdio_discovery_mode` warning is logged, and every
+  tool call returns a clear `missing_credentials` error until
+  `B2_APPLICATION_KEY_ID` / `B2_APPLICATION_KEY` are set. The HTTP transport is
+  unchanged. (#356)
+
 ## [0.2.0] - 2026-09-01
 
 ### Added

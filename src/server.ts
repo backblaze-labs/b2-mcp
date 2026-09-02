@@ -22,6 +22,7 @@ import {
   type ToolRegistrar,
 } from "./mcp.js";
 export { getRegisteredTools } from "./mcp.js";
+import type { CallToolResult } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import type { B2Config, SecretSinkConfig } from "./utils/types.js";
 import { parseIntEnv } from "./utils/config.js";
@@ -183,7 +184,33 @@ export interface CreateServerOptions {
    * @internal
    */
   failClosedUnknownCapabilities?: boolean;
+  /**
+   * Register the full tool surface for discovery while no B2 credentials are
+   * configured, and answer every tool call with a clear `missing_credentials`
+   * error instead of attempting a doomed provider call.
+   *
+   * @remarks
+   * Set by the stdio bootstrap when it starts without
+   * `B2_APPLICATION_KEY_ID` / `B2_APPLICATION_KEY` so registry/directory
+   * services (mcp.so, Glama, LobeHub) can still enumerate `tools/list` in a
+   * credential-less sandbox. Tool *calls* fail with an actionable message; the
+   * placeholder credentials the bootstrap injects are never used because this
+   * short-circuits before the handler runs.
+   *
+   * @internal
+   */
+  credentialsMissing?: boolean;
 }
+
+/** Tool-call error returned in credential-less stdio discovery mode. */
+const MISSING_CREDENTIALS_TOOL_ERROR = Object.freeze({
+  status: 401,
+  code: "missing_credentials",
+  message:
+    "B2 credentials are not configured. Set B2_APPLICATION_KEY_ID and B2_APPLICATION_KEY " +
+    "(stdio) or send the credential headers (HTTP) before calling B2 tools. The server is " +
+    "running in discovery mode, so tools are listed but cannot execute.",
+});
 
 /**
  * Build the MCP server and register the B2 tool surface.
@@ -288,11 +315,13 @@ export function createServer(
   const registrar = new ToolRegistrationAdapter(server, {
     shouldRegister: shouldRegisterForResolvedAuthz,
     wrapCallback: (name, callback) =>
-      createAuditedToolCallback(name, callback, config, {
-        getClientCapabilities: () => getMcpClientCapabilities(server),
-        getProtocolVersion: () => getMcpNegotiatedProtocolVersion(server),
-        requestStateCodec,
-      }),
+      options.credentialsMissing === true
+        ? createMissingCredentialsToolCallback(name, config)
+        : createAuditedToolCallback(name, callback, config, {
+            getClientCapabilities: () => getMcpClientCapabilities(server),
+            getProtocolVersion: () => getMcpNegotiatedProtocolVersion(server),
+            requestStateCodec,
+          }),
   });
 
   // Initialize clients. The application (workhorse) key drives the B2 native
@@ -324,9 +353,16 @@ export function createServer(
     : auth;
   const masterClient = masterIsDistinct ? new B2Client(masterAuth) : b2Client;
 
+  // Discovery mode advertises the full durable-secret schemas (decoupled from
+  // sink availability) so registries learn real inputs like keyName/capabilities/
+  // email; the discovery guard still rejects every call before execution.
+  const durableSecretOptions = {
+    registerDurableSecretSchemas: options.credentialsMissing === true,
+  };
+
   // ── B2 Native API tools (control plane: buckets, keys, object lock) ──────
   registerBucketTools(registrar, b2Client, config);
-  registerKeyTools(registrar, b2Client, auth, config);
+  registerKeyTools(registrar, b2Client, auth, config, durableSecretOptions);
   registerObjectLockTools(registrar, b2Client, config);
 
   // ── Partner API tools (master key) ──────────────────────────────────────
@@ -335,7 +371,7 @@ export function createServer(
   // distinct master key is configured; otherwise (and in full-surface mode) keep
   // the prior behavior of always registering them.
   if (!filterActive || masterIsDistinct) {
-    registerPartnerTools(registrar, masterClient, masterAuth, config);
+    registerPartnerTools(registrar, masterClient, masterAuth, config, durableSecretOptions);
   }
 
   // ── S3-Compatible API tools (data plane: objects + multipart) ────────────
@@ -379,13 +415,24 @@ export function createServer(
       (name) => !registrar.hasTool(name) && isToolAllowedByOAuthScopes(name, oauthScopes),
     );
   } else if (config.secretSink?.mode !== "inline") {
-    registerDurableSecretCompatibilityStubs(registrar, config.secretSink, (name) =>
-      isToolAllowedByOAuthScopes(name, oauthScopes),
+    // Skip names already registered: discovery mode advertises the full
+    // durable-secret schemas above, so a stub would duplicate the registration.
+    registerDurableSecretCompatibilityStubs(
+      registrar,
+      config.secretSink,
+      (name) => !registrar.hasTool(name) && isToolAllowedByOAuthScopes(name, oauthScopes),
     );
   }
 
   const toolCount = registrar.commit();
   logger.info({ toolCount, version: VERSION, outputFormat }, "server.ready");
+
+  // Discovery mode: reject every tools/call ahead of the SDK's input-schema
+  // validation so required-argument tools also return missing_credentials, while
+  // tools/list keeps the real schemas registered above.
+  if (options.credentialsMissing === true) {
+    installDiscoveryModeToolCallHandler(server, config);
+  }
 
   const originalClose = server.close.bind(server);
   let cleanedUp = false;
@@ -849,6 +896,93 @@ export function createAuditedToolCallback(
       throw safeErr;
     }
   };
+}
+
+/**
+ * Emit the discovery-mode `tool.call` audit event for a rejected attempt.
+ *
+ * @remarks
+ * Shared by the per-tool short circuit and the low-level `tools/call`
+ * interceptor so both paths log the same classified `missing_credentials`
+ * code/status and keep rejected attempts observable.
+ *
+ * @param name - Registered tool name recorded in the audit event.
+ * @param argKeys - Argument key names (never values) recorded in the event.
+ * @param config - Resolved B2 credentials and runtime policy.
+ */
+function logMissingCredentialsAudit(name: unknown, argKeys: string[], config: B2Config): void {
+  logger.info(
+    {
+      tool: name,
+      credential: config.credentialFingerprint ?? fingerprintConfig(config),
+      outputFormat: config.outputFormat ?? DEFAULT_MCP_OUTPUT_FORMAT,
+      argKeys,
+      durationMs: 0,
+      error: true,
+      resultType: "complete",
+      code: MISSING_CREDENTIALS_TOOL_ERROR.code,
+      status: MISSING_CREDENTIALS_TOOL_ERROR.status,
+    },
+    "tool.call",
+  );
+}
+
+function argKeysOf(args: unknown): string[] {
+  return args && typeof args === "object" && !Array.isArray(args) ? Object.keys(args) : [];
+}
+
+/**
+ * Build an audit-only tool callback for discovery mode.
+ *
+ * @remarks
+ * Discovery mode registers the full surface with placeholder credentials but
+ * must reject every execution ahead of provider/destructive handling. This short
+ * circuit returns the `missing_credentials` error without touching the real
+ * handler, yet still emits the `tool.call` audit event (with the classified
+ * code/status) so rejected attempts stay observable instead of leaving a gap.
+ * It backstops the low-level discovery-mode `tools/call` interceptor: it runs
+ * only when a call already cleared the SDK's schema validation (a
+ * no-required-argument tool) and reached the per-tool callback.
+ *
+ * @param name - Registered tool name recorded in the audit event.
+ * @param config - Resolved B2 credentials and runtime policy.
+ *
+ * @returns A tool callback that logs the attempt and returns `missing_credentials`.
+ *
+ * @example
+ * ```ts
+ * const callback = createMissingCredentialsToolCallback("b2_list_buckets", config);
+ * ```
+ */
+export function createMissingCredentialsToolCallback(name: string, config: B2Config): ToolCallback {
+  return async function missingCredentialsToolCallback(args: any) {
+    logMissingCredentialsAudit(name, argKeysOf(args), config);
+    return toolError(MISSING_CREDENTIALS_TOOL_ERROR);
+  };
+}
+
+/**
+ * Intercept every discovery-mode `tools/call` ahead of input-schema validation.
+ *
+ * @remarks
+ * The MCP SDK validates a tool's registered input schema before it invokes the
+ * tool callback, so the per-callback short circuit alone does not reject calls
+ * that fail schema validation first (for example a required-argument tool such
+ * as `s3_head_bucket` called with `{}`, which would otherwise return a schema
+ * validation error rather than `missing_credentials`). Overriding the low-level
+ * `tools/call` handler after registration rejects *every* call with
+ * `missing_credentials` regardless of arguments while `tools/list` keeps the
+ * real schemas, so registries still enumerate the full, accurate surface.
+ *
+ * @param server - MCP server whose tool-call dispatch is being overridden.
+ * @param config - Resolved B2 credentials and runtime policy for audit logging.
+ */
+function installDiscoveryModeToolCallHandler(server: McpServer, config: B2Config): void {
+  server.server.setRequestHandler("tools/call", async (request) => {
+    const params = (request as { params?: { name?: unknown; arguments?: unknown } }).params;
+    logMissingCredentialsAudit(params?.name, argKeysOf(params?.arguments), config);
+    return toolError(MISSING_CREDENTIALS_TOOL_ERROR) as CallToolResult;
+  });
 }
 
 function destructiveAuditLogFields(

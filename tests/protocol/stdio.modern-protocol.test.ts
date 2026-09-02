@@ -88,17 +88,18 @@ describe("startStdio", () => {
     expect(serveStdio).not.toHaveBeenCalled();
   });
 
-  it("exits the process when required credentials are missing", async () => {
+  it("starts in credential-less discovery mode instead of exiting when credentials are missing", async () => {
     delete process.env.B2_APPLICATION_KEY_ID;
     delete process.env.B2_APPLICATION_KEY;
-    // loadConfig() calls process.exit(1) on missing creds — stub it so the
-    // test doesn't actually exit, and assert it was triggered.
+    // Discovery mode replaces the old exit(1): the server starts and registers
+    // the full surface so directories can enumerate tools without credentials.
     const exit = vi.spyOn(process, "exit").mockImplementation((() => {
       throw new Error("exit");
     }) as never);
 
-    await expect(startStdio()).rejects.toThrow("exit");
-    expect(exit).toHaveBeenCalledWith(1);
+    await expect(startStdio()).resolves.toBeUndefined();
+    expect(exit).not.toHaveBeenCalled();
+    expect(serveStdio).toHaveBeenCalledTimes(1);
     exit.mockRestore();
   });
 });

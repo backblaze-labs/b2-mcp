@@ -91,6 +91,44 @@ async function fetchStdioCapabilities(
   }
 }
 
+const DISCOVERY_MODE_CREDENTIAL = "b2-mcp-discovery-mode";
+
+/**
+ * Enter credential-less stdio discovery mode when no B2 application key is set.
+ *
+ * @remarks
+ * `configFromMaterial` throws `missing_credentials` unless both
+ * `B2_APPLICATION_KEY_ID` and `B2_APPLICATION_KEY` are present, which made the
+ * stdio bootstrap exit before answering `tools/list`. Registry/directory
+ * services (mcp.so, Glama, LobeHub) spawn the server with no credentials just to
+ * enumerate tools, so instead of exiting we inject placeholder credentials,
+ * register the full surface (`B2_REGISTER_ALL_TOOLS`), and turn the secret sink
+ * off. The placeholder credentials are never used: `createServer` is told
+ * credentials are missing and short-circuits every tool call with a clear error.
+ *
+ * Discovery mode is entered only when **both** credential variables are absent.
+ * A partial or mistyped pair (exactly one set) is left untouched so it still
+ * fails fast as invalid, rather than overwriting the configured half and
+ * starting an unusable server.
+ *
+ * @param env - Environment record to inspect and mutate; defaults to
+ * `process.env`.
+ *
+ * @returns `true` when discovery mode was entered, otherwise `false`.
+ */
+function enterStdioDiscoveryModeIfNeeded(env: NodeJS.ProcessEnv = process.env): boolean {
+  if (env.B2_APPLICATION_KEY_ID || env.B2_APPLICATION_KEY) return false;
+  env.B2_APPLICATION_KEY_ID = DISCOVERY_MODE_CREDENTIAL;
+  env.B2_APPLICATION_KEY = DISCOVERY_MODE_CREDENTIAL;
+  // Force the secret sink off unconditionally: an explicit `file` value would
+  // make loadConfig preflight/create the sink file (and can fail before
+  // tools/list), and `inline` emits an unrelated durable-secret warning. Either
+  // contradicts the discovery-mode guarantee that the sink is off.
+  env.B2_SECRET_SINK = "off";
+  env.B2_REGISTER_ALL_TOOLS = "true";
+  return true;
+}
+
 /**
  * Start the MCP server over stdio.
  *
@@ -100,6 +138,8 @@ async function fetchStdioCapabilities(
  * deadline (10s by default). A local deadline expiry starts with an empty
  * fail-closed capability set; a returned transient upstream outage degrades to
  * the full tool surface. Other credential errors remain fatal during bootstrap.
+ * When no application key is present, the bootstrap starts a credential-less
+ * discovery server instead of exiting.
  *
  * @returns A promise that resolves after the stdio transport has been
  * registered with the MCP SDK.
@@ -114,6 +154,7 @@ async function fetchStdioCapabilities(
  */
 export async function startStdio(): Promise<void> {
   initLogging();
+  const discoveryMode = enterStdioDiscoveryModeIfNeeded();
   const config = serverModule.loadConfig();
   const capabilityTimeoutMs = stdioCapabilityFetchTimeoutMs();
   let capabilities: string[] | null;
@@ -122,6 +163,9 @@ export async function startStdio(): Promise<void> {
     { transport: "stdio", timeoutMs: capabilityTimeoutMs },
     "capability.fetch.stdio_starting",
   );
+  if (discoveryMode) {
+    logger.warn({ transport: "stdio", reason: "no_credentials" }, "server.stdio_discovery_mode");
+  }
   flushLogsSync();
   try {
     capabilities = await fetchStdioCapabilities(config, capabilityTimeoutMs);
@@ -152,6 +196,9 @@ export async function startStdio(): Promise<void> {
     } else {
       throw err;
     }
+  }
+  if (discoveryMode) {
+    createServerOptions = { ...createServerOptions, credentialsMissing: true };
   }
   stdioTransport.serveStdio(
     () =>

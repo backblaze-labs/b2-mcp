@@ -29,7 +29,11 @@ const credentialEnvKeys = [
 ] as const;
 
 const transportEnvKeys = ["B2_MCP_TRANSPORT"] as const;
-const bootstrapEnvKeys = ["B2_STDIO_CAPABILITY_TIMEOUT_MS"] as const;
+const bootstrapEnvKeys = [
+  "B2_STDIO_CAPABILITY_TIMEOUT_MS",
+  "B2_REGISTER_ALL_TOOLS",
+  "B2_SECRET_SINK",
+] as const;
 const executableEnvKeys = [...credentialEnvKeys, ...transportEnvKeys, ...bootstrapEnvKeys] as const;
 const { startStdio } = packageRoot;
 
@@ -102,6 +106,10 @@ describe("stdio entry point", () => {
     savedEnv = Object.fromEntries(
       [...credentialEnvKeys, ...bootstrapEnvKeys].map((key) => [key, process.env[key]]),
     );
+    // Default to the credentialed path; discovery-mode cases delete these.
+    process.env.B2_APPLICATION_KEY_ID = "test-key-id";
+    process.env.B2_APPLICATION_KEY = "test-key-secret";
+    delete process.env.B2_REGISTER_ALL_TOOLS;
   });
 
   afterEach(() => {
@@ -136,6 +144,91 @@ describe("stdio entry point", () => {
     options?.onerror(new Error("stdio failed"));
     expect(createServer).toHaveBeenCalledWith(config, ["listBuckets"]);
     expect(warn).toHaveBeenCalledWith({ err: "stdio failed" }, "mcp.stdio.error");
+  });
+
+  it("enters credential-less discovery mode and enumerates the full surface", async () => {
+    delete process.env.B2_APPLICATION_KEY_ID;
+    delete process.env.B2_APPLICATION_KEY;
+    const config = testConfig();
+    const server = { close: vi.fn(async () => undefined) };
+    const createServer = vi.spyOn(serverModule, "createServer").mockReturnValue(server as never);
+    vi.spyOn(serverModule, "loadConfig").mockReturnValue(config);
+    // B2_REGISTER_ALL_TOOLS=true makes the real fetchCapabilities resolve null;
+    // the mock stands in for that full-surface result.
+    const fetchCapabilities = vi.spyOn(serverModule, "fetchCapabilities").mockResolvedValue(null);
+    const serveStdio = vi
+      .mocked(stdioTransport.serveStdio)
+      .mockImplementation(
+        () =>
+          ({ close: vi.fn(async () => undefined) }) as ReturnType<typeof stdioTransport.serveStdio>,
+      );
+    const warn = vi.spyOn(loggerModule.logger, "warn").mockImplementation(() => undefined);
+
+    await startStdio();
+    (serveStdio.mock.calls[0]?.[0] as (() => unknown) | undefined)?.();
+
+    expect(process.env.B2_APPLICATION_KEY_ID).toBe("b2-mcp-discovery-mode");
+    expect(process.env.B2_APPLICATION_KEY).toBe("b2-mcp-discovery-mode");
+    expect(process.env.B2_REGISTER_ALL_TOOLS).toBe("true");
+    expect(process.env.B2_SECRET_SINK).toBe("off");
+    expect(fetchCapabilities).toHaveBeenCalled();
+    expect(createServer).toHaveBeenCalledWith(config, null, { credentialsMissing: true });
+    expect(warn).toHaveBeenCalledWith(
+      { transport: "stdio", reason: "no_credentials" },
+      "server.stdio_discovery_mode",
+    );
+  });
+
+  it("does not enter discovery mode when credentials are present", async () => {
+    process.env.B2_APPLICATION_KEY_ID = "test-key-id";
+    process.env.B2_APPLICATION_KEY = "test-key-secret";
+    const config = testConfig();
+    const server = { close: vi.fn(async () => undefined) };
+    const createServer = vi.spyOn(serverModule, "createServer").mockReturnValue(server as never);
+    vi.spyOn(serverModule, "loadConfig").mockReturnValue(config);
+    vi.spyOn(serverModule, "fetchCapabilities").mockResolvedValue(["listBuckets"]);
+    const serveStdio = vi
+      .mocked(stdioTransport.serveStdio)
+      .mockImplementation(
+        () =>
+          ({ close: vi.fn(async () => undefined) }) as ReturnType<typeof stdioTransport.serveStdio>,
+      );
+
+    await startStdio();
+    (serveStdio.mock.calls[0]?.[0] as (() => unknown) | undefined)?.();
+
+    expect(process.env.B2_APPLICATION_KEY_ID).toBe("test-key-id");
+    expect(createServer).toHaveBeenCalledWith(config, ["listBuckets"]);
+    expect(createServer).not.toHaveBeenCalledWith(config, expect.anything(), {
+      credentialsMissing: true,
+    });
+  });
+
+  it("does not enter discovery mode with a partial credential pair", async () => {
+    // Only the key id is set: a partial/mistyped pair must still fail fast as
+    // invalid instead of overwriting the configured half and starting an unusable
+    // discovery server.
+    process.env.B2_APPLICATION_KEY_ID = "test-key-id";
+    delete process.env.B2_APPLICATION_KEY;
+    const config = testConfig();
+    const server = { close: vi.fn(async () => undefined) };
+    const createServer = vi.spyOn(serverModule, "createServer").mockReturnValue(server as never);
+    vi.spyOn(serverModule, "loadConfig").mockReturnValue(config);
+    vi.spyOn(serverModule, "fetchCapabilities").mockResolvedValue(["listBuckets"]);
+    vi.mocked(stdioTransport.serveStdio).mockImplementation(
+      () =>
+        ({ close: vi.fn(async () => undefined) }) as ReturnType<typeof stdioTransport.serveStdio>,
+    );
+
+    await startStdio();
+
+    // The configured half is left untouched (never overwritten with the
+    // placeholder) and discovery mode is not activated.
+    expect(process.env.B2_APPLICATION_KEY_ID).toBe("test-key-id");
+    expect(process.env.B2_APPLICATION_KEY).toBeUndefined();
+    expect(createServer).not.toHaveBeenCalledWith(config, expect.anything(), {
+      credentialsMissing: true,
+    });
   });
 
   it("falls back to the full stdio surface when capability lookup is unavailable", async () => {
@@ -234,17 +327,24 @@ describe("stdio entry point", () => {
     expect(stdioTransport.serveStdio).not.toHaveBeenCalled();
   });
 
-  it("writes the missing-credential message and exits non-zero", async () => {
+  it("starts in discovery mode instead of exiting when credentials are missing", async () => {
     for (const key of credentialEnvKeys) delete process.env[key];
-    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-    vi.spyOn(process, "exit").mockImplementation(((code) => {
+    const exit = vi.spyOn(process, "exit").mockImplementation(((code) => {
       throw Object.assign(new Error(`process.exit(${code})`), { exitCode: code });
     }) as typeof process.exit);
-
-    await expect(startStdio()).rejects.toMatchObject({ exitCode: 1 });
-    expect(stderr).toHaveBeenCalledWith(
-      "b2-mcp: B2_APPLICATION_KEY_ID and B2_APPLICATION_KEY are required for stdio\n",
+    const config = testConfig();
+    vi.spyOn(serverModule, "createServer").mockReturnValue({
+      close: vi.fn(async () => undefined),
+    } as never);
+    vi.spyOn(serverModule, "loadConfig").mockReturnValue(config);
+    vi.spyOn(serverModule, "fetchCapabilities").mockResolvedValue(null);
+    vi.mocked(stdioTransport.serveStdio).mockImplementation(
+      () =>
+        ({ close: vi.fn(async () => undefined) }) as ReturnType<typeof stdioTransport.serveStdio>,
     );
+
+    await expect(startStdio()).resolves.toBeUndefined();
+    expect(exit).not.toHaveBeenCalled();
   });
 });
 
@@ -376,12 +476,28 @@ describe("executable CLI entry point", () => {
     expect(result.stderr).toContain("Usage: b2-mcp");
   });
 
-  it("selects stdio by default and reports missing credentials with exit code 1", () => {
-    const result = runEntrypoint([]);
+  it("starts the stdio server in discovery mode when credentials are missing", () => {
+    // Empty stdin makes the MCP stdio transport close promptly on EOF instead of
+    // blocking; the discovery warning is flushed synchronously at startup.
+    const result = spawnSync(tsxBin, ["src/index.ts"], {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      env: executableEnv({}),
+      input: "",
+      timeout: 10_000,
+    });
 
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain(
-      "b2-mcp: B2_APPLICATION_KEY_ID and B2_APPLICATION_KEY are required for stdio",
+    // No longer exits with the missing-credential fatal (previously status 1);
+    // the server starts in discovery mode and closes cleanly on stdin EOF. Assert
+    // an exact clean exit so a timeout (status null + error set) or any alternate
+    // startup crash cannot pass. The discovery warning itself is asserted in the
+    // mocked stdio-entry test above.
+    expect(result.error).toBeUndefined();
+    expect(result.signal).toBeNull();
+    expect(result.status).toBe(0);
+    const output = `${result.stdout}${result.stderr}`;
+    expect(output).not.toContain(
+      "B2_APPLICATION_KEY_ID and B2_APPLICATION_KEY are required for stdio",
     );
   });
 

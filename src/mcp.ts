@@ -29,6 +29,22 @@ export type McpServer = V2McpServer;
  */
 export type ToolCallback<TArgs = any> = (args: TArgs, extra: any) => any | Promise<any>;
 
+/**
+ * Registration controls for durable-secret-producing tool registrars.
+ *
+ * @remarks
+ * Durable-secret tools (`b2_create_key`, `b2_create_group_member`,
+ * `b2_reserve_trial_create_account`) register their full input schema only when
+ * an out-of-band secret sink is active. Credential-less discovery mode sets
+ * `registerDurableSecretSchemas` so those schemas are advertised in `tools/list`
+ * regardless of sink availability; execution is rejected by the discovery guard,
+ * so the real handlers never run.
+ */
+export interface DurableSecretRegistrationOptions {
+  /** Advertise the full durable-secret schemas even without an active sink. */
+  registerDurableSecretSchemas?: boolean;
+}
+
 /** Metadata used when registering a tool through {@link ToolRegistrar}. */
 export interface ToolRegistrationConfig {
   /** Optional human-readable title exposed to MCP clients. */
