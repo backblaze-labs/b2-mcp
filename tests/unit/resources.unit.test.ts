@@ -807,7 +807,7 @@ describe("MCP control-plane resources", () => {
   it("keeps non-secret server config visible in credential-less discovery mode", async () => {
     const { client, fake, close } = await connectResourceClient({
       capabilities: null,
-      serverOptions: { credentialsMissing: true },
+      serverOptions: { credentialsUnavailable: true },
     });
 
     try {

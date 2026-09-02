@@ -192,7 +192,7 @@ export async function startStdio(): Promise<void> {
       );
       capabilities = null;
     } else if (err instanceof CredentialResolutionError && err.code === "capability_auth_failed") {
-      logger.warn(
+      logger.error(
         {
           code: err.code,
           reason: "auth_failed",
@@ -200,13 +200,13 @@ export async function startStdio(): Promise<void> {
         "capability.fetch.stdio_discovery_mode",
       );
       capabilities = null;
-      createServerOptions = { ...createServerOptions, credentialsMissing: true };
+      createServerOptions = { ...createServerOptions, credentialsUnavailable: true };
     } else {
       throw err;
     }
   }
   if (discoveryMode) {
-    createServerOptions = { ...createServerOptions, credentialsMissing: true };
+    createServerOptions = { ...createServerOptions, credentialsUnavailable: true };
   }
   stdioTransport.serveStdio(
     () =>

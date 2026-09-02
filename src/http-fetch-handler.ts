@@ -38,9 +38,9 @@ import {
   type CredentialResolution,
   CredentialResolutionError,
   credentialFingerprint,
-  discoveryCredentialResolution,
   getHttpCredentialProvider,
   hasCredentialHeaders,
+  httpDiscoveryCredentialResolution,
   type SecretBroker,
   validateHttpCredentialConfiguration,
 } from "./credentials.js";
@@ -55,6 +55,7 @@ const MODERN_MCP_PROTOCOL_VERSION = "2026-07-28";
 const JSON_RPC_CREDENTIAL_RESOLUTION_FAILED = -32001;
 const JSON_RPC_HEADER_BODY_MISMATCH = -32020;
 const LOCALHOST_NAMES = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+const DISCOVERY_LIMIT_KEY = "http-discovery:credential-unavailable";
 
 const SDK_HEADER_ALLOWLIST = new Set([
   "accept",
@@ -104,7 +105,7 @@ export interface PreparedMcpRequest {
   /** Capability set for this credential, or `null` for full-surface mode. */
   capabilities: string[] | null;
   /** Whether tool execution must be short-circuited with missing_credentials. */
-  credentialsMissing?: boolean;
+  credentialsUnavailable?: boolean;
   /** MCP server instances created during this request. */
   servers: Set<ReturnType<typeof createMcpServerDefinition>>;
   /** Verified MCP auth info supplied by OAuth or hosting middleware. */
@@ -237,8 +238,8 @@ export function createPreparedMcpServerFactory(
     }
     const b2OauthScopes = prepared.authInfo?.scopes?.filter((scope) => scope.startsWith("b2:"));
     const server = createServerForRequest(prepared.resolved.config, prepared.capabilities, {
-      ...(prepared.credentialsMissing
-        ? { credentialsMissing: true }
+      ...(prepared.credentialsUnavailable
+        ? { credentialsUnavailable: true }
         : prepared.authInfo
           ? { oauthScopes: b2OauthScopes ?? [] }
           : {}),
@@ -484,6 +485,30 @@ function logCredentialResolutionFailure(
   );
 }
 
+function logCredentialDiscoveryMode(
+  provider: CredentialProvider,
+  request: Request,
+  authInfo: AuthInfo | null | undefined,
+  err: unknown,
+  method: string | undefined,
+): void {
+  const status = err instanceof CredentialResolutionError ? err.status : 500;
+  const code = err instanceof CredentialResolutionError ? err.code : "credential_unavailable";
+  const principal = authPrincipalLabel(authInfo);
+  logger.info(
+    {
+      provider: provider.name,
+      status,
+      code,
+      method: request.method,
+      mcpMethod: method,
+      path: new URL(request.url).pathname,
+      ...(principal && { principal }),
+    },
+    "credential.discovery_mode",
+  );
+}
+
 type ParsedJsonBody = { ok: true; body?: unknown } | { ok: false };
 
 function parsedJsonBody(rawBody: string | undefined): ParsedJsonBody {
@@ -517,7 +542,7 @@ function toolNameFromParsedBody(body: unknown): string | undefined {
   return typeof name === "string" ? name : undefined;
 }
 
-function isCredentialFreeMcpMethod(method: string | undefined): boolean {
+function mayDispatchToDiscoveryServer(method: string | undefined): boolean {
   return (
     method === "initialize" ||
     method === "server/discover" ||
@@ -526,12 +551,23 @@ function isCredentialFreeMcpMethod(method: string | undefined): boolean {
   );
 }
 
-function isMissingCredentialResolution(err: unknown): boolean {
-  return err instanceof CredentialResolutionError && err.code === "missing_credentials";
+function isCredentialUnavailableForDiscovery(err: unknown): boolean {
+  return (
+    err instanceof CredentialResolutionError &&
+    (err.code === "missing_credentials" ||
+      err.code === "missing_auth_info" ||
+      err.code === "missing_principal" ||
+      err.code === "principal_not_mapped" ||
+      err.code === "credential_ref_not_found")
+  );
 }
 
 function isCapabilityAuthFailure(err: unknown): boolean {
   return err instanceof CredentialResolutionError && err.code === "capability_auth_failed";
+}
+
+function canDowngradeCapabilityAuthFailure(provider: CredentialProvider): boolean {
+  return provider.name === "http-headers";
 }
 
 function jsonRpcErrorBody(
@@ -983,7 +1019,50 @@ export function createB2McpFetchHandler(options: HttpPipelineOptions = {}): B2Mc
         method === "POST" ? parsedJsonBody(rawBody) : ({ ok: true, body: undefined } as const);
       const protocolPreflight = classifyProtocolPreflight(request, sanitizedHeaders, parsedBody);
       const bodyMethod = parsedBody.ok ? requestMethodFromParsedBody(parsedBody.body) : undefined;
-      const canUseCredentialFreeServer = isCredentialFreeMcpMethod(bodyMethod);
+      const canUseDiscoveryServer = mayDispatchToDiscoveryServer(bodyMethod);
+      async function dispatchDiscoveryMode(
+        discoveryResolved: CredentialResolution,
+      ): Promise<Response> {
+        const discoveryLimitKey = discoveryResolved.cacheKey;
+        const fromLimitKey = limitKey ?? initialLimitKey;
+        const discoveryPermit = inFlight.rekey(fromLimitKey, discoveryLimitKey);
+        if (!discoveryPermit.ok) {
+          return responseWithCleanup(
+            jsonResponse(
+              discoveryPermit.status,
+              { error: discoveryPermit.error },
+              { "Retry-After": "1" },
+            ),
+            () => finalize(limitKey, prepared),
+          );
+        }
+        limitKey = discoveryLimitKey;
+
+        const discoveryRateKey = deriveRateKey(discoveryLimitKey);
+        if (!allowRequest(discoveryRateKey)) {
+          return responseWithCleanup(
+            jsonResponse(429, { error: "Rate limit exceeded" }, { "Retry-After": "1" }),
+            () => finalize(limitKey, prepared),
+          );
+        }
+
+        prepared = {
+          resolved: discoveryResolved,
+          capabilities: null,
+          credentialsUnavailable: true,
+          servers: new Set(),
+          ...(authInfo && { authInfo }),
+        };
+        const response = await preparedRequestScope.run(prepared, () =>
+          dispatchToMcp(
+            request,
+            rawBody ?? undefined,
+            authInfo,
+            protocolPreflight.sdkHeaders ?? sanitizedHeaders,
+          ),
+        );
+        return responseWithCleanup(response, () => finalize(limitKey, prepared));
+      }
       if (protocolPreflight.rejection) {
         logProtocolRejection(request, protocolPreflight.rejection);
         return responseWithCleanup(
@@ -1015,25 +1094,11 @@ export function createB2McpFetchHandler(options: HttpPipelineOptions = {}): B2Mc
       try {
         resolved = credentialProvider.resolve({ req: credentialRequest });
       } catch (err) {
-        logCredentialResolutionFailure(credentialProvider, request, authInfo, err);
-        if (canUseCredentialFreeServer && isMissingCredentialResolution(err)) {
-          prepared = {
-            resolved: discoveryCredentialResolution("http", limitKey ?? initialLimitKey),
-            capabilities: null,
-            credentialsMissing: true,
-            servers: new Set(),
-            ...(authInfo && { authInfo }),
-          };
-          const response = await preparedRequestScope.run(prepared, () =>
-            dispatchToMcp(
-              request,
-              rawBody,
-              authInfo,
-              protocolPreflight.sdkHeaders ?? sanitizedHeaders,
-            ),
-          );
-          return responseWithCleanup(response, () => finalize(limitKey, prepared));
+        if (canUseDiscoveryServer && isCredentialUnavailableForDiscovery(err)) {
+          logCredentialDiscoveryMode(credentialProvider, request, authInfo, err, bodyMethod);
+          return dispatchDiscoveryMode(httpDiscoveryCredentialResolution(DISCOVERY_LIMIT_KEY));
         }
+        logCredentialResolutionFailure(credentialProvider, request, authInfo, err);
         return responseWithCleanup(credentialErrorResponse(err, protocolPreflight.credError), () =>
           finalize(limitKey, prepared),
         );
@@ -1068,23 +1133,13 @@ export function createB2McpFetchHandler(options: HttpPipelineOptions = {}): B2Mc
           resolved.cacheKey,
         );
       } catch (err) {
-        if (canUseCredentialFreeServer && isCapabilityAuthFailure(err)) {
-          prepared = {
-            resolved,
-            capabilities: null,
-            credentialsMissing: true,
-            servers: new Set(),
-            ...(authInfo && { authInfo }),
-          };
-          const response = await preparedRequestScope.run(prepared, () =>
-            dispatchToMcp(
-              request,
-              rawBody,
-              authInfo,
-              protocolPreflight.sdkHeaders ?? sanitizedHeaders,
-            ),
-          );
-          return responseWithCleanup(response, () => finalize(limitKey, prepared));
+        if (
+          canUseDiscoveryServer &&
+          isCapabilityAuthFailure(err) &&
+          canDowngradeCapabilityAuthFailure(credentialProvider)
+        ) {
+          logCredentialDiscoveryMode(credentialProvider, request, authInfo, err, bodyMethod);
+          return dispatchDiscoveryMode(httpDiscoveryCredentialResolution(DISCOVERY_LIMIT_KEY));
         }
         return responseWithCleanup(credentialErrorResponse(err, protocolPreflight.credError), () =>
           finalize(limitKey, prepared),

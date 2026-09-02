@@ -358,21 +358,19 @@ function httpConfigOptions(): ConfigOptions {
 }
 
 /**
- * Build a non-secret placeholder credential resolution for MCP discovery.
+ * Build a non-secret placeholder credential resolution for HTTP MCP discovery.
  *
  * @remarks
  * Directory scanners and MCP inspectors need to initialize and enumerate tools
  * before a user supplies real B2 credentials. The placeholder credential is
  * never sent to B2: callers must pass the returned config to `createServer`
- * with `credentialsMissing: true`, which short-circuits all tool execution.
+ * with `credentialsUnavailable: true`, which short-circuits all tool execution.
  *
- * @param transport - Transport whose runtime defaults should be resolved.
  * @param cacheKey - Non-secret caller key used for request cleanup/rate scopes.
  *
- * @returns Credential resolution suitable for discovery-mode server creation.
+ * @returns Credential resolution suitable for HTTP discovery-mode server creation.
  */
-export function discoveryCredentialResolution(
-  transport: "stdio" | "http",
+export function httpDiscoveryCredentialResolution(
   cacheKey = `credential:${DISCOVERY_MODE_CREDENTIAL}`,
 ): CredentialResolution {
   const config = configFromMaterial(
@@ -380,20 +378,13 @@ export function discoveryCredentialResolution(
       applicationKeyId: DISCOVERY_MODE_CREDENTIAL,
       applicationKey: DISCOVERY_MODE_CREDENTIAL,
     },
-    transport === "stdio"
-      ? {
-          transport,
-          allowLocalFiles: process.env.B2_ALLOW_LOCAL_FILES !== "false",
-          fileRoot: process.env.B2_FILE_ROOT ?? null,
-          strictOptionalPairs: false,
-        }
-      : httpConfigOptions(),
+    httpConfigOptions(),
   );
   config.callerFingerprint = callerFingerprintForConfig(config, cacheKey);
   return {
     config,
     cacheKey,
-    capabilityCacheKey: `discovery:${credentialFingerprint([transport, cacheKey].join("\0"))}`,
+    capabilityCacheKey: `discovery:${credentialFingerprint(["http", cacheKey].join("\0"))}`,
   };
 }
 

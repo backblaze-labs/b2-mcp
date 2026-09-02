@@ -43,14 +43,20 @@ Glama build tests, LobeHub `plugin init`, MCP Inspector) need `initialize` and
 default: no credentials, or placeholder credentials that B2 rejects, enter
 credential-free discovery mode.
 
-Discovery mode advertises the full 40-tool surface, including the real
-durable-secret schemas for `b2_create_key`, `b2_create_group_member`, and
-`b2_reserve_trial_create_account`. Every `tools/call` returns a structured
-`missing_credentials` error until the caller supplies valid B2 credentials.
+Discovery mode advertises the full 40-tool surface for schema scanners. It
+registers the durable-secret input schemas so registries can see the real
+arguments, but every `tools/call` returns a structured `missing_credentials`
+error until the caller supplies valid B2 credentials. Credentialed deployments
+without an enabled secret sink still advertise the durable-secret tools as
+non-secret unavailable stubs, as documented in the README.
 
 Do not force `B2_REGISTER_ALL_TOOLS` for scanner compatibility. It remains an
 operator/test escape hatch that bypasses capability-aware registration for real
 credentialed deployments.
+
+During a rolling deploy, old replicas may still return the previous HTTP
+credential error for credential-free scanner requests until every replica has
+the discovery-mode behavior.
 
 ## Glama
 
@@ -59,9 +65,12 @@ credentialed deployments.
    maintainer account. Then merge community forks into the official entry.
 2. **Release** (containerized build → security scan → one-click deploy → A
    grade): on `https://glama.ai/mcp/servers/backblaze-labs/b2-mcp/admin/dockerfile`,
-   point Glama at the repo `Dockerfile` (HTTP transport, port `3000`,
-   `/health`), declare the env schema below, **Deploy** to run the build test,
-   then **Make Release** with the version and a short changelog.
+   point Glama at the repo `Dockerfile`, use the plain image command
+   `node dist/index.js` (the image sets `B2_MCP_TRANSPORT=http` and
+   `PORT=3000`), set the health check to `/health`, declare the env schema
+   below, and keep scanner `placeholderArguments` as `{}`. If Glama requires an
+   explicit listen host, add `B2_HTTP_HOST=0.0.0.0`. Then **Deploy** to run the
+   build test and **Make Release** with the version and a short changelog.
 
 Env schema for the Glama deploy form:
 

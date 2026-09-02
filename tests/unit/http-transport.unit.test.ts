@@ -25,7 +25,11 @@ import {
   invalidateCapabilityCache,
 } from "../../src/server";
 import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
-import { CredentialProvider, CredentialResolutionError } from "../../src/credentials";
+import {
+  CredentialProvider,
+  CredentialResolutionError,
+  DISCOVERY_MODE_CREDENTIAL,
+} from "../../src/credentials";
 import { logger } from "../../src/utils/logger";
 import {
   JSON_HEADERS,
@@ -281,12 +285,25 @@ async function replaceHandle(
 
 describe("HTTP transport handler", () => {
   it("serves modern discovery without credentials and gates tool calls", async () => {
+    const infoSpy = vi.spyOn(logger, "info").mockImplementation(() => undefined as never);
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined as never);
     const res = await request(port, "POST", "/mcp", {
       headers: modernHeaders("tools/list"),
       body: LIST_TOOLS,
     });
     expect(res.status).toBe(200);
     expect(JSON.parse(res.body).result.tools.length).toBeGreaterThan(0);
+    expect(warnSpy.mock.calls.some(([, event]) => event === "credential.resolve.failed")).toBe(
+      false,
+    );
+    expect(infoSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "http-headers",
+        code: "missing_credentials",
+        mcpMethod: "tools/list",
+      }),
+      "credential.discovery_mode",
+    );
 
     const call = await request(port, "POST", "/mcp", {
       headers: modernHeaders("tools/call", "s3_head_bucket"),
@@ -296,6 +313,31 @@ describe("HTTP transport handler", () => {
     expect(call.status).toBe(200);
     expect(callResult.isError).toBe(true);
     expect(JSON.stringify(callResult)).toContain("missing_credentials");
+  });
+
+  it("sanitizes discovery-mode tools/call audit fields", async () => {
+    const infoSpy = vi.spyOn(logger, "info").mockImplementation(() => undefined as never);
+    const leakedName = "B2_APPLICATION_KEY=leaked-secret-or-oversized";
+    const leakedKey = "B2_MASTER_KEY=leaked-secret";
+    const res = await request(port, "POST", "/mcp", {
+      headers: modernHeaders("tools/call", leakedName),
+      body: callToolBody(leakedName, { [leakedKey]: "x" }),
+    });
+
+    const callResult = JSON.parse(res.body).result;
+    expect(res.status).toBe(200);
+    expect(callResult.isError).toBe(true);
+    const callLog = infoSpy.mock.calls.find(([, event]) => event === "tool.call")?.[0] as
+      | Record<string, unknown>
+      | undefined;
+    expect(callLog).toMatchObject({
+      tool: "unknown_tool",
+      argKeyCount: 1,
+      code: "missing_credentials",
+    });
+    expect(callLog).not.toHaveProperty("argKeys");
+    expect(JSON.stringify(infoSpy.mock.calls)).not.toContain(leakedName);
+    expect(JSON.stringify(infoSpy.mock.calls)).not.toContain(leakedKey);
   });
 
   it("returns 200 on /health when default header mode needs no static B2 env", async () => {
@@ -411,6 +453,39 @@ describe("HTTP transport handler", () => {
     });
     expect(missing.status).toBe(200);
     expect(JSON.parse(missing.body).result.tools.length).toBeGreaterThan(0);
+  });
+
+  it("uses a neutral discovery credential after rejected header credentials", async () => {
+    const seenKeyIds: string[] = [];
+    const fetchCapabilities = vi.fn(async () => {
+      throw new CredentialResolutionError(
+        "Credential or capability resolution failed",
+        401,
+        "capability_auth_failed",
+      );
+    });
+    await replaceHandle(undefined, {
+      fetchCapabilities,
+      createServer: (config, capabilities, options) => {
+        seenKeyIds.push(config.applicationKeyId);
+        return createServer(config, capabilities, options);
+      },
+    });
+
+    for (let i = 0; i < 3; i++) {
+      const res = await request(port, "POST", "/mcp", {
+        headers: {
+          "x-b2-key-id": `invalid-${i}`,
+          "x-b2-key": `invalid-secret-${i}`,
+          ...modernHeaders("tools/list"),
+        },
+        body: LIST_TOOLS,
+      });
+      expect(res.status).toBe(200);
+    }
+
+    expect(fetchCapabilities).toHaveBeenCalledTimes(3);
+    expect(new Set(seenKeyIds)).toEqual(new Set([DISCOVERY_MODE_CREDENTIAL]));
   });
 
   it("keeps concurrent header credentials isolated through the shared handler", async () => {
@@ -1007,6 +1082,29 @@ describe("HTTP transport handler", () => {
     expect(ok.status).toBe(200);
   });
 
+  it("keeps rejected server-mode credentials observable", async () => {
+    process.env.B2_HTTP_CREDENTIAL_MODE = "server";
+    process.env.B2_APPLICATION_KEY_ID = "server-key";
+    process.env.B2_APPLICATION_KEY = "server-secret";
+    await replaceHandle(undefined, {
+      fetchCapabilities: vi.fn(async () => {
+        throw new CredentialResolutionError(
+          "Credential or capability resolution failed",
+          401,
+          "capability_auth_failed",
+        );
+      }),
+    });
+
+    const res = await request(port, "POST", "/mcp", {
+      headers: modernHeaders("tools/list"),
+      body: LIST_TOOLS,
+    });
+    const parsed = JSON.parse(res.body);
+    expect(res.status).toBe(401);
+    expect(parsed.error.data).toMatchObject({ code: "capability_auth_failed", status: 401 });
+  });
+
   it("server mode applies in-flight caps per verified principal", async () => {
     process.env.B2_HTTP_CREDENTIAL_MODE = "server";
     process.env.B2_APPLICATION_KEY_ID = "server-key";
@@ -1099,7 +1197,43 @@ describe("HTTP transport handler", () => {
     expect(ok.status).toBe(200);
   });
 
-  it("principal mode requires verified authInfo", async () => {
+  it("keeps rejected principal-mode credentials observable", async () => {
+    process.env.B2_HTTP_CREDENTIAL_MODE = "principal";
+    process.env.B2_PRINCIPAL_CREDENTIAL_MAP = JSON.stringify({ alice: "tenant_a" });
+    await replaceHandle(
+      () => ({
+        token: "verified-token",
+        clientId: "client-a",
+        scopes: ["b2:read"],
+        extra: { sub: "alice" },
+      }),
+      {
+        secretBroker: {
+          resolve: (ref) =>
+            ref === "tenant_a"
+              ? { applicationKeyId: "tenant-key", applicationKey: "tenant-secret" }
+              : null,
+        },
+        fetchCapabilities: vi.fn(async () => {
+          throw new CredentialResolutionError(
+            "Credential or capability resolution failed",
+            401,
+            "capability_auth_failed",
+          );
+        }),
+      },
+    );
+
+    const res = await request(port, "POST", "/mcp", {
+      headers: modernHeaders("tools/list"),
+      body: LIST_TOOLS,
+    });
+    const parsed = JSON.parse(res.body);
+    expect(res.status).toBe(401);
+    expect(parsed.error.data).toMatchObject({ code: "capability_auth_failed", status: 401 });
+  });
+
+  it("principal mode serves discovery when the B2 credential is not mapped", async () => {
     process.env.B2_HTTP_CREDENTIAL_MODE = "principal";
     process.env.B2_PRINCIPAL_CREDENTIAL_MAP = JSON.stringify({ alice: "tenant_a" });
     process.env.B2_CREDENTIAL_TENANT_A_APPLICATION_KEY_ID = "tenant-key";
@@ -1110,6 +1244,22 @@ describe("HTTP transport handler", () => {
       headers: modernHeaders("tools/list"),
       body: LIST_TOOLS,
     });
-    expect(missingAuth.status).toBe(401);
+    expect(missingAuth.status).toBe(200);
+    expect(JSON.parse(missingAuth.body).result.tools.length).toBeGreaterThan(0);
+
+    await replaceHandle(() => ({
+      token: "verified-token",
+      clientId: "client-b",
+      scopes: ["b2:read"],
+      extra: { sub: "bob" },
+    }));
+    const unmappedCall = await request(port, "POST", "/mcp", {
+      headers: modernHeaders("tools/call", "b2_list_buckets"),
+      body: callToolBody("b2_list_buckets"),
+    });
+    const callResult = JSON.parse(unmappedCall.body).result;
+    expect(unmappedCall.status).toBe(200);
+    expect(callResult.isError).toBe(true);
+    expect(JSON.stringify(callResult)).toContain("missing_credentials");
   });
 });

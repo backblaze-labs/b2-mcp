@@ -135,8 +135,10 @@ describe("HTTP handler (MCP 2026-07-28)", () => {
       const discover = client.getDiscoverResult() ?? (await client.discover());
       expect(discover.supportedVersions).toContain(MODERN_PROTOCOL_VERSION);
       expect(discover.cacheScope).toBe("private");
+      expect(discover.ttlMs).toBe(30_000);
 
       const listed = await client.listTools(undefined, { cacheMode: "refresh" });
+      expect(listed.ttlMs).toBe(30_000);
       const toolNames = listed.tools.map((tool) => tool.name);
       expect(toolNames).toContain("b2_list_buckets");
       expect(toolNames).toContain("s3_list_objects_v2");
@@ -495,7 +497,12 @@ describe("HTTP handler (MCP 2026-07-28)", () => {
     try {
       expect(client.getProtocolEra()).toBe("modern");
 
+      const discover = client.getDiscoverResult() ?? (await client.discover());
+      expect(discover.ttlMs).toBe(0);
+      expect(discover.cacheScope).toBe("private");
+
       const listed = await client.listTools(undefined, { cacheMode: "refresh" });
+      expect(listed.ttlMs).toBe(0);
       const toolNames = listed.tools.map((tool) => tool.name);
       expect(toolNames).toContain("b2_list_buckets");
       expect(toolNames).toContain("s3_head_bucket");
@@ -506,6 +513,39 @@ describe("HTTP handler (MCP 2026-07-28)", () => {
       expect(JSON.stringify(call)).not.toContain("validation");
     } finally {
       await closeClient(client);
+    }
+  });
+
+  it("does not reuse credential-free discovery cache for credentialed tools/list", async () => {
+    await replaceHandle({ fetchCapabilities: vi.fn(async () => ["listBuckets"]) });
+
+    const partition = "discovery-then-credentialed";
+    const anonymous = await connectHttpClient(port, {
+      era: "modern",
+      headers: {},
+      cachePartition: partition,
+    });
+    try {
+      const listed = await anonymous.client.listTools();
+      expect(listed.ttlMs).toBe(0);
+      expect(listed.tools.map((tool) => tool.name)).toContain("b2_create_bucket");
+    } finally {
+      await closeClient(anonymous.client);
+    }
+
+    const credentialed = await connectHttpClient(port, {
+      era: "modern",
+      headers: creds,
+      cachePartition: partition,
+    });
+    try {
+      const listed = await credentialed.client.listTools();
+      const toolNames = listed.tools.map((tool) => tool.name);
+      expect(listed.ttlMs).toBe(30_000);
+      expect(toolNames).toContain("b2_list_buckets");
+      expect(toolNames).not.toContain("b2_create_bucket");
+    } finally {
+      await closeClient(credentialed.client);
     }
   });
 
@@ -525,7 +565,11 @@ describe("HTTP handler (MCP 2026-07-28)", () => {
       cachePartition: "invalid-credential-discovery",
     });
     try {
+      const discover = client.getDiscoverResult() ?? (await client.discover());
+      expect(discover.ttlMs).toBe(0);
+
       const listed = await client.listTools(undefined, { cacheMode: "refresh" });
+      expect(listed.ttlMs).toBe(0);
       const toolNames = listed.tools.map((tool) => tool.name);
       expect(toolNames).toContain("b2_list_buckets");
       expect(toolNames).toContain("s3_head_bucket");

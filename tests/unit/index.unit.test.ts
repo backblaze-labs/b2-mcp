@@ -172,7 +172,7 @@ describe("stdio entry point", () => {
     expect(process.env.B2_REGISTER_ALL_TOOLS).toBe("true");
     expect(process.env.B2_SECRET_SINK).toBe("off");
     expect(fetchCapabilities).toHaveBeenCalled();
-    expect(createServer).toHaveBeenCalledWith(config, null, { credentialsMissing: true });
+    expect(createServer).toHaveBeenCalledWith(config, null, { credentialsUnavailable: true });
     expect(warn).toHaveBeenCalledWith(
       { transport: "stdio", reason: "no_credentials" },
       "server.stdio_discovery_mode",
@@ -200,7 +200,7 @@ describe("stdio entry point", () => {
     expect(process.env.B2_APPLICATION_KEY_ID).toBe("test-key-id");
     expect(createServer).toHaveBeenCalledWith(config, ["listBuckets"]);
     expect(createServer).not.toHaveBeenCalledWith(config, expect.anything(), {
-      credentialsMissing: true,
+      credentialsUnavailable: true,
     });
   });
 
@@ -227,7 +227,7 @@ describe("stdio entry point", () => {
     expect(process.env.B2_APPLICATION_KEY_ID).toBe("test-key-id");
     expect(process.env.B2_APPLICATION_KEY).toBeUndefined();
     expect(createServer).not.toHaveBeenCalledWith(config, expect.anything(), {
-      credentialsMissing: true,
+      credentialsUnavailable: true,
     });
   });
 
@@ -274,7 +274,7 @@ describe("stdio entry point", () => {
         "capability_auth_failed",
       ),
     );
-    const warn = vi.spyOn(loggerModule.logger, "warn").mockImplementation(() => undefined);
+    const error = vi.spyOn(loggerModule.logger, "error").mockImplementation(() => undefined);
     const serveStdio = vi.mocked(stdioTransport.serveStdio).mockImplementation(
       () =>
         ({
@@ -286,8 +286,8 @@ describe("stdio entry point", () => {
 
     const factory = serveStdio.mock.calls[0]?.[0] as (() => unknown) | undefined;
     expect(factory?.()).toBe(server);
-    expect(createServer).toHaveBeenCalledWith(config, null, { credentialsMissing: true });
-    expect(warn).toHaveBeenCalledWith(
+    expect(createServer).toHaveBeenCalledWith(config, null, { credentialsUnavailable: true });
+    expect(error).toHaveBeenCalledWith(
       { code: "capability_auth_failed", reason: "auth_failed" },
       "capability.fetch.stdio_discovery_mode",
     );

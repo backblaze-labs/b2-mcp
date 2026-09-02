@@ -9,13 +9,13 @@ function schemaKeys(server: ReturnType<typeof createServer>, name: string): stri
   return Object.keys(getRegisteredTools(server)?.[name]?.inputSchema?.shape ?? {});
 }
 
-// createServer(config, null, { credentialsMissing: true }) is the credential-less
+// createServer(config, null, { credentialsUnavailable: true }) is the credential-less
 // stdio discovery mode: the full tool surface is registered so directory services
 // can read tools/list, but every tool call short-circuits with a clear
 // missing_credentials error instead of attempting a doomed provider call.
 describe("credential-less discovery mode", () => {
   it("registers the full surface but refuses tool calls with missing_credentials", async () => {
-    const server = createServer(testConfig, null, { credentialsMissing: true });
+    const server = createServer(testConfig, null, { credentialsUnavailable: true });
 
     for (const name of ["b2_list_buckets", "s3_head_bucket", "b2_usage_growth"]) {
       const result = await callTool(server, name, {});
@@ -29,7 +29,7 @@ describe("credential-less discovery mode", () => {
 
   it("emits a tool.call audit event for the rejected attempt", async () => {
     const infoSpy = vi.spyOn(logger, "info").mockImplementation(() => undefined as never);
-    const server = createServer(testConfig, null, { credentialsMissing: true });
+    const server = createServer(testConfig, null, { credentialsUnavailable: true });
 
     await callTool(server, "b2_list_buckets", {});
 
@@ -48,7 +48,7 @@ describe("credential-less discovery mode", () => {
     // testConfig has no secret sink, so outside discovery mode these tools would
     // register confirm-only compatibility stubs. Discovery mode must decouple
     // schema advertisement from sink availability so registries learn real inputs.
-    const server = createServer(testConfig, null, { credentialsMissing: true });
+    const server = createServer(testConfig, null, { credentialsUnavailable: true });
 
     expect(schemaKeys(server, "b2_create_key")).toEqual(
       expect.arrayContaining(["keyName", "capabilities", "idempotencyKey"]),
@@ -62,7 +62,7 @@ describe("credential-less discovery mode", () => {
   });
 
   it("still refuses the durable-secret tools with missing_credentials", async () => {
-    const server = createServer(testConfig, null, { credentialsMissing: true });
+    const server = createServer(testConfig, null, { credentialsUnavailable: true });
 
     for (const name of [
       "b2_create_key",
@@ -84,7 +84,7 @@ describe("credential-less discovery mode", () => {
   });
 
   it("guards even the bootstrap authorize tool", async () => {
-    const server = createServer(testConfig, null, { credentialsMissing: true });
+    const server = createServer(testConfig, null, { credentialsUnavailable: true });
 
     const result = await callTool(server, "b2_authorize_account", {});
     expect(result.isError).toBe(true);
