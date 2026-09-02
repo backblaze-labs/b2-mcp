@@ -84,6 +84,12 @@ or pull request code. Record deployed commit, artifact digest, Node version,
 MCP revision, platform region/runtime, tool-contract hash, and result. A failed
 provider smoke downgrades that recipe's support claim until repaired.
 
+Rolling deploy note: MCP resources are an additive advertised capability.
+During a mixed-version stateless HTTP rollout, a client that initialized against
+a new replica can briefly send `resources/list` or `resources/read` to an old
+replica and receive method-not-found. Treat that as expected, bounded rollout
+skew; it self-heals once all replicas run the same version.
+
 The supported container operator runbook is
 [`deploy/customer-hosted/README.md`](../deploy/customer-hosted/README.md).
 Treat that README as the canonical source for build/run steps, secret injection,

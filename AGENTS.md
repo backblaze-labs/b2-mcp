@@ -107,6 +107,35 @@ Each register function receives the server + client(s) and calls `server.tool(na
 
 **Capability-aware registration.** When `createServer` is given a `capabilities` array (the entry points fetch it via `fetchCapabilities`), it wraps `server.tool` so only tools the key can use are registered — the surface auto-right-sizes to the credential (a read-only key drops every write/delete/admin tool; full ~9,719 tokens → read-only ~2,867). The map is `src/utils/tool-capabilities.ts` (any-of semantics; unmapped tools always register; Partner tools register only with a distinct master key). When `capabilities` is `null`/omitted — all unit tests, or `B2_REGISTER_ALL_TOOLS=true` — the full surface registers, so there's no behavior change. The key decides what's _possible_; the destructive gate decides what's _permitted_.
 
+### Resource registration flow
+
+`src/resources.ts` registers the read-only MCP resource surface after tools are
+committed, so `b2://capabilities` can report the active tool profile. Resources
+are JSON only:
+
+- `b2://server-config` - non-secret process configuration: transport,
+  credential mode, destructive policy, secret-sink mode, public URL, and server
+  version. It is intentionally not B2-capability-gated because it contains no
+  account identifiers or credential values and supports credential-less stdio
+  discovery.
+- `b2://capabilities` - the current credential capability set plus active tool
+  profile; omitted in credential-less discovery mode and reduced by OAuth scope
+  policy when OAuth is active.
+- `b2://bucket/{bucketName}` - capability/OAuth-gated on the same central
+  `isToolEnabled` / `isToolAllowedByOAuthScopes` policy as `b2_list_buckets`.
+  `resources/list` advertises at most the first 100 concrete bucket resources
+  because B2 has no bucket-list pagination; `resources/read` can still target a
+  known bucket name directly. Bucket reads include type/visibility, lifecycle,
+  Object Lock, retention, encryption, CORS, replication, and notification rules
+  when the caller is also allowed to use `b2_get_bucket_notification_rules`.
+
+Bucket notification rules use the same redaction helper as the bucket tools.
+Webhook URL host/path/query, HMAC signing secrets, and custom-header values are
+redacted before reaching the MCP response, and successful resource payloads pass
+through the central MCP-output sanitizer. Bucket resource reads are not given a
+client cache hint because visibility and notification targets are
+security-relevant after writes.
+
 ### Three backing categories, two client types
 
 The public tool surface is described by backing category, with availability

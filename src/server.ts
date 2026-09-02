@@ -74,6 +74,7 @@ import { registerKeyTools } from "./b2/keys.js";
 import { registerObjectLockTools } from "./b2/object-lock.js";
 import { registerPartnerTools } from "./b2/partner.js";
 import { registerInsightTools } from "./b2/insights.js";
+import { registerControlPlaneResources } from "./resources.js";
 
 import { registerS3BucketTools } from "./s3/buckets.js";
 import { registerS3ObjectTools } from "./s3/objects.js";
@@ -425,6 +426,11 @@ export function createServer(
   }
 
   const toolCount = registrar.commit();
+  registerControlPlaneResources(server, b2Client, config, capabilities, {
+    oauthScopes,
+    credentialsMissing: options.credentialsMissing,
+    failClosedUnknownCapabilities,
+  });
   logger.info({ toolCount, version: VERSION, outputFormat }, "server.ready");
 
   // Discovery mode: reject every tools/call ahead of the SDK's input-schema

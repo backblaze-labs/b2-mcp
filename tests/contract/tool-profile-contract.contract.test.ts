@@ -425,8 +425,14 @@ describe("MCP advertised capability contract", () => {
       expect(fixture.modern?.discover.ttlMs).toBe(contract.approvedCacheHint.ttlMs);
       expect(fixture.modern?.discover.cacheScope).toBe(contract.approvedCacheHint.cacheScope);
       expect(fixture.modern?.discover.supportedVersions).toEqual([contract.mcpRevision]);
-      expect(fixture.modern?.discover.capabilities).toEqual({ tools: { listChanged: true } });
-      expect(Object.keys(fixture.modern?.discover.capabilities ?? {}).sort()).toEqual(["tools"]);
+      expect(fixture.modern?.discover.capabilities).toEqual({
+        resources: { listChanged: true },
+        tools: { listChanged: true },
+      });
+      expect(Object.keys(fixture.modern?.discover.capabilities ?? {}).sort()).toEqual([
+        "resources",
+        "tools",
+      ]);
     },
   );
 
