@@ -628,7 +628,7 @@ describe("supply-chain audit policy", () => {
     );
     expect(packageJson.scripts["release:stamp"]).toBe("node scripts/write-release-version.mjs");
     expect(packageJson.scripts.version).toBe(
-      "node scripts/cut-changelog.mjs && node scripts/update-server-json-version.mjs && git add CHANGELOG.md server.json",
+      "node scripts/cut-changelog.mjs && node scripts/update-server-json-version.mjs && git add CHANGELOG.md server.json lhm.plugin.json mcpb/manifest.json",
     );
     expect(packageJson.mcpName).toBe("io.github.backblaze-labs/b2-mcp");
     expect(packageJson.scripts.prepublishOnly).toContain("pnpm run build");

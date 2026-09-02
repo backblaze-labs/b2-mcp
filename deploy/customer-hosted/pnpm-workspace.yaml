@@ -29,6 +29,10 @@ minimumReleaseAgeExclude:
   # Time-bounded SDK release-age exception documented in docs/SDK_ADOPTION_CONTRACT.md.
   - '@backblaze-labs/b2-sdk@0.4.0'
 overrides:
+  # Force the dev-only mcpb packer's interactive-editor path off vulnerable
+  # tmp 0.0.33 (GHSA path-traversal); mcpb pack never prompts, but the audit
+  # scans dev deps. external-editor is tmp's only consumer.
+  'external-editor>tmp': ^0.2.7
   '@istanbuljs/load-nyc-config>js-yaml': 3.15.1
   '@typescript-eslint/visitor-keys>eslint-visitor-keys': 4.2.1
   '@hono/node-server': 2.0.10

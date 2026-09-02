@@ -1,7 +1,8 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { spawnSync } from "child_process";
+import { parse as parseYaml } from "yaml";
 
 const root = join(__dirname, "../..");
 
@@ -97,7 +98,7 @@ function withFixture(run: (fixtureRoot: string) => void): void {
           name: "io.github.backblaze-labs/b2-mcp",
           title: "Backblaze B2 MCP Server",
           description:
-            "Operate Backblaze B2 buckets, files, keys, Object Lock, and S3-compatible storage.",
+            "Official Backblaze B2 MCP server for buckets, files, keys, Object Lock, and S3 storage.",
           websiteUrl: "https://github.com/backblaze-labs/b2-mcp#readme",
           repository: {
             url: "https://github.com/backblaze-labs/b2-mcp",
@@ -177,6 +178,39 @@ function withFixture(run: (fixtureRoot: string) => void): void {
     writeFileSync(
       join(fixtureRoot, "runtime-policy.json"),
       JSON.stringify({ engineRange: "^22.22.2 || ^24 || ^26" }, null, 2),
+    );
+    writeFileSync(
+      join(fixtureRoot, "lhm.plugin.json"),
+      `${JSON.stringify(
+        {
+          author: "Backblaze",
+          description: "Official Backblaze B2 MCP server.",
+          identifier: "backblaze-labs-b2-mcp",
+          name: "Backblaze B2 MCP Server",
+          tools: [],
+          version: "0.1.0",
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    mkdirSync(join(fixtureRoot, "mcpb"), { recursive: true });
+    writeFileSync(
+      join(fixtureRoot, "mcpb", "manifest.json"),
+      `${JSON.stringify(
+        {
+          manifest_version: "0.3",
+          name: "b2-mcp",
+          version: "0.1.0",
+          server: {
+            type: "node",
+            entry_point: "npx",
+            mcp_config: { command: "npx", args: ["-y", "@backblaze-labs/b2-mcp"] },
+          },
+        },
+        null,
+        2,
+      )}\n`,
     );
     run(fixtureRoot);
   } finally {
@@ -272,12 +306,21 @@ describe("release scripts", () => {
       });
 
       const serverJson = JSON.parse(readFileSync(join(fixtureRoot, "server.json"), "utf8"));
+      const lhm = JSON.parse(readFileSync(join(fixtureRoot, "lhm.plugin.json"), "utf8"));
+      const mcpb = JSON.parse(readFileSync(join(fixtureRoot, "mcpb", "manifest.json"), "utf8"));
       expect(result.status).toBe(0);
       expect(result.stdout).toContain(
         "server-json-version: updated io.github.backblaze-labs/b2-mcp@0.2.0",
       );
+      expect(result.stdout).toContain("lhm-plugin-version: updated backblaze-labs-b2-mcp@0.2.0");
+      expect(result.stdout).toContain("mcpb-manifest-version: updated b2-mcp@0.2.0");
       expect(serverJson.version).toBe("0.2.0");
       expect(serverJson.packages[0].version).toBe("0.2.0");
+      expect(lhm.version).toBe("0.2.0");
+      expect(mcpb.version).toBe("0.2.0");
+      expect(mcpb.manifest_version).toBe("0.3");
+      // The npx launcher is pinned to the exact release for a reproducible bundle.
+      expect(mcpb.server.mcp_config.args).toContain("@backblaze-labs/b2-mcp@0.2.0");
     });
   });
 
@@ -301,6 +344,183 @@ describe("release scripts", () => {
     expect(result.stdout).toContain(
       `mcp-registry-manifest: verified io.github.backblaze-labs/b2-mcp@${packageJson.version}`,
     );
+  });
+
+  it("keeps the checked-in lhm.plugin.json version in sync with package metadata", () => {
+    const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+    const lhm = JSON.parse(readFileSync(join(root, "lhm.plugin.json"), "utf8"));
+    expect(lhm.version).toBe(packageJson.version);
+  });
+
+  it("keeps the checked-in mcpb/manifest.json version in sync with package metadata", () => {
+    const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+    const mcpb = JSON.parse(readFileSync(join(root, "mcpb", "manifest.json"), "utf8"));
+    expect(mcpb.version).toBe(packageJson.version);
+    // The npx launcher must stay pinned to the exact release so the advertised
+    // MCPB bundle runs reproducible code, not whatever npm publishes later.
+    expect(mcpb.server.mcp_config.args).toContain(`@backblaze-labs/b2-mcp@${packageJson.version}`);
+  });
+
+  it("packs a valid .mcpb bundle with the pinned mcpb CLI", () => {
+    const packageVersion = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
+    const outFile = join(root, "dist-mcpb", "b2-mcp.mcpb");
+    rmSync(outFile, { force: true });
+    const result = spawnSync(process.execPath, ["scripts/build-mcpb.mjs"], {
+      cwd: root,
+      encoding: "utf8",
+    });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(`build-mcpb: packed`);
+    expect(result.stdout).toContain(`b2-mcp@${packageVersion}`);
+    expect(existsSync(outFile)).toBe(true);
+    // A .mcpb is a zip archive; verify the magic bytes and that the packed
+    // manifest is present in the archive's file listing.
+    const archive = readFileSync(outFile);
+    expect(archive.subarray(0, 2).toString("latin1")).toBe("PK");
+    expect(archive.includes(Buffer.from("manifest.json"))).toBe(true);
+  });
+
+  it("refuses to pack when mcpb/manifest.json version drifts from package.json", () => {
+    const fixtureRoot = mkdtempSync(join(tmpdir(), "b2-mcp-build-mcpb-"));
+    try {
+      writeFileSync(
+        join(fixtureRoot, "package.json"),
+        `${JSON.stringify({ name: "@backblaze-labs/b2-mcp", version: "0.2.0" }, null, 2)}\n`,
+      );
+      mkdirSync(join(fixtureRoot, "mcpb"), { recursive: true });
+      writeFileSync(
+        join(fixtureRoot, "mcpb", "manifest.json"),
+        `${JSON.stringify({ manifest_version: "0.3", name: "b2-mcp", version: "0.1.0" }, null, 2)}\n`,
+      );
+      // Seed a stale artifact from a prior build; the failed run must remove it
+      // so the documented upload path never keeps prior-release code.
+      const staleArtifact = join(fixtureRoot, "dist-mcpb", "b2-mcp.mcpb");
+      mkdirSync(join(fixtureRoot, "dist-mcpb"), { recursive: true });
+      writeFileSync(staleArtifact, "stale");
+      const result = spawnSync(process.execPath, [join(root, "scripts/build-mcpb.mjs")], {
+        cwd: fixtureRoot,
+        encoding: "utf8",
+      });
+      expect(result.status).toBe(2);
+      expect(result.stderr).toContain("does not match package.json");
+      expect(existsSync(staleArtifact)).toBe(false);
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps smithery.yaml in sync with the server.json env contract", () => {
+    const serverJson = JSON.parse(readFileSync(join(root, "server.json"), "utf8"));
+    const envVars = serverJson.packages[0].environmentVariables as Array<{
+      name: string;
+      isRequired: boolean;
+      isSecret: boolean;
+    }>;
+    const smithery = parseYaml(readFileSync(join(root, "smithery.yaml"), "utf8"));
+
+    // stdio transport, matching the published npm package.
+    expect(smithery.startCommand.type).toBe("stdio");
+
+    const schema = smithery.startCommand.configSchema;
+    const properties = schema.properties as Record<string, { type: string; format?: string }>;
+
+    // Five-variable allowlist: exactly the server.json env contract, no extras.
+    const expectedNames = envVars.map((v) => v.name).sort();
+    expect(Object.keys(properties).sort()).toEqual(expectedNames);
+
+    // Required flags mirror server.json's isRequired.
+    const expectedRequired = envVars
+      .filter((v) => v.isRequired)
+      .map((v) => v.name)
+      .sort();
+    expect([...(schema.required as string[])].sort()).toEqual(expectedRequired);
+
+    // Every secret credential is masked (format: password); non-secrets are not.
+    for (const envVar of envVars) {
+      const property = properties[envVar.name];
+      expect(property).toBeDefined();
+      expect(property.type).toBe("string");
+      if (envVar.isSecret) {
+        expect(property.format).toBe("password");
+      } else {
+        expect(property.format).toBeUndefined();
+      }
+    }
+
+    // The generated command/env mapping launches the npm package and only
+    // forwards the allowlisted, non-empty credentials. The commandFunction is a
+    // trusted, checked-in arrow-expression string from smithery.yaml; wrap it in
+    // `new Function` (not eval) to materialize it for assertion.
+    const commandFunction = new Function(
+      `return (${smithery.startCommand.commandFunction});`,
+    )() as (config: Record<string, string | undefined>) => {
+      command: string;
+      args: string[];
+      env: Record<string, string>;
+    };
+    const launched = commandFunction({
+      B2_APPLICATION_KEY_ID: "id",
+      B2_APPLICATION_KEY: "secret",
+      B2_REGION: "",
+      B2_MASTER_KEY_ID: undefined,
+    });
+    expect(launched.command).toBe("npx");
+    expect(launched.args).toEqual(["-y", "@backblaze-labs/b2-mcp"]);
+    expect(launched.env).toEqual({ B2_APPLICATION_KEY_ID: "id", B2_APPLICATION_KEY: "secret" });
+  });
+
+  it("keeps mcpb/manifest.json in sync with the server.json env contract", () => {
+    const serverJson = JSON.parse(readFileSync(join(root, "server.json"), "utf8"));
+    const envVars = serverJson.packages[0].environmentVariables as Array<{
+      name: string;
+      isRequired: boolean;
+      isSecret: boolean;
+    }>;
+    const mcpb = JSON.parse(readFileSync(join(root, "mcpb", "manifest.json"), "utf8"));
+
+    // Node/npx launch of the published package, matching server.json + smithery.
+    // Unlike smithery, the MCPB launcher pins the exact published version so the
+    // bundle is reproducible; assert the package name, allowing the @<version> pin.
+    expect(mcpb.server.type).toBe("node");
+    expect(mcpb.server.mcp_config.command).toBe("npx");
+    const args = mcpb.server.mcp_config.args as string[];
+    expect(args[0]).toBe("-y");
+    expect(args[1]).toMatch(/^@backblaze-labs\/b2-mcp(@.+)?$/);
+
+    const env = mcpb.server.mcp_config.env as Record<string, string>;
+    const userConfig = mcpb.user_config as Record<
+      string,
+      { type: string; required?: boolean; sensitive?: boolean; default?: unknown }
+    >;
+
+    // user_config carries exactly one key per server.json env var (lowercased),
+    // and env forwards exactly those variables — no extras, no missing.
+    const expectedKeys = envVars.map((v) => v.name.toLowerCase()).sort();
+    expect(Object.keys(userConfig).sort()).toEqual(expectedKeys);
+    expect(Object.keys(env).sort()).toEqual(envVars.map((v) => v.name).sort());
+
+    for (const envVar of envVars) {
+      const key = envVar.name.toLowerCase();
+      // env forwards only the ${user_config.<key>} template, never a literal
+      // credential value or placeholder.
+      expect(env[envVar.name]).toBe(`\${user_config.${key}}`);
+
+      const field = userConfig[key];
+      expect(field).toBeDefined();
+      expect(field.type).toBe("string");
+      // Required flag mirrors server.json isRequired.
+      expect(field.required === true).toBe(envVar.isRequired);
+      // Every secret credential is marked sensitive so hosts mask it.
+      if (envVar.isSecret) {
+        expect(field.sensitive).toBe(true);
+      }
+      // Optional fields retain an empty-string default so an unset value is
+      // forwarded as "" (which the server treats as absent) rather than leaking
+      // a literal placeholder credential.
+      if (!envVar.isRequired) {
+        expect(field.default).toBe("");
+      }
+    }
   });
 
   for (const testCase of [
@@ -877,7 +1097,7 @@ describe("release scripts", () => {
               version: [
                 `node ${join(root, "scripts/cut-changelog.mjs")}`,
                 `node ${join(root, "scripts/update-server-json-version.mjs")}`,
-                "git add CHANGELOG.md server.json",
+                "git add CHANGELOG.md server.json lhm.plugin.json mcpb/manifest.json",
               ].join(" && "),
             },
           },
@@ -900,6 +1120,10 @@ describe("release scripts", () => {
       const changelog = readFileSync(join(fixtureRoot, "CHANGELOG.md"), "utf8");
       const bumpedPackage = JSON.parse(readFileSync(packagePath, "utf8"));
       const bumpedServerJson = JSON.parse(readFileSync(join(fixtureRoot, "server.json"), "utf8"));
+      const bumpedLhm = JSON.parse(readFileSync(join(fixtureRoot, "lhm.plugin.json"), "utf8"));
+      const bumpedMcpb = JSON.parse(
+        readFileSync(join(fixtureRoot, "mcpb", "manifest.json"), "utf8"),
+      );
       const stagedFiles = runGit(fixtureRoot, ["diff", "--cached", "--name-only"]);
 
       expect(result.status).toBe(0);
@@ -907,9 +1131,13 @@ describe("release scripts", () => {
       expect(bumpedPackage.version).toBe("0.1.1");
       expect(bumpedServerJson.version).toBe("0.1.1");
       expect(bumpedServerJson.packages[0].version).toBe("0.1.1");
+      expect(bumpedLhm.version).toBe("0.1.1");
+      expect(bumpedMcpb.version).toBe("0.1.1");
       expect(changelog).toMatch(/^## \[Unreleased\]\n\n## \[0\.1\.1\] - \d{4}-\d{2}-\d{2}/m);
       expect(stagedFiles.split(/\r?\n/)).toContain("CHANGELOG.md");
       expect(stagedFiles.split(/\r?\n/)).toContain("server.json");
+      expect(stagedFiles.split(/\r?\n/)).toContain("lhm.plugin.json");
+      expect(stagedFiles.split(/\r?\n/)).toContain("mcpb/manifest.json");
     });
   });
 

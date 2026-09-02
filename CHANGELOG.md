@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `smithery.yaml` so Smithery can offer a one-click stdio install of the
+  official server. (#300)
+- `glama.json` repo-root maintainer manifest for the Glama org server claim,
+  plus a README Glama score badge. (#300)
+- `lhm.plugin.json` LobeHub marketplace manifest and a README LobeHub badge;
+  the release version lifecycle now stamps its version alongside `server.json`.
+  (#300)
+- `mcpb/manifest.json` (MCPB 0.3) plus a `pnpm run build:mcpb` pack script for
+  Smithery's Local publish path; the release version-sync now stamps the MCPB
+  manifest alongside `server.json` and `lhm.plugin.json`. (#300)
+- Flat, visible `## Tools` list of all 40 tools in the README so directory
+  auto-extractors (mcp.so, Glama, ...) can populate the tool section. (#300)
+- `docs/DISCOVERABILITY.md` runbook documenting the registry/directory listings
+  and per-release steps (Glama, Smithery, LobeHub, mcp.so). (#300)
+- README "official server" note and an `Official …` MCP Registry manifest
+  description to distinguish `backblaze-labs/b2-mcp` from community forks. (#301)
+
 ### Changed
 - The stdio server no longer exits when started without B2 credentials. It now
   enters a credential-less discovery mode: the full tool surface is registered
@@ -15,6 +33,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tool call returns a clear `missing_credentials` error until
   `B2_APPLICATION_KEY_ID` / `B2_APPLICATION_KEY` are set. The HTTP transport is
   unchanged. (#356)
+
+### Fixed
+- Point the README MCP Registry badge at `$.servers[0].server.version` to match
+  the registry API's `2025-12-11` response shape, so it renders the published
+  version again. (#297)
 
 ## [0.2.0] - 2026-09-01
 

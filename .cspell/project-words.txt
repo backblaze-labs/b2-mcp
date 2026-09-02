@@ -62,9 +62,13 @@ buildx
 creds
 EOPENBREAKER
 exfiltration
+Fleur
 Glama
+MCPB
+mcpmarket
 noout
 paginators
+punkpeye
 sessionful
 Smithery
 unallowed

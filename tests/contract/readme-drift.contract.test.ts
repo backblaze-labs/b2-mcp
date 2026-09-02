@@ -69,6 +69,22 @@ describe("README tool-surface drift", () => {
       `Prefix counts remain ${native} native \`b2_*\` names + ${s3} data-plane \`s3_*\` names.`,
     );
   });
+
+  it("keeps the flat `## Tools` list in exact sync with the full contract", () => {
+    // The flat list under `## Tools` (before `### Tool details and availability`)
+    // is what registry/directory auto-extractors read. Isolate it so a deleted or
+    // mistyped bullet is caught here even though the name also appears in the
+    // detailed tables below.
+    const start = readme.indexOf("\n## Tools\n");
+    const end = readme.indexOf("### Tool details and availability");
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const section = readme.slice(start, end);
+    const listed = [...section.matchAll(/^- `((?:b2|s3)_[a-z0-9_]+)`/gm)].map((m) => m[1]);
+    // No duplicate bullets, and the set/count matches the full tool contract.
+    expect([...listed].sort()).toEqual([...new Set(listed)].sort());
+    expect([...listed].sort()).toEqual([...toolNames].sort());
+  });
 });
 
 describe("README project badges", () => {
@@ -97,7 +113,21 @@ describe("README project badges", () => {
       "registry.modelcontextprotocol.io/v0/servers?search=io.github.backblaze-labs/b2-mcp",
     );
     expect(readme).toContain("glama.ai/mcp/servers/@backblaze-labs/b2-mcp");
+    // The Glama badge must render the live score image, not just link the base
+    // server path (which both the image and the link URL share). Guard the exact
+    // score-image target so reverting it away from /badges/score.svg fails CI.
+    expect(readme).toContain("glama.ai/mcp/servers/@backblaze-labs/b2-mcp/badges/score.svg");
     expect(readme).toContain("smithery.ai/server/@backblaze-labs/b2-mcp");
+    // The LobeHub badge must keep both its shields image and its deterministic
+    // per-server listing URL, so dropping either fails CI rather than silently
+    // shipping a broken/absent badge.
+    expect(readme).toContain("img.shields.io/badge/LobeHub-b2--mcp");
+    expect(readme).toContain("lobehub.com/mcp/backblaze-labs-b2-mcp");
+    // The MCP Registry badge must query the nested `$.servers[0].server.version`
+    // path (encoded), matching the 2025-12-11 registry response shape. Guard
+    // against a regression back to the flat `$.servers[0].version` query.
+    expect(readme).toContain("query=%24.servers%5B0%5D.server.version");
+    expect(readme).not.toContain("query=%24.servers%5B0%5D.version");
     // Never link badges to fragile search-result URLs.
     expect(readme).not.toContain("registry.modelcontextprotocol.io/?search=");
     expect(readme).not.toContain("smithery.ai/servers?q=");

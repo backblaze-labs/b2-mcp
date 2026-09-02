@@ -1,0 +1,68 @@
+{
+  "manifest_version": "0.3",
+  "name": "b2-mcp",
+  "display_name": "Backblaze B2 MCP Server",
+  "version": "0.2.0",
+  "description": "Official Backblaze B2 MCP server for buckets, files, keys, Object Lock, and S3 storage.",
+  "author": { "name": "Backblaze", "url": "https://github.com/backblaze-labs/b2-mcp" },
+  "repository": { "type": "git", "url": "https://github.com/backblaze-labs/b2-mcp.git" },
+  "homepage": "https://github.com/backblaze-labs/b2-mcp#readme",
+  "documentation": "https://github.com/backblaze-labs/b2-mcp#readme",
+  "support": "https://github.com/backblaze-labs/b2-mcp/issues",
+  "license": "MIT",
+  "keywords": ["backblaze", "b2", "storage", "object-storage", "s3", "mcp"],
+  "server": {
+    "type": "node",
+    "entry_point": "npx",
+    "mcp_config": {
+      "command": "npx",
+      "args": ["-y", "@backblaze-labs/b2-mcp@0.2.0"],
+      "env": {
+        "B2_APPLICATION_KEY_ID": "${user_config.b2_application_key_id}",
+        "B2_APPLICATION_KEY": "${user_config.b2_application_key}",
+        "B2_REGION": "${user_config.b2_region}",
+        "B2_MASTER_KEY_ID": "${user_config.b2_master_key_id}",
+        "B2_MASTER_KEY": "${user_config.b2_master_key}"
+      }
+    }
+  },
+  "user_config": {
+    "b2_application_key_id": {
+      "type": "string",
+      "title": "Application Key ID",
+      "description": "Backblaze B2 application key ID (use a non-master application key).",
+      "sensitive": true,
+      "required": true
+    },
+    "b2_application_key": {
+      "type": "string",
+      "title": "Application Key",
+      "description": "Backblaze B2 application key secret.",
+      "sensitive": true,
+      "required": true
+    },
+    "b2_region": {
+      "type": "string",
+      "title": "Region (optional)",
+      "description": "Optional fallback S3-compatible region used before authorization (for example us-east-005).",
+      "required": false,
+      "default": ""
+    },
+    "b2_master_key_id": {
+      "type": "string",
+      "title": "Master Key ID (optional)",
+      "description": "Optional master key ID, required only for the Partner/Groups API tools.",
+      "sensitive": true,
+      "required": false,
+      "default": ""
+    },
+    "b2_master_key": {
+      "type": "string",
+      "title": "Master Key (optional)",
+      "description": "Optional master key secret, required only for the Partner/Groups API tools.",
+      "sensitive": true,
+      "required": false,
+      "default": ""
+    }
+  }
+}

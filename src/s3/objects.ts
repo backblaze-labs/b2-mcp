@@ -845,7 +845,7 @@ export function registerS3ObjectTools(
     "s3_copy_object",
     {
       description:
-        "Copy an object within B2 or between B2 buckets through the official B2 SDK. The acl input is retained as a no-op S3 compatibility hint; B2 access follows the destination bucket policy.",
+        "Copy an object within B2 or between B2 buckets via B2's S3-compatible CopyObject API. The acl input is retained as a no-op S3 compatibility hint; B2 access follows the destination bucket policy.",
       inputSchema: {
         sourceBucket: z.string().describe("The source bucket name."),
         sourceKey: z.string().describe("The source object key."),

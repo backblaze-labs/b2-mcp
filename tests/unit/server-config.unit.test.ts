@@ -89,6 +89,12 @@ describe("loadConfig — valid env vars", () => {
     expect(config.region).toBe("eu-central-003");
   });
 
+  it("treats a blank/whitespace B2_REGION as unset (MCPB empty default)", async () => {
+    process.env.B2_REGION = "   ";
+    const config = await loadConfig();
+    expect(config.region).toBe("us-west-004");
+  });
+
   it("resolves explicit stdio file secret sink paths", async () => {
     const secretFile = join(mkdtempSync(join(tmpdir(), "b2-mcp-config-secret-sink-")), "s.jsonl");
     process.env.B2_SECRET_SINK = "file";

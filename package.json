@@ -29,6 +29,7 @@
   "scripts": {
     "clean": "rm -rf dist",
     "build": "pnpm run clean && tsc",
+    "build:mcpb": "node scripts/build-mcpb.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
     "docs": "typedoc",
     "docs:watch": "typedoc --watch",
@@ -83,7 +84,7 @@
     "release:notes": "node scripts/extract-release-notes.mjs",
     "release:stamp": "node scripts/write-release-version.mjs",
     "release:sbom": "node scripts/production-security-gate.mjs --sbom publish-package/b2-mcp-production.cdx.json",
-    "version": "node scripts/cut-changelog.mjs && node scripts/update-server-json-version.mjs && git add CHANGELOG.md server.json",
+    "version": "node scripts/cut-changelog.mjs && node scripts/update-server-json-version.mjs && git add CHANGELOG.md server.json lhm.plugin.json mcpb/manifest.json",
     "prepublishOnly": "pnpm run build && node scripts/verify-release-input.mjs --tag \"v$(node -p 'require(\"./package.json\").version')\" && pnpm run release:stamp",
     "postpack": "node -e \"require('node:fs').rmSync('dist/release-version.json',{force:true})\"",
     "probe:500": "pnpm run build && node scripts/probe-b2-500s.mjs",
@@ -120,6 +121,7 @@
     "zod": "4.4.3"
   },
   "devDependencies": {
+    "@anthropic-ai/mcpb": "2.1.2",
     "@biomejs/biome": "2.5.10",
     "@microsoft/tsdoc-config": "0.18.1",
     "@modelcontextprotocol/client": "2.0.0",
@@ -142,7 +144,8 @@
     "typescript-eslint": "8.68.0",
     "vercel": "59.7.0",
     "vitest": "^4.1.11",
-    "wrangler": "4.127.0"
+    "wrangler": "4.127.0",
+    "yaml": "^2.9.0"
   },
   "engines": {
     "node": "^22.22.2 || ^24 || ^26"
