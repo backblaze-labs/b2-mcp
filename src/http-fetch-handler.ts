@@ -1126,52 +1126,55 @@ export function createB2McpFetchHandler(options: HttpPipelineOptions = {}): B2Mc
       const useSharedCredentialVerificationLimit =
         usesHeaderCredentialVerificationLimit(credentialProvider, request) &&
         requiresCapabilityDiscovery(resolved.capabilityCacheKey);
-      if (useSharedCredentialVerificationLimit) {
-        const verificationPermit = inFlight.rekey(limitKey, CREDENTIAL_VERIFICATION_LIMIT_KEY);
-        if (!verificationPermit.ok) {
-          return responseWithCleanup(
-            jsonResponse(
-              verificationPermit.status,
-              { error: verificationPermit.error },
-              { "Retry-After": "1" },
-            ),
-            () => finalize(limitKey, prepared),
-          );
-        }
-        limitKey = CREDENTIAL_VERIFICATION_LIMIT_KEY;
+      const credentialPermit = inFlight.rekey(limitKey, resolved.cacheKey);
+      if (!credentialPermit.ok) {
+        return responseWithCleanup(
+          jsonResponse(
+            credentialPermit.status,
+            { error: credentialPermit.error },
+            { "Retry-After": "1" },
+          ),
+          () => finalize(limitKey, prepared),
+        );
+      }
+      limitKey = resolved.cacheKey;
 
-        const verificationRateKey = deriveRateKey(CREDENTIAL_VERIFICATION_LIMIT_KEY);
-        if (!allowRequest(verificationRateKey)) {
-          return responseWithCleanup(
-            jsonResponse(429, { error: "Rate limit exceeded" }, { "Retry-After": "1" }),
-            () => finalize(limitKey, prepared),
-          );
-        }
-      } else {
-        const credentialPermit = inFlight.rekey(limitKey, resolved.cacheKey);
-        if (!credentialPermit.ok) {
-          return responseWithCleanup(
-            jsonResponse(
-              credentialPermit.status,
-              { error: credentialPermit.error },
-              { "Retry-After": "1" },
-            ),
-            () => finalize(limitKey, prepared),
-          );
-        }
-        limitKey = resolved.cacheKey;
-
-        const credentialRateKey = deriveRateKey(resolved.cacheKey);
-        if (!allowRequest(credentialRateKey)) {
-          return responseWithCleanup(
-            jsonResponse(429, { error: "Rate limit exceeded" }, { "Retry-After": "1" }),
-            () => finalize(limitKey, prepared),
-          );
-        }
+      const credentialRateKey = deriveRateKey(resolved.cacheKey);
+      if (!allowRequest(credentialRateKey)) {
+        return responseWithCleanup(
+          jsonResponse(429, { error: "Rate limit exceeded" }, { "Retry-After": "1" }),
+          () => finalize(limitKey, prepared),
+        );
       }
 
       let capabilities: string[] | null;
+      let verificationPermitHeld = false;
       try {
+        if (useSharedCredentialVerificationLimit) {
+          const verificationPermit = inFlight.acquire(CREDENTIAL_VERIFICATION_LIMIT_KEY);
+          if (!verificationPermit.ok) {
+            return responseWithCleanup(
+              jsonResponse(
+                verificationPermit.status,
+                { error: verificationPermit.error },
+                { "Retry-After": "1" },
+              ),
+              () => finalize(limitKey, prepared),
+            );
+          }
+          verificationPermitHeld = true;
+
+          const verificationRateKey = deriveRateKey(CREDENTIAL_VERIFICATION_LIMIT_KEY);
+          if (!allowRequest(verificationRateKey)) {
+            inFlight.release(CREDENTIAL_VERIFICATION_LIMIT_KEY);
+            verificationPermitHeld = false;
+            return responseWithCleanup(
+              jsonResponse(429, { error: "Rate limit exceeded" }, { "Retry-After": "1" }),
+              () => finalize(limitKey, prepared),
+            );
+          }
+        }
+
         capabilities = await fetchCapabilitiesForRequest(
           resolved.config,
           resolved.capabilityCacheKey,
@@ -1189,29 +1192,8 @@ export function createB2McpFetchHandler(options: HttpPipelineOptions = {}): B2Mc
         return responseWithCleanup(credentialErrorResponse(err, protocolPreflight.credError), () =>
           finalize(limitKey, prepared),
         );
-      }
-
-      if (useSharedCredentialVerificationLimit) {
-        const credentialPermit = inFlight.rekey(limitKey, resolved.cacheKey);
-        if (!credentialPermit.ok) {
-          return responseWithCleanup(
-            jsonResponse(
-              credentialPermit.status,
-              { error: credentialPermit.error },
-              { "Retry-After": "1" },
-            ),
-            () => finalize(limitKey, prepared),
-          );
-        }
-        limitKey = resolved.cacheKey;
-
-        const credentialRateKey = deriveRateKey(resolved.cacheKey);
-        if (!allowRequest(credentialRateKey)) {
-          return responseWithCleanup(
-            jsonResponse(429, { error: "Rate limit exceeded" }, { "Retry-After": "1" }),
-            () => finalize(limitKey, prepared),
-          );
-        }
+      } finally {
+        if (verificationPermitHeld) inFlight.release(CREDENTIAL_VERIFICATION_LIMIT_KEY);
       }
 
       prepared = {

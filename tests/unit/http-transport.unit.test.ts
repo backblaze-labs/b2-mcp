@@ -605,6 +605,44 @@ describe("HTTP transport handler", () => {
     await expect(first).resolves.toMatchObject({ status: 200 });
   });
 
+  it("preserves per-credential limits during shared verification", async () => {
+    delete process.env.B2_REGISTER_ALL_TOOLS;
+    process.env.B2_MAX_SESSIONS_PER_KEY = "1";
+    let releaseCapabilities!: () => void;
+    const capabilitiesBlocked = new Promise<void>((resolve) => {
+      releaseCapabilities = resolve;
+    });
+    const fetchCapabilities = vi.fn(async () => {
+      await capabilitiesBlocked;
+      return ["listBuckets"];
+    });
+    await replaceHandle(undefined, { fetchCapabilities });
+
+    const first = request(port, "POST", "/mcp", {
+      headers: {
+        "x-b2-key-id": "same-valid-key",
+        "x-b2-key": "same-secret",
+        ...modernHeaders("tools/list"),
+      },
+      body: LIST_TOOLS,
+    });
+    await vi.waitFor(() => expect(fetchCapabilities).toHaveBeenCalledTimes(1));
+
+    const second = await request(port, "POST", "/mcp", {
+      headers: {
+        "x-b2-key-id": "same-valid-key",
+        "x-b2-key": "same-secret",
+        ...modernHeaders("tools/list"),
+      },
+      body: LIST_TOOLS,
+    });
+    expect(second.status).toBe(429);
+    expect(fetchCapabilities).toHaveBeenCalledTimes(1);
+
+    releaseCapabilities();
+    await expect(first).resolves.toMatchObject({ status: 200 });
+  });
+
   it("rate-limits invalid header verification before upstream auth", async () => {
     delete process.env.B2_REGISTER_ALL_TOOLS;
     process.env.B2_TRUST_PROXY_HEADERS = "true";
