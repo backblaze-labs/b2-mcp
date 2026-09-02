@@ -561,6 +561,7 @@ describe("HTTP transport handler", () => {
   });
 
   it("holds invalid header verification behind a shared in-flight key", async () => {
+    delete process.env.B2_REGISTER_ALL_TOOLS;
     process.env.B2_TRUST_PROXY_HEADERS = "true";
     process.env.B2_MAX_SESSIONS_PER_KEY = "1";
     let releaseCapabilities!: () => void;
@@ -605,6 +606,7 @@ describe("HTTP transport handler", () => {
   });
 
   it("rate-limits invalid header verification before upstream auth", async () => {
+    delete process.env.B2_REGISTER_ALL_TOOLS;
     process.env.B2_TRUST_PROXY_HEADERS = "true";
     process.env.B2_MCP_RATE_LIMIT_BURST = "1";
     process.env.B2_MCP_RATE_LIMIT_RPS = "1";
@@ -640,6 +642,67 @@ describe("HTTP transport handler", () => {
     });
     expect(second.status).toBe(429);
     expect(fetchCapabilities).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps valid cached header credentials isolated from verification limits", async () => {
+    delete process.env.B2_REGISTER_ALL_TOOLS;
+    process.env.B2_MAX_SESSIONS_PER_KEY = "1";
+    await replaceHandle();
+
+    for (const keyId of ["valid-a", "valid-b"]) {
+      const warm = await request(port, "POST", "/mcp", {
+        headers: {
+          "x-b2-key-id": keyId,
+          "x-b2-key": `secret-${keyId}`,
+          ...modernHeaders("tools/list"),
+        },
+        body: LIST_TOOLS,
+      });
+      expect(warm.status).toBe(200);
+    }
+
+    const controllers: ReadableStreamDefaultController<Uint8Array>[] = [];
+    await replaceHandle(undefined, {
+      mcpHandler: {
+        fetch: vi.fn(async () => {
+          const stream = new ReadableStream<Uint8Array>({
+            start(controller) {
+              controllers.push(controller);
+              controller.enqueue(new TextEncoder().encode("data: open\n\n"));
+            },
+          });
+          return new Response(stream, {
+            status: 200,
+            headers: { "Content-Type": "text/event-stream" },
+          });
+        }),
+        close: vi.fn(),
+      },
+    });
+
+    const first = request(port, "POST", "/mcp", {
+      headers: {
+        "x-b2-key-id": "valid-a",
+        "x-b2-key": "secret-valid-a",
+        ...modernHeaders("tools/list"),
+      },
+      body: LIST_TOOLS,
+    });
+    await vi.waitFor(() => expect(controllers).toHaveLength(1));
+
+    const second = request(port, "POST", "/mcp", {
+      headers: {
+        "x-b2-key-id": "valid-b",
+        "x-b2-key": "secret-valid-b",
+        ...modernHeaders("tools/list"),
+      },
+      body: LIST_TOOLS,
+    });
+    await vi.waitFor(() => expect(controllers).toHaveLength(2));
+
+    for (const controller of controllers) controller.close();
+    await expect(first).resolves.toMatchObject({ status: 200 });
+    await expect(second).resolves.toMatchObject({ status: 200 });
   });
 
   it("keeps concurrent header credentials isolated through the shared handler", async () => {

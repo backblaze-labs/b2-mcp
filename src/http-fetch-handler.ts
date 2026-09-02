@@ -23,6 +23,7 @@ import {
 import {
   createServer as createMcpServerDefinition,
   fetchCapabilities as fetchCredentialCapabilities,
+  requiresCapabilityDiscovery,
   sweepAuthManagerCache,
   sweepCapabilityCache,
 } from "./server.js";
@@ -1122,10 +1123,9 @@ export function createB2McpFetchHandler(options: HttpPipelineOptions = {}): B2Mc
         );
       }
 
-      const useSharedCredentialVerificationLimit = usesHeaderCredentialVerificationLimit(
-        credentialProvider,
-        request,
-      );
+      const useSharedCredentialVerificationLimit =
+        usesHeaderCredentialVerificationLimit(credentialProvider, request) &&
+        requiresCapabilityDiscovery(resolved.capabilityCacheKey);
       if (useSharedCredentialVerificationLimit) {
         const verificationPermit = inFlight.rekey(limitKey, CREDENTIAL_VERIFICATION_LIMIT_KEY);
         if (!verificationPermit.ok) {

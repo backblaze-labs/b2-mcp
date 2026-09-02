@@ -583,6 +583,27 @@ export function sweepCapabilityCache(now = Date.now()): void {
 }
 
 /**
+ * Return whether a capability lookup would need a fresh B2 authorize request.
+ *
+ * @remarks
+ * HTTP uses this to put only actual capability-authorize work behind shared
+ * verification limits. Cached capability results and already in-flight lookups
+ * stay on their credential-scoped limiter keys.
+ *
+ * @param cacheKey - Exact capability cache key to inspect.
+ * @param now - Millisecond timestamp used for deterministic tests.
+ *
+ * @returns True when no fresh cache entry or in-flight lookup exists.
+ */
+export function requiresCapabilityDiscovery(cacheKey: string, now = Date.now()): boolean {
+  if (process.env.B2_REGISTER_ALL_TOOLS === "true") return false;
+  sweepCapabilityCache(now);
+  const cached = capabilityCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) return false;
+  return !capabilityInflight.has(cacheKey);
+}
+
+/**
  * Remove expired auth-manager cache entries.
  *
  * @param now - Millisecond timestamp used for deterministic tests.
