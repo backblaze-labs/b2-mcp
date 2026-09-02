@@ -124,14 +124,18 @@ automatically; the rest need a submission or claim. Full status lives in
 
 - Official MCP Registry — published (`server.json` + `publish.yml`).
 - mcp.so — submitted (`mcp.so/servers/backblaze-b2-mcp-server`).
+- MCP Market — live, auto-crawled from the registry (`mcpmarket.com/server/backblaze-b2`).
 - Glama — claim + release (above).
-- Smithery — submit repo (`smithery.yaml`).
+- Smithery — submit repo (`smithery.yaml` / MCPB bundle).
 - LobeHub — claim + `lhm plugin update` (above).
 - PulseMCP — crawls the registry; verify, submit if absent.
-- Cline MCP Marketplace, Docker MCP Catalog, mcp-get, MCP Market, OpenTools,
-  Fleur — submit.
-- Awesome-list PRs — `punkpeye/awesome-mcp-servers`, `wong2/awesome-mcp-servers`,
-  `appcypher/awesome-mcp-servers`, `modelcontextprotocol/servers`.
+- Cline MCP Marketplace, Docker MCP Catalog, mcp-get, OpenTools, Fleur — submit.
+- Awesome-list PRs — only `punkpeye/awesome-mcp-servers` is a viable target
+  (PR [#13422](https://github.com/punkpeye/awesome-mcp-servers/pull/13422)). The
+  others were dropped: `wong2/awesome-mcp-servers` disabled pull requests and is
+  auto-generated from the mcp.so database (so mcp.so coverage flows through),
+  `appcypher/awesome-mcp-servers` is archived (read-only) with PRs disabled, and
+  `modelcontextprotocol/servers` no longer keeps a third-party server list.
 - VS Code / Cursor / Windsurf — auto-ingest the registry; verify only.
 
 ## Authority backlinks (highest ranking lever, #301)
