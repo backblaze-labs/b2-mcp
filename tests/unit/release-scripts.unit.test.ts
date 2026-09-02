@@ -194,6 +194,15 @@ function withFixture(run: (fixtureRoot: string) => void): void {
         2,
       )}\n`,
     );
+    mkdirSync(join(fixtureRoot, "mcpb"), { recursive: true });
+    writeFileSync(
+      join(fixtureRoot, "mcpb", "manifest.json"),
+      `${JSON.stringify(
+        { manifest_version: "0.3", name: "b2-mcp", version: "0.1.0" },
+        null,
+        2,
+      )}\n`,
+    );
     run(fixtureRoot);
   } finally {
     rmSync(fixtureRoot, { recursive: true, force: true });
@@ -289,14 +298,18 @@ describe("release scripts", () => {
 
       const serverJson = JSON.parse(readFileSync(join(fixtureRoot, "server.json"), "utf8"));
       const lhm = JSON.parse(readFileSync(join(fixtureRoot, "lhm.plugin.json"), "utf8"));
+      const mcpb = JSON.parse(readFileSync(join(fixtureRoot, "mcpb", "manifest.json"), "utf8"));
       expect(result.status).toBe(0);
       expect(result.stdout).toContain(
         "server-json-version: updated io.github.backblaze-labs/b2-mcp@0.2.0",
       );
       expect(result.stdout).toContain("lhm-plugin-version: updated backblaze-labs-b2-mcp@0.2.0");
+      expect(result.stdout).toContain("mcpb-manifest-version: updated b2-mcp@0.2.0");
       expect(serverJson.version).toBe("0.2.0");
       expect(serverJson.packages[0].version).toBe("0.2.0");
       expect(lhm.version).toBe("0.2.0");
+      expect(mcpb.version).toBe("0.2.0");
+      expect(mcpb.manifest_version).toBe("0.3");
     });
   });
 
@@ -326,6 +339,12 @@ describe("release scripts", () => {
     const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
     const lhm = JSON.parse(readFileSync(join(root, "lhm.plugin.json"), "utf8"));
     expect(lhm.version).toBe(packageJson.version);
+  });
+
+  it("keeps the checked-in mcpb/manifest.json version in sync with package metadata", () => {
+    const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+    const mcpb = JSON.parse(readFileSync(join(root, "mcpb", "manifest.json"), "utf8"));
+    expect(mcpb.version).toBe(packageJson.version);
   });
 
   it("keeps smithery.yaml in sync with the server.json env contract", () => {

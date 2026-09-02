@@ -29,6 +29,7 @@ directories de-duplicate community forks under the official entry.
 | `smithery.yaml` | Smithery | stdio one-click config; credential fields masked as `password`. |
 | `glama.json` | Glama | `maintainers` list gates the org claim. Read from the default branch. |
 | `lhm.plugin.json` | LobeHub | Owner declaration used by `lhm plugin update`; regenerate on release. |
+| `mcpb/manifest.json` | Smithery (Local/MCPB) | MCPB 0.3 manifest; packed to a `.mcpb` bundle (`pnpm run build:mcpb`) and uploaded via Smithery's Local publish tab. |
 
 The canonical registry description lives in
 `scripts/lib/mcp-registry-manifest.mjs` (`mcpRegistryDescription`) and is
@@ -135,9 +136,26 @@ automatically; the rest need a submission or claim. Full status lives in
   `Backblaze B2 MCP server`.
 - A featured card on backblazelabs.com with the display name and description.
 
+## Smithery (MCPB bundle)
+
+Smithery's publish flow at [smithery.ai/new](https://smithery.ai/new) has two
+tabs. The **URL** tab is for a remote server you host at a public HTTPS endpoint
+(Streamable HTTP + OAuth) — not us, since b2-mcp runs locally per user with the
+user's own B2 keys. Use the **Local (MCPB Bundle)** tab instead.
+
+1. Build the bundle: `pnpm run build:mcpb` → `dist-mcpb/b2-mcp.mcpb` (packs
+   `mcpb/manifest.json`, which runs `npx -y @backblaze-labs/b2-mcp` and prompts
+   for the B2 credentials). The manifest version is kept in lockstep with
+   `package.json` by `scripts/update-server-json-version.mjs`.
+2. On [smithery.ai/new](https://smithery.ai/new), pick the **Local (MCPB
+   Bundle)** tab, namespace `backblaze-labs`, server id `b2-mcp`, and upload the
+   `.mcpb`. (The legacy `smithery.yaml` is retained for older tooling.)
+
 ## On every release
 
-1. Bump + `scripts/update-server-json-version.mjs` (syncs `server.json`).
-2. Regenerate `lhm.plugin.json` and `lhm plugin update`.
-3. Cut a new Glama release (rerun the Dockerfile deploy → Make Release).
-4. Confirm the registry badge shows the new version.
+1. Bump + `scripts/update-server-json-version.mjs` (syncs `server.json`,
+   `lhm.plugin.json`, and `mcpb/manifest.json` versions).
+2. `pnpm run build:mcpb` and upload/publish the `.mcpb` to Smithery.
+3. Regenerate `lhm.plugin.json` and `lhm plugin update`.
+4. Cut a new Glama release (rerun the Dockerfile deploy → Make Release).
+5. Confirm the registry badge shows the new version.

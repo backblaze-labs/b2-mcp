@@ -29,6 +29,7 @@
   "scripts": {
     "clean": "rm -rf dist",
     "build": "pnpm run clean && tsc",
+    "build:mcpb": "node scripts/build-mcpb.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
     "docs": "typedoc",
     "docs:watch": "typedoc --watch",

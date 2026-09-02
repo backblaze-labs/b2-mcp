@@ -27,6 +27,22 @@ function updateLhmPluginVersion(root, version) {
   return version;
 }
 
+function updateMcpbManifestVersion(root, version) {
+  const mcpbPath = path.join(root, "mcpb", "manifest.json");
+  const source = readFileSync(mcpbPath, "utf8");
+  const mcpb = JSON.parse(source);
+  assert(
+    typeof mcpb.version === "string",
+    "mcpb/manifest.json is missing a top-level version string",
+  );
+  // Rewrite the top-level `version` in place; the leading `manifest_version`
+  // key is untouched because the regex matches the quoted `"version"` key only.
+  const updated = source.replace(/("version"\s*:\s*)"[^"]*"/, `$1${JSON.stringify(version)}`);
+  assert(updated !== source || mcpb.version === version, "failed to stamp mcpb/manifest.json version");
+  writeFileSync(mcpbPath, updated);
+  return version;
+}
+
 export function updateServerJsonVersion(root) {
   const packageJson = readJson(root, "package.json");
   const serverJsonPath = path.join(root, "server.json");
@@ -49,13 +65,15 @@ export function updateServerJsonVersion(root) {
 
   writeFileSync(serverJsonPath, `${JSON.stringify(serverJson, null, 2)}\n`);
   const lhmVersion = updateLhmPluginVersion(root, packageJson.version);
-  return { name: serverJson.name, version: serverJson.version, lhmVersion };
+  const mcpbVersion = updateMcpbManifestVersion(root, packageJson.version);
+  return { name: serverJson.name, version: serverJson.version, lhmVersion, mcpbVersion };
 }
 
 function main() {
   const result = updateServerJsonVersion(releaseRoot());
   console.log(`server-json-version: updated ${result.name}@${result.version}`);
   console.log(`lhm-plugin-version: updated backblaze-labs-b2-mcp@${result.lhmVersion}`);
+  console.log(`mcpb-manifest-version: updated b2-mcp@${result.mcpbVersion}`);
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
