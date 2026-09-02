@@ -150,9 +150,10 @@ export function registerS3MultipartTools(
         parts: z
           .array(
             z.object({
-              partNumber: multipartPartNumberSchema(
-                "Part number from 1-10000; provide each uploaded part once.",
-              ),
+              partNumber: z
+                .number()
+                .int()
+                .describe("Part number from 1-10000; provide each uploaded part once."),
               etag: z
                 .string()
                 .describe(

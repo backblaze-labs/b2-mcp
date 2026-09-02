@@ -1258,8 +1258,8 @@
                 },
                 "partNumber": {
                   "description": "Part number from 1-10000; provide each uploaded part once.",
-                  "maximum": 10000,
-                  "minimum": 1,
+                  "maximum": 9007199254740991,
+                  "minimum": -9007199254740991,
                   "type": "integer"
                 }
               },
@@ -2058,5 +2058,5 @@
     "toolsListCacheHint": null,
     "discover": null
   },
-  "hash": "b5b8f11253027130d2a4fa3d8020b48663fbe66b607abe5c366f3e539c04ee97"
+  "hash": "5826957139a3a0af5b7c04d742e996409c9adce30569ee9b88f7215056729001"
 }
