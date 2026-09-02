@@ -37,30 +37,20 @@ contract-checked against `server.json`; keep it ≤100 characters.
 
 ## Credential-less tool scans
 
-Directories that enumerate tools by launching the stdio server (mcp.so, Glama
-build tests, LobeHub `plugin init`) need `tools/list` to work without a real B2
-account. Since #356 this is the **default** — no env required. Launching with no
-`B2_APPLICATION_KEY_ID` / `B2_APPLICATION_KEY` enters credential-less discovery
-mode automatically: the full 40-tool surface (including the real durable-secret
-schemas) registers, a `server.stdio_discovery_mode` warning is logged, and every
-tool *call* returns a clear `missing_credentials` error. So most scanners work
-against `npx -y @backblaze-labs/b2-mcp` with no configuration at all.
+Directories that enumerate tools by launching stdio or HTTP transports (mcp.so,
+Glama build tests, LobeHub `plugin init`, MCP Inspector) need `initialize` and
+`tools/list` to work before a user supplies real B2 credentials. This is the
+default: no credentials, or placeholder credentials that B2 rejects, enter
+credential-free discovery mode.
 
-**Fallback** — only for a scanner that refuses to launch without explicit
-credential values. Set placeholders plus `B2_REGISTER_ALL_TOOLS=true`, and
-`B2_SECRET_SINK=inline` so the durable-secret tools (`b2_create_key`,
-`b2_create_group_member`, `b2_reserve_trial_create_account`) advertise their real
-inputs rather than `confirm`-only compatibility stubs:
+Discovery mode advertises the full 40-tool surface, including the real
+durable-secret schemas for `b2_create_key`, `b2_create_group_member`, and
+`b2_reserve_trial_create_account`. Every `tools/call` returns a structured
+`missing_credentials` error until the caller supplies valid B2 credentials.
 
-```
-B2_APPLICATION_KEY_ID=placeholder
-B2_APPLICATION_KEY=placeholder
-B2_REGISTER_ALL_TOOLS=true
-B2_SECRET_SINK=inline
-```
-
-Do not force `B2_REGISTER_ALL_TOOLS` on real user deployments; it bypasses
-capability-aware registration.
+Do not force `B2_REGISTER_ALL_TOOLS` for scanner compatibility. It remains an
+operator/test escape hatch that bypasses capability-aware registration for real
+credentialed deployments.
 
 ## Glama
 
@@ -84,14 +74,10 @@ Env schema for the Glama deploy form:
 | `B2_MASTER_KEY` | no | yes | (Partner tools only) |
 | `B2_HTTP_CREDENTIAL_MODE` | yes | no | `server` |
 
-`B2_HTTP_CREDENTIAL_MODE` **must** be `server` for this deployment. In the
-default `headers` mode the HTTP transport ignores env-injected credentials and
-requires B2 credential headers on every request, so Glama's credential-free tool
-scan would receive `401` responses; `server` mode signs requests with the
-env-supplied application key instead.
-
-If Glama's build test cannot enumerate tools without credentials, add
-`B2_REGISTER_ALL_TOOLS=true` (fixed value) for the build only.
+`B2_HTTP_CREDENTIAL_MODE=server` is still the right one-click deployment shape:
+real user tool calls use the env-supplied application key. Glama's build-time
+scanner can initialize and run `tools/list` even when those env values are absent
+or placeholders, but actual `tools/call` requests stay credential-gated.
 
 ## LobeHub
 
@@ -107,9 +93,9 @@ npx -y @lobehub/market-cli github status
 npx -y @lobehub/market-cli login
 npx -y @lobehub/market-cli github connect
 
-# Regenerate the manifest (no auth; placeholder creds so the server starts)
+# Regenerate the manifest (no auth; discovery mode handles missing credentials)
 npx -y @lobehub/market-cli plugin init \
-  --stdio "env B2_APPLICATION_KEY_ID=placeholder B2_APPLICATION_KEY=placeholder B2_REGISTER_ALL_TOOLS=true B2_SECRET_SINK=inline node dist/index.js" \
+  --stdio "node dist/index.js" \
   --dir "$(pwd)" --force
 # then restore the official name/description/identifier in lhm.plugin.json
 

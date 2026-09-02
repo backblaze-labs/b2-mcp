@@ -91,7 +91,7 @@ describe("HTTP transport guards (MCP 2026-07-28)", () => {
   it("rejects a request with a non-localhost Origin (DNS-rebinding guard)", async () => {
     await startHandle();
     const res = await request(port, "POST", "/mcp", {
-      headers: { ...creds, ...JSON_HEADERS, origin: "https://evil.example.com" },
+      headers: { ...JSON_HEADERS, origin: "https://evil.example.com" },
       body: LIST_TOOLS,
     });
     expect(res.status).toBe(403);
@@ -123,13 +123,13 @@ describe("HTTP transport guards (MCP 2026-07-28)", () => {
     });
 
     const first = request(port, "POST", "/mcp", {
-      headers: { ...creds, ...modernHeaders("tools/list") },
+      headers: modernHeaders("tools/list"),
       body: LIST_TOOLS,
     });
     await entered.promise; // first request now occupies the only in-flight slot
 
     const second = await request(port, "POST", "/mcp", {
-      headers: { ...creds, ...modernHeaders("tools/list") },
+      headers: modernHeaders("tools/list"),
       body: LIST_TOOLS,
     });
     expect(second.status).toBe(503);

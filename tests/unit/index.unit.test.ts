@@ -262,6 +262,37 @@ describe("stdio entry point", () => {
     );
   });
 
+  it("starts discovery mode when bootstrap capability lookup rejects credentials", async () => {
+    const config = testConfig();
+    const server = { close: vi.fn(async () => undefined) };
+    const createServer = vi.spyOn(serverModule, "createServer").mockReturnValue(server as never);
+    vi.spyOn(serverModule, "loadConfig").mockReturnValue(config);
+    vi.spyOn(serverModule, "fetchCapabilities").mockRejectedValue(
+      new CredentialResolutionError(
+        "Credential or capability resolution failed",
+        401,
+        "capability_auth_failed",
+      ),
+    );
+    const warn = vi.spyOn(loggerModule.logger, "warn").mockImplementation(() => undefined);
+    const serveStdio = vi.mocked(stdioTransport.serveStdio).mockImplementation(
+      () =>
+        ({
+          close: vi.fn(async () => undefined),
+        }) as ReturnType<typeof stdioTransport.serveStdio>,
+    );
+
+    await startStdio();
+
+    const factory = serveStdio.mock.calls[0]?.[0] as (() => unknown) | undefined;
+    expect(factory?.()).toBe(server);
+    expect(createServer).toHaveBeenCalledWith(config, null, { credentialsMissing: true });
+    expect(warn).toHaveBeenCalledWith(
+      { code: "capability_auth_failed", reason: "auth_failed" },
+      "capability.fetch.stdio_discovery_mode",
+    );
+  });
+
   it("bounds stdio capability lookup before starting with a fail-closed surface", async () => {
     vi.useFakeTimers();
     try {

@@ -68,7 +68,7 @@ describe("startStdio", () => {
     expect(serveStdio).toHaveBeenCalledTimes(1);
   });
 
-  it("fails closed when stdio capability discovery rejects the credential", async () => {
+  it("starts discovery mode when stdio capability discovery rejects the credential", async () => {
     process.env.B2_APPLICATION_KEY_ID = "test-key-id";
     process.env.B2_APPLICATION_KEY = "test-key-secret";
     delete process.env.B2_REGISTER_ALL_TOOLS;
@@ -84,8 +84,8 @@ describe("startStdio", () => {
       ),
     );
 
-    await expect(startStdio()).rejects.toMatchObject({ code: "capability_auth_failed" });
-    expect(serveStdio).not.toHaveBeenCalled();
+    await expect(startStdio()).resolves.toBeUndefined();
+    expect(serveStdio).toHaveBeenCalledTimes(1);
   });
 
   it("starts in credential-less discovery mode instead of exiting when credentials are missing", async () => {

@@ -197,26 +197,26 @@ export interface CreateServerOptions {
    * error instead of attempting a doomed provider call.
    *
    * @remarks
-   * Set by the stdio bootstrap when it starts without
-   * `B2_APPLICATION_KEY_ID` / `B2_APPLICATION_KEY` so registry/directory
-   * services (mcp.so, Glama, LobeHub) can still enumerate `tools/list` in a
-   * credential-less sandbox. Tool *calls* fail with an actionable message; the
-   * placeholder credentials the bootstrap injects are never used because this
-   * short-circuits before the handler runs.
+   * Set by stdio bootstrap and the HTTP request pipeline when the caller has no
+   * valid B2 credential, so registry/directory services (mcp.so, Glama,
+   * LobeHub) can still initialize and enumerate `tools/list` in a
+   * credential-less sandbox. Tool *calls* fail with an actionable message; any
+   * placeholder credentials are never used because this short-circuits before
+   * the handler runs.
    *
    * @internal
    */
   credentialsMissing?: boolean;
 }
 
-/** Tool-call error returned in credential-less stdio discovery mode. */
+/** Tool-call error returned in credential-less discovery mode. */
 const MISSING_CREDENTIALS_TOOL_ERROR = Object.freeze({
   status: 401,
   code: "missing_credentials",
   message:
-    "B2 credentials are not configured. Set B2_APPLICATION_KEY_ID and B2_APPLICATION_KEY " +
-    "(stdio) or send the credential headers (HTTP) before calling B2 tools. The server is " +
-    "running in discovery mode, so tools are listed but cannot execute.",
+    "B2 credentials are missing or could not be verified. Set B2_APPLICATION_KEY_ID and " +
+    "B2_APPLICATION_KEY (stdio) or send valid credential headers (HTTP) before calling B2 " +
+    "tools. The server is running in discovery mode, so tools are listed but cannot execute.",
 });
 
 /**
@@ -486,9 +486,10 @@ export function createServer(
 /**
  * One-shot authorize to read the key's capabilities for capability-aware
  * registration. Returns null only when discovery is explicitly skipped via
- * B2_REGISTER_ALL_TOOLS=true. Lookup failures throw so callers fail closed
- * instead of exposing the full tool surface; an empty array is a fail-closed
- * capability set and is deliberately not cached at the positive TTL.
+ * B2_REGISTER_ALL_TOOLS=true. Lookup failures throw so callers can decide
+ * whether to fail closed or enter credential-free discovery mode; an empty
+ * array is a fail-closed capability set and is deliberately not cached at the
+ * positive TTL.
  */
 interface CapabilityCacheEntry {
   capabilities: string[];

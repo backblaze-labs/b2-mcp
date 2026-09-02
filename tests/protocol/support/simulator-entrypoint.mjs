@@ -54,6 +54,13 @@ function credentialScopedTransport(inner) {
         // s3.<region>.backblazeb2.com URL so the S3 client builds as in production.
         storageApi.s3ApiUrl = "https://s3.us-west-004.backblazeb2.com";
         const applicationKeyId = applicationKeyIdFromBasicAuth(request.headers?.Authorization);
+        if (applicationKeyId.includes("invalid")) {
+          return new JsonResponse(
+            401,
+            { status: 401, code: "unauthorized", message: "denied" },
+            Object.fromEntries(response.headers ?? []),
+          );
+        }
         if (applicationKeyId.includes("other")) {
           storageApi.allowed.capabilities = READ_ONLY_CAPABILITIES;
         }

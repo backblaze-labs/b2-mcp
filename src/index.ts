@@ -36,7 +36,7 @@
 // exporting dependency-injection seams from the package root.
 import * as stdioTransport from "@modelcontextprotocol/server/stdio";
 import { CliUsageError, helpText, parseCliArgs } from "./cli.js";
-import { CredentialResolutionError } from "./credentials.js";
+import { CredentialResolutionError, DISCOVERY_MODE_CREDENTIAL } from "./credentials.js";
 import * as serverModule from "./server.js";
 import { parseIntEnv, PortUsageError } from "./utils/config.js";
 import { flushLogsSync, initLogging, logger } from "./utils/logger.js";
@@ -91,8 +91,6 @@ async function fetchStdioCapabilities(
   }
 }
 
-const DISCOVERY_MODE_CREDENTIAL = "b2-mcp-discovery-mode";
-
 /**
  * Enter credential-less stdio discovery mode when no B2 application key is set.
  *
@@ -137,9 +135,9 @@ function enterStdioDiscoveryModeIfNeeded(env: NodeJS.ProcessEnv = process.env): 
  * capability discovery once with a `B2_STDIO_CAPABILITY_TIMEOUT_MS` bootstrap
  * deadline (10s by default). A local deadline expiry starts with an empty
  * fail-closed capability set; a returned transient upstream outage degrades to
- * the full tool surface. Other credential errors remain fatal during bootstrap.
- * When no application key is present, the bootstrap starts a credential-less
- * discovery server instead of exiting.
+ * the full tool surface. When no application key is present, or B2 definitively
+ * rejects the supplied key during this bootstrap lookup, stdio starts a
+ * credential-less discovery server instead of exiting.
  *
  * @returns A promise that resolves after the stdio transport has been
  * registered with the MCP SDK.
@@ -193,6 +191,16 @@ export async function startStdio(): Promise<void> {
         "capability.fetch.stdio_degraded",
       );
       capabilities = null;
+    } else if (err instanceof CredentialResolutionError && err.code === "capability_auth_failed") {
+      logger.warn(
+        {
+          code: err.code,
+          reason: "auth_failed",
+        },
+        "capability.fetch.stdio_discovery_mode",
+      );
+      capabilities = null;
+      createServerOptions = { ...createServerOptions, credentialsMissing: true };
     } else {
       throw err;
     }

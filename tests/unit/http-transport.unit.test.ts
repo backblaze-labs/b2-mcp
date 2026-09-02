@@ -280,13 +280,22 @@ async function replaceHandle(
 }
 
 describe("HTTP transport handler", () => {
-  it("returns 401 on modern /mcp without credentials", async () => {
+  it("serves modern discovery without credentials and gates tool calls", async () => {
     const res = await request(port, "POST", "/mcp", {
       headers: modernHeaders("tools/list"),
       body: LIST_TOOLS,
     });
-    expect(res.status).toBe(401);
-    expect(res.body).toMatch(/credentials/i);
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.body).result.tools.length).toBeGreaterThan(0);
+
+    const call = await request(port, "POST", "/mcp", {
+      headers: modernHeaders("tools/call", "s3_head_bucket"),
+      body: callToolBody("s3_head_bucket"),
+    });
+    const callResult = JSON.parse(call.body).result;
+    expect(call.status).toBe(200);
+    expect(callResult.isError).toBe(true);
+    expect(JSON.stringify(callResult)).toContain("missing_credentials");
   });
 
   it("returns 200 on /health when default header mode needs no static B2 env", async () => {
@@ -389,7 +398,7 @@ describe("HTTP transport handler", () => {
     expect(res.status).toBe(200);
   });
 
-  it("requires headers on every request in header compatibility mode", async () => {
+  it("uses request headers for real calls but permits headerless discovery", async () => {
     const ok = await request(port, "POST", "/mcp", {
       headers: { ...creds, ...modernHeaders("tools/list") },
       body: LIST_TOOLS,
@@ -400,7 +409,8 @@ describe("HTTP transport handler", () => {
       headers: modernHeaders("tools/list"),
       body: LIST_TOOLS,
     });
-    expect(missing.status).toBe(401);
+    expect(missing.status).toBe(200);
+    expect(JSON.parse(missing.body).result.tools.length).toBeGreaterThan(0);
   });
 
   it("keeps concurrent header credentials isolated through the shared handler", async () => {
