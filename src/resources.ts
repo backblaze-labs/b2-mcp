@@ -54,6 +54,8 @@ interface RegisterControlPlaneResourcesOptions {
   oauthScopes?: ReadonlySet<string> | null;
   /** Whether the stdio entry is advertising schemas without real credentials. */
   credentialsMissing?: boolean;
+  /** Whether capability discovery failed locally and the tool surface is fail-closed. */
+  failClosedUnknownCapabilities?: boolean;
 }
 
 type ResourceOperation = "resources/list" | "resources/read" | "b2_get_bucket_notification_rules";
@@ -475,7 +477,9 @@ export function registerControlPlaneResources(
   const canReadBuckets =
     options.credentialsMissing !== true && canUseTool("b2_list_buckets", caps, oauthScopes);
   const canReadCapabilities =
-    options.credentialsMissing !== true && canUseTool("b2_authorize_account", caps, oauthScopes);
+    options.credentialsMissing !== true &&
+    options.failClosedUnknownCapabilities !== true &&
+    canUseTool("b2_authorize_account", caps, oauthScopes);
   const canReadNotificationRules = canUseTool(
     "b2_get_bucket_notification_rules",
     caps,

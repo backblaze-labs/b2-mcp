@@ -818,4 +818,24 @@ describe("MCP control-plane resources", () => {
       await close();
     }
   });
+
+  it("omits capability summaries while capabilities are fail-closed unknown", async () => {
+    const { client, fake, close } = await connectResourceClient({
+      capabilities: [],
+      serverOptions: { failClosedUnknownCapabilities: true },
+    });
+
+    try {
+      const listed = await client.listResources(undefined, { cacheMode: "refresh" });
+      expect(listed.resources.map((resource) => resource.uri).sort()).toEqual([
+        SERVER_CONFIG_RESOURCE_URI,
+      ]);
+      await expect(
+        client.readResource({ uri: CAPABILITIES_RESOURCE_URI }, { cacheMode: "refresh" }),
+      ).rejects.toThrow(/not.*found/i);
+      expect(fake.requests).toEqual([]);
+    } finally {
+      await close();
+    }
+  });
 });

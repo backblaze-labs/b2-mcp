@@ -429,6 +429,7 @@ export function createServer(
   registerControlPlaneResources(server, b2Client, config, capabilities, {
     oauthScopes,
     credentialsMissing: options.credentialsMissing,
+    failClosedUnknownCapabilities,
   });
   logger.info({ toolCount, version: VERSION, outputFormat }, "server.ready");
 
