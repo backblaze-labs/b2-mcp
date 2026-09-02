@@ -846,6 +846,93 @@ describe("MCP control-plane resources", () => {
       await close();
     }
   });
+
+  it("hides bucket and capability resources for non-B2 OAuth scopes", async () => {
+    const { client, fake, close } = await connectResourceClient({
+      capabilities: ["listBuckets", "readBucketNotifications"],
+      serverOptions: { oauthScopes: ["openid"] },
+    });
+
+    try {
+      const listed = await client.listResources(undefined, { cacheMode: "refresh" });
+      expect(listed.resources.map((resource) => resource.uri).sort()).toEqual([
+        SERVER_CONFIG_RESOURCE_URI,
+      ]);
+      await expect(
+        client.readResource({ uri: "b2://bucket/any" }, { cacheMode: "refresh" }),
+      ).rejects.toThrow(/not.*found/i);
+      expect(fake.requests).toEqual([]);
+    } finally {
+      await close();
+    }
+  });
+
+  it("suppresses the admin-gated notification sub-read for a b2:read scope", async () => {
+    const bucket = bucketInfoFixture("bucket-id-read", "read-scope-bucket");
+    const fake = new DeterministicB2NativeFake({
+      capabilities: ["listBuckets", "readBucketNotifications"],
+    }).respond("b2_list_buckets", new StaticHttpResponse(200, { buckets: [bucket] }));
+    const {
+      client,
+      fake: transport,
+      close,
+    } = await connectResourceClient({
+      capabilities: ["listBuckets", "readBucketNotifications"],
+      serverOptions: { oauthScopes: ["b2:read"] },
+      fake,
+    });
+
+    try {
+      const resource = parseJsonResource<BucketResourcePayload>(
+        await client.readResource(
+          { uri: "b2://bucket/read-scope-bucket" },
+          { cacheMode: "refresh" },
+        ),
+      );
+      expect(resource.eventNotifications).toEqual({
+        isClientAuthorizedToRead: false,
+        value: null,
+      });
+      expect(transport.requests.map((request) => request.endpoint)).toEqual([
+        "b2_authorize_account",
+        "b2_list_buckets",
+      ]);
+    } finally {
+      await close();
+    }
+  });
+
+  it("redacts request-controlled key IDs from resource audit URIs", async () => {
+    const bucket = bucketInfoFixture("bucket-id-keyid", testConfig.applicationKeyId);
+    const fake = new DeterministicB2NativeFake({ capabilities: ["listBuckets"] }).respond(
+      "b2_list_buckets",
+      new StaticHttpResponse(200, { buckets: [bucket] }),
+    );
+    const { client, close } = await connectResourceClient({
+      capabilities: ["listBuckets"],
+      fake,
+    });
+
+    try {
+      const uri = `b2://bucket/${testConfig.applicationKeyId}`;
+      const resource = parseJsonResource<BucketResourcePayload>(
+        await client.readResource({ uri }, { cacheMode: "refresh" }),
+      );
+      expect(resource.uri).toBe("b2://bucket/[redacted]");
+      expect(infoSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          resource: "b2_bucket",
+          uri: "b2://bucket/[redacted]",
+          operation: "resources/read",
+          error: false,
+        }),
+        "resource.call",
+      );
+      expect(JSON.stringify(infoSpy.mock.calls)).not.toContain(testConfig.applicationKeyId);
+    } finally {
+      await close();
+    }
+  });
 });
 
 describe("protocolErrorAuditFields", () => {
