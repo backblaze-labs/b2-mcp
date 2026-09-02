@@ -903,7 +903,7 @@ describe("MCP control-plane resources", () => {
   });
 
   it("redacts request-controlled key IDs from resource audit URIs", async () => {
-    const bucket = bucketInfoFixture("bucket-id-keyid", testConfig.applicationKeyId);
+    const bucket = bucketInfoFixture("bucket-key-id", testConfig.applicationKeyId);
     const fake = new DeterministicB2NativeFake({ capabilities: ["listBuckets"] }).respond(
       "b2_list_buckets",
       new StaticHttpResponse(200, { buckets: [bucket] }),
