@@ -73,6 +73,24 @@ function optionalJson(value: unknown): string {
   return value === undefined ? "not provided" : json(value);
 }
 
+/**
+ * Positive-integer string schema bounded to the JavaScript safe-integer range.
+ *
+ * @remarks
+ * The regex alone accepts arbitrarily long digit strings, which `parseInt`
+ * silently coerces to imprecise values or `Infinity`. Rejecting anything above
+ * `Number.MAX_SAFE_INTEGER` at validation time keeps the generated workflow
+ * arguments representable and safe to hand to the numeric tool schemas.
+ */
+function positiveIntArgSchema() {
+  return z
+    .string()
+    .regex(/^[1-9][0-9]*$/)
+    .refine((value) => Number.parseInt(value, 10) <= Number.MAX_SAFE_INTEGER, {
+      message: `Value must be a safe integer at most ${Number.MAX_SAFE_INTEGER}.`,
+    });
+}
+
 function intArg(value: string | undefined, fallback: number): number {
   return value === undefined ? fallback : Number.parseInt(value, 10);
 }
@@ -165,19 +183,13 @@ export function registerB2WorkflowPrompts(registrar: PromptRegistrar): void {
           .string()
           .optional()
           .describe("Optional object prefix the lifecycle rules should target."),
-        currentVersionsToHideAfterDays: z
-          .string()
-          .regex(/^[1-9][0-9]*$/)
+        currentVersionsToHideAfterDays: positiveIntArgSchema()
           .optional()
           .describe("Optional age in days after which current versions should be hidden."),
-        hiddenVersionsToDeleteAfterDays: z
-          .string()
-          .regex(/^[1-9][0-9]*$/)
+        hiddenVersionsToDeleteAfterDays: positiveIntArgSchema()
           .optional()
           .describe("Optional age in days after which noncurrent versions should expire."),
-        unfinishedLargeFileCancelDays: z
-          .string()
-          .regex(/^[1-9][0-9]*$/)
+        unfinishedLargeFileCancelDays: positiveIntArgSchema()
           .optional()
           .default("7")
           .describe("Days after initiation to cancel unfinished multipart uploads."),
@@ -220,10 +232,9 @@ export function registerB2WorkflowPrompts(registrar: PromptRegistrar): void {
         retentionMode: z
           .enum(["governance", "compliance"])
           .describe("Default Object Lock retention mode for new objects."),
-        retentionDuration: z
-          .string()
-          .regex(/^[1-9][0-9]*$/)
-          .describe("Default retention duration for new objects."),
+        retentionDuration: positiveIntArgSchema().describe(
+          "Default retention duration for new objects.",
+        ),
         retentionUnit: z.enum(["days", "years"]).describe("Unit for the retention duration."),
       },
     },
@@ -317,9 +328,7 @@ export function registerB2WorkflowPrompts(registrar: PromptRegistrar): void {
           .optional()
           .describe("Optional comma-separated bucket restrictions for the replacement key."),
         namePrefix: z.string().optional().describe("Optional file-name prefix restriction."),
-        validDurationInSeconds: z
-          .string()
-          .regex(/^[1-9][0-9]*$/)
+        validDurationInSeconds: positiveIntArgSchema()
           .optional()
           .describe("Optional replacement key lifetime in seconds."),
       },
