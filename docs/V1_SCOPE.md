@@ -167,9 +167,9 @@ The profile count table below is the canonical numeric source in this document:
 
 | Profile          | Total tools | `b2_*` | `s3_*` | `bz_*` | Purpose                                                                                  |
 | ---------------- | ----------- | ------ | ------ | ------ | ---------------------------------------------------------------------------------------- |
-| `full`           | 40          | 21     | 19     | 0      | Complete surface across all backing categories; durable-secret availability annotated.  |
-| `phase1-default` | 37          | 18     | 19     | 0      | Default customer-hosted profile; Partner read/eject/list omitted; secret stubs kept.    |
-| `read-only`      | 20          | 11     | 9      | 0      | Deterministic read/list profile; write/delete/admin handlers omitted; secret stubs kept. |
+| `full`           | 41          | 21     | 20     | 0      | Complete surface across all backing categories; durable-secret availability annotated.  |
+| `phase1-default` | 38          | 18     | 20     | 0      | Default customer-hosted profile; Partner read/eject/list omitted; secret stubs kept.    |
+| `read-only`      | 21          | 11     | 10     | 0      | Deterministic read/list profile; write/delete/admin handlers omitted; secret stubs kept. |
 
 The enumerated tool lists below are the canonical membership snapshot for this
 decision. The implementation source is the tool registration modules plus
@@ -223,6 +223,7 @@ tools are SDK-backed native B2 operations in the full profile.
 - `s3_create_multipart_upload`
 - `s3_delete_object`
 - `s3_delete_objects`
+- `s3_get_bucket_lifecycle`
 - `s3_get_bucket_location`
 - `s3_get_object`
 - `s3_get_presigned_url`
@@ -286,6 +287,7 @@ compatibility stubs otherwise. Their backing category remains Native B2 SDK.
 - `s3_create_multipart_upload`
 - `s3_delete_object`
 - `s3_delete_objects`
+- `s3_get_bucket_lifecycle`
 - `s3_get_bucket_location`
 - `s3_get_object`
 - `s3_get_presigned_url`
@@ -332,6 +334,7 @@ capabilities:
 
 `s3_*` tools in `read-only`:
 
+- `s3_get_bucket_lifecycle`
 - `s3_get_bucket_location`
 - `s3_get_object`
 - `s3_get_presigned_url`

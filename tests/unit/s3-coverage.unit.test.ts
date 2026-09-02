@@ -80,6 +80,7 @@ describe("S3 tool error paths (catch blocks)", () => {
   // The retained S3 tools that call SDK.send. Presigning-only tools are excluded.
   const tools = [
     "s3_head_bucket",
+    "s3_get_bucket_lifecycle",
     "s3_put_bucket_lifecycle",
     "s3_get_bucket_location",
     "s3_put_object",

@@ -76,13 +76,13 @@ describe("isToolEnabled", () => {
 });
 
 describe("capability-aware registration", () => {
-  it("null capabilities → full surface plus compatibility stubs, no filtering (40 tools)", () => {
-    expect(toolNames(null).length).toBe(40);
+  it("null capabilities → full surface plus compatibility stubs, no filtering (41 tools)", () => {
+    expect(toolNames(null).length).toBe(41);
   });
 
   it("EMPTY capabilities → fail closed instead of full surface", () => {
     const names = toolNames([]);
-    expect(names.length).toBeLessThan(40);
+    expect(names.length).toBeLessThan(41);
     expect(names).toContain("b2_authorize_account");
     expect(names).toContain("b2_create_key");
     expect(names).not.toContain("b2_usage_growth");
@@ -126,7 +126,7 @@ describe("capability-aware registration", () => {
     ]) {
       expect(names).toContain(t);
     }
-    expect(names.length).toBeLessThan(40);
+    expect(names.length).toBeLessThan(41);
   });
 
   it("keeps file-mode durable-secret names callable when filters omit handlers", () => {
@@ -151,6 +151,7 @@ describe("capability-aware registration", () => {
     expect(names).toContain("s3_put_object");
     expect(names).toContain("s3_create_multipart_upload");
     expect(names).toContain("s3_put_bucket_lifecycle");
+    expect(names).toContain("s3_get_bucket_lifecycle");
     expect(names).not.toContain("s3_delete_object");
     expect(names).not.toContain("b2_delete_bucket");
   });

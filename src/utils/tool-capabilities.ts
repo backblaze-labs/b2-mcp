@@ -60,6 +60,7 @@ export const TOOL_CAPABILITIES: Record<string, string[]> = {
   s3_upload_part_copy: ["writeFiles"],
   s3_get_presigned_url: ["readFiles", "writeFiles"],
   s3_head_bucket: ["listBuckets"],
+  s3_get_bucket_lifecycle: ["listBuckets"],
   s3_get_bucket_location: ["listBuckets"],
   s3_put_bucket_lifecycle: ["writeBuckets"],
 };
@@ -227,6 +228,7 @@ export const OAUTH_TOOL_SCOPE_POLICY: Record<string, OAuthToolScopePolicy> = {
   s3_create_multipart_upload: "write",
   s3_delete_object: "write",
   s3_delete_objects: "write",
+  s3_get_bucket_lifecycle: "read",
   s3_get_bucket_location: "read",
   s3_get_object: "read",
   s3_get_presigned_url: "read",

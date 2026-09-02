@@ -6,7 +6,7 @@
 import type { B2S3LifecycleRule, B2S3PeerClient } from "./aws-sdk-adapter.js";
 import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
-import { toolError, toolSuccess } from "../utils/errors.js";
+import { toolError, toolJson, toolSuccess } from "../utils/errors.js";
 import { B2Config } from "../utils/types.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
 
@@ -29,7 +29,10 @@ import { checkDestructive } from "../utils/destructive-gate.js";
  */
 export function registerS3BucketTools(
   server: ToolRegistrar,
-  s3: Pick<B2S3PeerClient, "headBucket" | "putBucketLifecycle" | "deleteBucketLifecycle">,
+  s3: Pick<
+    B2S3PeerClient,
+    "headBucket" | "getBucketLifecycle" | "putBucketLifecycle" | "deleteBucketLifecycle"
+  >,
   config: B2Config,
 ): void {
   server.registerTool(
@@ -45,6 +48,24 @@ export function registerS3BucketTools(
       try {
         await s3.headBucket(args.bucket);
         return toolSuccess(`Bucket '${args.bucket}' exists and is accessible.`);
+      } catch (err) {
+        return toolError(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "s3_get_bucket_lifecycle",
+    {
+      description:
+        "Read S3 lifecycle rules from a B2 bucket through the S3-compatible endpoint. Returns rules in the same normalized shape accepted by s3_put_bucket_lifecycle; no configuration returns configured: false and rules: [].",
+      inputSchema: {
+        bucket: z.string().describe("The bucket name."),
+      },
+    },
+    async (args) => {
+      try {
+        return toolJson(await s3.getBucketLifecycle(args.bucket));
       } catch (err) {
         return toolError(err);
       }

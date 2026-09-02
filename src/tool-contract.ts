@@ -129,6 +129,7 @@ export const TOOL_BACKING_BY_NAME = {
   s3_create_multipart_upload: "awsS3Sdk",
   s3_delete_object: "awsS3Sdk",
   s3_delete_objects: "awsS3Sdk",
+  s3_get_bucket_lifecycle: "awsS3Sdk",
   s3_get_bucket_location: "awsS3Sdk",
   s3_get_object: "awsS3Sdk",
   s3_get_presigned_url: "awsS3Sdk",

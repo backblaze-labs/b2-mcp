@@ -13,9 +13,9 @@
   },
   "capabilities": ["listBuckets", "listFiles", "listKeys", "readBucketNotifications", "readFiles"],
   "counts": {
-    "total": 20,
+    "total": 21,
     "b2": 11,
-    "s3": 9,
+    "s3": 10,
     "bz": 0
   },
   "names": [
@@ -30,6 +30,7 @@
     "b2_reserve_trial_create_account",
     "b2_unfinished_uploads",
     "b2_usage_growth",
+    "s3_get_bucket_lifecycle",
     "s3_get_bucket_location",
     "s3_get_object",
     "s3_get_presigned_url",
@@ -52,6 +53,7 @@
     "b2_reserve_trial_create_account": [],
     "b2_unfinished_uploads": ["bucket"],
     "b2_usage_growth": [],
+    "s3_get_bucket_lifecycle": ["bucket"],
     "s3_get_bucket_location": ["bucket"],
     "s3_get_object": ["bucket", "key"],
     "s3_get_presigned_url": ["bucket", "key", "operation"],
@@ -368,6 +370,27 @@
             "type": "string"
           }
         },
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "s3_get_bucket_lifecycle",
+      "descriptionSha256": "1332684e386564decb3d7e976bdcef5e7fc84c4a19330bc59f405864ded596f3",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "bucket": {
+            "description": "The bucket name.",
+            "type": "string"
+          }
+        },
+        "required": ["bucket"],
         "type": "object"
       },
       "annotations": {
@@ -718,5 +741,5 @@
       "resultType": "complete"
     }
   },
-  "hash": "9873510da79d6862df6aa9b9d0bb55d4646f09b6daf6d89646f197b3845411c0"
+  "hash": "7f5966ed012deb4f9dfe8f9dfe4c26989b87a9537cbdedbf3dc9e07feb55cbfa"
 }

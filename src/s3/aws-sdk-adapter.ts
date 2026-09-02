@@ -17,6 +17,7 @@ import {
   CreateMultipartUploadCommand,
   DeleteBucketLifecycleCommand,
   DeleteObjectCommand,
+  GetBucketLifecycleConfigurationCommand,
   GetBucketLocationCommand,
   GetObjectCommand,
   HeadBucketCommand,
@@ -30,6 +31,7 @@ import {
   S3Client,
   UploadPartCommand,
   UploadPartCopyCommand,
+  type LifecycleRule,
   type S3ClientConfig as AwsS3ClientConfig,
   type S3ClientResolvedConfig,
   type ServiceInputTypes,
@@ -80,10 +82,10 @@ export interface B2S3LifecycleAbortIncompleteMultipartUpload {
   daysAfterInitiation: number;
 }
 
-/** S3 lifecycle rule subset supported by the B2 MCP tool surface. */
-export interface B2S3LifecycleRule {
+/** S3 lifecycle rule subset returned by the B2 MCP read tool. */
+export interface B2S3LifecycleRuleResult {
   /** Rule identifier supplied to S3 lifecycle APIs. */
-  id: string;
+  id?: string;
   /** Whether the lifecycle rule is active. */
   status: "Enabled" | "Disabled";
   /** Optional object-key prefix filter. */
@@ -94,6 +96,12 @@ export interface B2S3LifecycleRule {
   noncurrentVersionExpiration?: B2S3LifecycleNoncurrentVersionExpiration;
   /** Optional cleanup action for incomplete multipart uploads. */
   abortIncompleteMultipartUpload?: B2S3LifecycleAbortIncompleteMultipartUpload;
+}
+
+/** S3 lifecycle rule subset accepted by the B2 MCP write tool. */
+export interface B2S3LifecycleRule extends B2S3LifecycleRuleResult {
+  /** Rule identifier supplied to S3 lifecycle APIs. */
+  id: string;
 }
 
 /** Completed multipart part supplied to S3 CompleteMultipartUpload. */
@@ -438,6 +446,16 @@ export interface B2S3PresignObjectUrlResult {
 export interface B2S3BucketLocationResult {
   /** S3 location constraint returned by the provider, when present. */
   locationConstraint?: string;
+}
+
+/** Result from reading a bucket's S3 lifecycle configuration. */
+export interface B2S3BucketLifecycleResult {
+  /** Bucket whose lifecycle configuration was read. */
+  bucket: string;
+  /** Whether the provider currently has a lifecycle configuration document. */
+  configured: boolean;
+  /** Normalized lifecycle rules in the field casing accepted by the write tool. */
+  rules: B2S3LifecycleRuleResult[];
 }
 
 /** Options for creating a multipart upload. */
@@ -788,6 +806,46 @@ function badRequest(message: string): never {
   throw Object.assign(new Error(message), { status: 400, code: "bad_request" });
 }
 
+function normalizeS3LifecycleRule(rule: LifecycleRule): B2S3LifecycleRuleResult {
+  const expiration: B2S3LifecycleExpiration = {};
+  if (rule.Expiration?.Days !== undefined) expiration.days = rule.Expiration.Days;
+  if (rule.Expiration?.ExpiredObjectDeleteMarker !== undefined) {
+    expiration.expiredObjectDeleteMarker = rule.Expiration.ExpiredObjectDeleteMarker;
+  }
+
+  const prefix = rule.Filter?.Prefix ?? rule.Prefix;
+  return {
+    ...(rule.ID !== undefined ? { id: rule.ID } : {}),
+    status: rule.Status === "Enabled" ? "Enabled" : "Disabled",
+    ...(prefix !== undefined ? { filter: { prefix } } : {}),
+    ...(Object.keys(expiration).length > 0 ? { expiration } : {}),
+    ...(rule.NoncurrentVersionExpiration?.NoncurrentDays !== undefined
+      ? {
+          noncurrentVersionExpiration: {
+            noncurrentDays: rule.NoncurrentVersionExpiration.NoncurrentDays,
+          },
+        }
+      : {}),
+    ...(rule.AbortIncompleteMultipartUpload?.DaysAfterInitiation !== undefined
+      ? {
+          abortIncompleteMultipartUpload: {
+            daysAfterInitiation: rule.AbortIncompleteMultipartUpload.DaysAfterInitiation,
+          },
+        }
+      : {}),
+  };
+}
+
+function isNoSuchLifecycleConfiguration(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const maybe = err as { name?: unknown; code?: unknown; Code?: unknown };
+  return (
+    maybe.name === "NoSuchLifecycleConfiguration" ||
+    maybe.code === "NoSuchLifecycleConfiguration" ||
+    maybe.Code === "NoSuchLifecycleConfiguration"
+  );
+}
+
 /**
  * Reject browser-executable content types for signed upload capabilities.
  *
@@ -895,6 +953,31 @@ export class B2S3PeerClient {
    */
   async headBucket(bucket: string): Promise<void> {
     await this.sendWithCircuit(new HeadBucketCommand({ Bucket: bucket }));
+  }
+
+  /**
+   * Read the S3 lifecycle configuration for a bucket.
+   *
+   * @param bucket - Bucket name.
+   *
+   * @returns Normalized lifecycle configuration for the bucket.
+   */
+  async getBucketLifecycle(bucket: string): Promise<B2S3BucketLifecycleResult> {
+    try {
+      const result = await this.sendWithCircuit(
+        new GetBucketLifecycleConfigurationCommand({ Bucket: bucket }),
+      );
+      return {
+        bucket,
+        configured: true,
+        rules: (result.Rules ?? []).map(normalizeS3LifecycleRule),
+      };
+    } catch (err) {
+      if (isNoSuchLifecycleConfiguration(err)) {
+        return { bucket, configured: false, rules: [] };
+      }
+      throw err;
+    }
   }
 
   /**

@@ -27,7 +27,7 @@ unpublished branches.
 
 ## Tool Backing Taxonomy
 
-The public 40-tool surface is documented by backing category, not by separate
+The public 41-tool surface is documented by backing category, not by separate
 functional buckets. Every tool belongs to exactly one of three categories:
 
 1. Native B2 SDK (`@backblaze-labs/b2-sdk`) for B2 control-plane operations the

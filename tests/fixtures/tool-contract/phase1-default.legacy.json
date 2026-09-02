@@ -27,9 +27,9 @@
     "writeFiles"
   ],
   "counts": {
-    "total": 37,
+    "total": 38,
     "b2": 18,
-    "s3": 19,
+    "s3": 20,
     "bz": 0
   },
   "names": [
@@ -57,6 +57,7 @@
     "s3_create_multipart_upload",
     "s3_delete_object",
     "s3_delete_objects",
+    "s3_get_bucket_lifecycle",
     "s3_get_bucket_location",
     "s3_get_object",
     "s3_get_presigned_url",
@@ -96,6 +97,7 @@
     "s3_create_multipart_upload": ["bucket", "key"],
     "s3_delete_object": ["bucket", "key"],
     "s3_delete_objects": ["bucket", "objects"],
+    "s3_get_bucket_lifecycle": ["bucket"],
     "s3_get_bucket_location": ["bucket"],
     "s3_get_object": ["bucket", "key"],
     "s3_get_presigned_url": ["bucket", "key", "operation"],
@@ -1351,6 +1353,27 @@
       }
     },
     {
+      "name": "s3_get_bucket_lifecycle",
+      "descriptionSha256": "1332684e386564decb3d7e976bdcef5e7fc84c4a19330bc59f405864ded596f3",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "bucket": {
+            "description": "The bucket name.",
+            "type": "string"
+          }
+        },
+        "required": ["bucket"],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
+      }
+    },
+    {
       "name": "s3_get_bucket_location",
       "descriptionSha256": "547c5df273d7e92d1cd70bcde04ae90d3706e9317d7cc06fcb58ace6a8f86465",
       "inputSchema": {
@@ -1925,5 +1948,5 @@
     "toolsListCacheHint": null,
     "discover": null
   },
-  "hash": "de997e8002adb8c1c38147202b4a8f8507d98c37ca1870f928eef281b5523e1c"
+  "hash": "bdbd323ca6340c2e290e51bf0f14e73790eeb1889b2e9f030391197b490bbf23"
 }

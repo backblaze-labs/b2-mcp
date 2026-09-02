@@ -1061,6 +1061,83 @@ describe("s3_put_bucket_lifecycle", () => {
   });
 });
 
+describe("s3_get_bucket_lifecycle", () => {
+  it("returns normalized lifecycle rules", async () => {
+    sendSpy.mockResolvedValueOnce({
+      Rules: [
+        {
+          ID: "expire-after-30-days",
+          Status: "Enabled",
+          Filter: { Prefix: "logs/" },
+          Expiration: { Days: 30 },
+        },
+        {
+          ID: "delete-old-versions",
+          Status: "Enabled",
+          Filter: { Prefix: "docs/" },
+          NoncurrentVersionExpiration: { NoncurrentDays: 90 },
+        },
+        {
+          ID: "abort-incomplete-uploads",
+          Status: "Enabled",
+          Prefix: "",
+          AbortIncompleteMultipartUpload: { DaysAfterInitiation: 7 },
+        },
+      ],
+    });
+
+    const result = parseResult(
+      await callTool(server, "s3_get_bucket_lifecycle", { bucket: "my-bucket" }),
+    );
+
+    expect(result).toEqual({
+      bucket: "my-bucket",
+      configured: true,
+      rules: [
+        {
+          id: "expire-after-30-days",
+          status: "Enabled",
+          filter: { prefix: "logs/" },
+          expiration: { days: 30 },
+        },
+        {
+          id: "delete-old-versions",
+          status: "Enabled",
+          filter: { prefix: "docs/" },
+          noncurrentVersionExpiration: { noncurrentDays: 90 },
+        },
+        {
+          id: "abort-incomplete-uploads",
+          status: "Enabled",
+          filter: { prefix: "" },
+          abortIncompleteMultipartUpload: { daysAfterInitiation: 7 },
+        },
+      ],
+    });
+    expect(sendSpy.mock.calls[0][0].constructor.name).toBe(
+      "GetBucketLifecycleConfigurationCommand",
+    );
+    expect(sendSpy.mock.calls[0][0].input).toMatchObject({ Bucket: "my-bucket" });
+  });
+
+  it("returns an empty not configured result when S3 has no lifecycle configuration", async () => {
+    sendSpy.mockRejectedValueOnce({
+      name: "NoSuchLifecycleConfiguration",
+      message: "The lifecycle configuration does not exist.",
+      $metadata: { httpStatusCode: 404, requestId: "rq-lifecycle" },
+    });
+
+    const result = await callTool(server, "s3_get_bucket_lifecycle", { bucket: "empty-bucket" });
+
+    expect(result.isError).toBeFalsy();
+    expect(parseResult(result)).toEqual({
+      bucket: "empty-bucket",
+      configured: false,
+      rules: [],
+    });
+  });
+});
+
 describe("s3_get_bucket_location", () => {
   it("returns the bucket location constraint", async () => {
     sendSpy.mockResolvedValueOnce({ LocationConstraint: "us-west-004" });

@@ -8,16 +8,16 @@ Approved modern cache hint: `ttlMs=30000`, `cacheScope=private`
 
 | Profile | Total | `b2_*` | `s3_*` | `bz_*` | Hash prefix |
 | --- | ---: | ---: | ---: | ---: | --- |
-| `full` | 40 | 21 | 19 | 0 | `537cb0277be8` |
-| `live-b2-contract` | 39 | 20 | 19 | 0 | `9449981e8ef1` |
-| `phase1-default` | 37 | 18 | 19 | 0 | `de997e8002ad` |
-| `read-only` | 20 | 11 | 9 | 0 | `9873510da79d` |
+| `full` | 41 | 21 | 20 | 0 | `f315bd824c73` |
+| `live-b2-contract` | 40 | 20 | 20 | 0 | `1495adfb11c0` |
+| `phase1-default` | 38 | 18 | 20 | 0 | `bdbd323ca634` |
+| `read-only` | 21 | 11 | 10 | 0 | `7f5966ed012d` |
 
 ## `full`
 
 Complete tool superset for contract review and regression detection across all backing categories; durable-secret producers are sink-backed when a secret sink is active and otherwise remain availability-annotated stubs.
 
-Profile hash: `537cb0277be8d453239d7ca8462eedb5d24733da6ee804d1a22458250a2d129c`
+Profile hash: `f315bd824c73c6b4b6cabcbc5a1ec7cc367eb60e211f41dcd4642d76c14d24f0`
 
 ### Capability Input
 
@@ -26,7 +26,7 @@ Profile hash: `537cb0277be8d453239d7ca8462eedb5d24733da6ee804d1a22458250a2d129c`
 ### Backing Categories
 
 - Native B2 SDK: 17
-- AWS S3 SDK: 19
+- AWS S3 SDK: 20
 - Neither SDK: 4
 
 ### `b2_*` Tools (21)
@@ -53,7 +53,7 @@ Profile hash: `537cb0277be8d453239d7ca8462eedb5d24733da6ee804d1a22458250a2d129c`
 - `b2_update_file_retention`
 - `b2_usage_growth`
 
-### `s3_*` Tools (19)
+### `s3_*` Tools (20)
 
 - `s3_abort_multipart_upload`
 - `s3_complete_multipart_upload`
@@ -61,6 +61,7 @@ Profile hash: `537cb0277be8d453239d7ca8462eedb5d24733da6ee804d1a22458250a2d129c`
 - `s3_create_multipart_upload`
 - `s3_delete_object`
 - `s3_delete_objects`
+- `s3_get_bucket_lifecycle`
 - `s3_get_bucket_location`
 - `s3_get_object`
 - `s3_get_presigned_url`
@@ -79,7 +80,7 @@ Profile hash: `537cb0277be8d453239d7ca8462eedb5d24733da6ee804d1a22458250a2d129c`
 
 Protected live B2 contract profile: non-master application key with release-evidence capabilities, no key-management grants, and a distinct master key only for Partner/Groups API surface discovery.
 
-Profile hash: `9449981e8ef194d9c1b4f2da77da00388e4f91c10609eed526655d6be446cacf`
+Profile hash: `1495adfb11c0ad592b1312de720b530b84612789929675d567104dea0e5ae4cc`
 
 ### Capability Input
 
@@ -106,7 +107,7 @@ Profile hash: `9449981e8ef194d9c1b4f2da77da00388e4f91c10609eed526655d6be446cacf`
 ### Backing Categories
 
 - Native B2 SDK: 16
-- AWS S3 SDK: 19
+- AWS S3 SDK: 20
 - Neither SDK: 4
 
 ### `b2_*` Tools (20)
@@ -132,7 +133,7 @@ Profile hash: `9449981e8ef194d9c1b4f2da77da00388e4f91c10609eed526655d6be446cacf`
 - `b2_update_file_retention`
 - `b2_usage_growth`
 
-### `s3_*` Tools (19)
+### `s3_*` Tools (20)
 
 - `s3_abort_multipart_upload`
 - `s3_complete_multipart_upload`
@@ -140,6 +141,7 @@ Profile hash: `9449981e8ef194d9c1b4f2da77da00388e4f91c10609eed526655d6be446cacf`
 - `s3_create_multipart_upload`
 - `s3_delete_object`
 - `s3_delete_objects`
+- `s3_get_bucket_lifecycle`
 - `s3_get_bucket_location`
 - `s3_get_object`
 - `s3_get_presigned_url`
@@ -158,7 +160,7 @@ Profile hash: `9449981e8ef194d9c1b4f2da77da00388e4f91c10609eed526655d6be446cacf`
 
 Default customer-hosted Phase 1 profile: standard B2 application key, no distinct Partner/master credential, and durable-secret producers exposed as sink-backed tools on local stdio or unavailable stubs when the sink is off.
 
-Profile hash: `de997e8002adb8c1c38147202b4a8f8507d98c37ca1870f928eef281b5523e1c`
+Profile hash: `bdbd323ca6340c2e290e51bf0f14e73790eeb1889b2e9f030391197b490bbf23`
 
 ### Capability Input
 
@@ -179,7 +181,7 @@ Profile hash: `de997e8002adb8c1c38147202b4a8f8507d98c37ca1870f928eef281b5523e1c`
 ### Backing Categories
 
 - Native B2 SDK: 14
-- AWS S3 SDK: 19
+- AWS S3 SDK: 20
 - Neither SDK: 4
 
 ### `b2_*` Tools (18)
@@ -203,7 +205,7 @@ Profile hash: `de997e8002adb8c1c38147202b4a8f8507d98c37ca1870f928eef281b5523e1c`
 - `b2_update_file_retention`
 - `b2_usage_growth`
 
-### `s3_*` Tools (19)
+### `s3_*` Tools (20)
 
 - `s3_abort_multipart_upload`
 - `s3_complete_multipart_upload`
@@ -211,6 +213,7 @@ Profile hash: `de997e8002adb8c1c38147202b4a8f8507d98c37ca1870f928eef281b5523e1c`
 - `s3_create_multipart_upload`
 - `s3_delete_object`
 - `s3_delete_objects`
+- `s3_get_bucket_lifecycle`
 - `s3_get_bucket_location`
 - `s3_get_object`
 - `s3_get_presigned_url`
@@ -229,7 +232,7 @@ Profile hash: `de997e8002adb8c1c38147202b4a8f8507d98c37ca1870f928eef281b5523e1c`
 
 Deterministic read/list profile for safe production use and contract tests; write/delete/admin handlers are omitted while durable-secret producer names remain unavailable stubs unless a sink-backed admin profile is configured.
 
-Profile hash: `9873510da79d6862df6aa9b9d0bb55d4646f09b6daf6d89646f197b3845411c0`
+Profile hash: `7f5966ed012deb4f9dfe8f9dfe4c26989b87a9537cbdedbf3dc9e07feb55cbfa`
 
 ### Capability Input
 
@@ -242,7 +245,7 @@ Profile hash: `9873510da79d6862df6aa9b9d0bb55d4646f09b6daf6d89646f197b3845411c0`
 ### Backing Categories
 
 - Native B2 SDK: 7
-- AWS S3 SDK: 9
+- AWS S3 SDK: 10
 - Neither SDK: 4
 
 ### `b2_*` Tools (11)
@@ -259,8 +262,9 @@ Profile hash: `9873510da79d6862df6aa9b9d0bb55d4646f09b6daf6d89646f197b3845411c0`
 - `b2_unfinished_uploads`
 - `b2_usage_growth`
 
-### `s3_*` Tools (9)
+### `s3_*` Tools (10)
 
+- `s3_get_bucket_lifecycle`
 - `s3_get_bucket_location`
 - `s3_get_object`
 - `s3_get_presigned_url`

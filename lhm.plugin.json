@@ -1478,6 +1478,28 @@
       }
     },
     {
+      "name": "s3_get_bucket_lifecycle",
+      "description": "Read S3 lifecycle rules from a B2 bucket through the S3-compatible endpoint. Returns rules in the same normalized shape accepted by s3_put_bucket_lifecycle; no configuration returns configured: false and rules: [].",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "bucket": {
+            "type": "string",
+            "description": "The bucket name."
+          }
+        },
+        "required": ["bucket"],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
       "name": "s3_get_bucket_location",
       "description": "Get the region (location constraint) of a B2 bucket via the S3-compatible API. No native b2_* equivalent — used to verify region/endpoint pairing.",
       "inputSchema": {
