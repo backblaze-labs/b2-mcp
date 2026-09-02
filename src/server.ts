@@ -929,9 +929,9 @@ function argKeysOf(args: unknown): string[] {
  * circuit returns the `missing_credentials` error without touching the real
  * handler, yet still emits the `tool.call` audit event (with the classified
  * code/status) so rejected attempts stay observable instead of leaving a gap.
- * It backstops {@link installDiscoveryModeToolCallHandler}: it runs only when a
- * call already cleared the SDK's schema validation (a no-required-argument tool)
- * and reached the per-tool callback.
+ * It backstops the low-level discovery-mode `tools/call` interceptor: it runs
+ * only when a call already cleared the SDK's schema validation (a
+ * no-required-argument tool) and reached the per-tool callback.
  *
  * @param name - Registered tool name recorded in the audit event.
  * @param config - Resolved B2 credentials and runtime policy.

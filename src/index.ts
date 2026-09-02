@@ -91,27 +91,6 @@ async function fetchStdioCapabilities(
   }
 }
 
-/**
- * Start the MCP server over stdio.
- *
- * @remarks
- * The stdio path reads credentials from the process environment, attempts
- * capability discovery once with a `B2_STDIO_CAPABILITY_TIMEOUT_MS` bootstrap
- * deadline (10s by default). A local deadline expiry starts with an empty
- * fail-closed capability set; a returned transient upstream outage degrades to
- * the full tool surface. Other credential errors remain fatal during bootstrap.
- *
- * @returns A promise that resolves after the stdio transport has been
- * registered with the MCP SDK.
- *
- * @throws CredentialResolutionError when credential resolution fails for a
- * reason other than transient capability lookup.
- *
- * @example
- * ```ts
- * await startStdio();
- * ```
- */
 const DISCOVERY_MODE_CREDENTIAL = "b2-mcp-discovery-mode";
 
 /**
@@ -145,6 +124,29 @@ function enterStdioDiscoveryModeIfNeeded(env: NodeJS.ProcessEnv = process.env): 
   return true;
 }
 
+/**
+ * Start the MCP server over stdio.
+ *
+ * @remarks
+ * The stdio path reads credentials from the process environment, attempts
+ * capability discovery once with a `B2_STDIO_CAPABILITY_TIMEOUT_MS` bootstrap
+ * deadline (10s by default). A local deadline expiry starts with an empty
+ * fail-closed capability set; a returned transient upstream outage degrades to
+ * the full tool surface. Other credential errors remain fatal during bootstrap.
+ * When no application key is present, the bootstrap starts a credential-less
+ * discovery server instead of exiting.
+ *
+ * @returns A promise that resolves after the stdio transport has been
+ * registered with the MCP SDK.
+ *
+ * @throws CredentialResolutionError when credential resolution fails for a
+ * reason other than transient capability lookup.
+ *
+ * @example
+ * ```ts
+ * await startStdio();
+ * ```
+ */
 export async function startStdio(): Promise<void> {
   initLogging();
   const discoveryMode = enterStdioDiscoveryModeIfNeeded();
