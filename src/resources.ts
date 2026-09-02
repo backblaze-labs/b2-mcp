@@ -28,6 +28,7 @@ import {
   sanitizeError,
   sanitizeProviderCode,
   sanitizeProviderRequestId,
+  sanitizeText,
   runWithSanitizerOptions,
   sanitizerOptionsFromConfig,
   type SanitizerOptions,
@@ -216,6 +217,7 @@ async function withResourceGuards<T>(
   const start = Date.now();
   const signal = (ctx as { mcpReq?: { signal?: AbortSignal } } | undefined)?.mcpReq?.signal;
   const sanitizerOptions = sanitizerOptionsFromConfig(config);
+  const safeUri = sanitizeText(audit.uri, sanitizerOptions);
   try {
     const result = await runWithMcpRequestSignal(signal ?? currentMcpRequestSignal(), () =>
       runWithSanitizerOptions(sanitizerOptions, callback),
@@ -224,7 +226,7 @@ async function withResourceGuards<T>(
     logger.info(
       {
         resource: audit.name,
-        uri: audit.uri,
+        uri: safeUri,
         operation: audit.operation,
         credential: credentialFingerprint(config),
         durationMs: Date.now() - start,
@@ -238,7 +240,7 @@ async function withResourceGuards<T>(
     logger.warn(
       {
         resource: audit.name,
-        uri: audit.uri,
+        uri: safeUri,
         operation: audit.operation,
         credential: credentialFingerprint(config),
         durationMs: Date.now() - start,
@@ -375,6 +377,7 @@ async function bucketEventNotifications(
 
   const start = Date.now();
   const sanitizerOptions = sanitizerOptionsFromConfig(options.config);
+  const safeUri = sanitizeText(uri, sanitizerOptions);
   try {
     const value = redactNotificationSecrets(
       await options.b2Client.getBucketNotificationRules(bucketId),
@@ -387,7 +390,7 @@ async function bucketEventNotifications(
     logger.warn(
       {
         resource: "b2_bucket",
-        uri,
+        uri: safeUri,
         operation: "b2_get_bucket_notification_rules",
         credential: credentialFingerprint(options.config),
         durationMs: Date.now() - start,

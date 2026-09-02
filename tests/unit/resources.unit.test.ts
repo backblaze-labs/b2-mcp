@@ -658,6 +658,77 @@ describe("MCP control-plane resources", () => {
     }
   });
 
+  it("sanitizes request-controlled bucket resource URIs in audit logs", async () => {
+    const bucket = bucketInfoFixture("bucket-id-secret", testConfig.applicationKey);
+    const fake = new DeterministicB2NativeFake({ capabilities: ["listBuckets"] }).respond(
+      "b2_list_buckets",
+      new StaticHttpResponse(200, { buckets: [bucket] }),
+    );
+    const { client, close } = await connectResourceClient({
+      capabilities: ["listBuckets"],
+      fake,
+    });
+
+    try {
+      const uri = `b2://bucket/${testConfig.applicationKey}`;
+      const resource = parseJsonResource<BucketResourcePayload>(
+        await client.readResource({ uri }, { cacheMode: "refresh" }),
+      );
+      expect(resource.uri).toBe("b2://bucket/[redacted]");
+      expect(infoSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          resource: "b2_bucket",
+          uri: "b2://bucket/[redacted]",
+          operation: "resources/read",
+          error: false,
+        }),
+        "resource.call",
+      );
+      expect(JSON.stringify(infoSpy.mock.calls)).not.toContain(testConfig.applicationKey);
+    } finally {
+      await close();
+    }
+  });
+
+  it("sanitizes request-controlled bucket resource URIs in protocol errors", async () => {
+    const fake = new DeterministicB2NativeFake({ capabilities: ["listBuckets"] }).respond(
+      "b2_list_buckets",
+      new StaticHttpResponse(200, { buckets: [] }),
+    );
+    const { client, close } = await connectResourceClient({
+      capabilities: ["listBuckets"],
+      fake,
+    });
+
+    try {
+      const uri = `b2://bucket/${testConfig.applicationKey}`;
+      let error: unknown;
+      try {
+        await client.readResource({ uri }, { cacheMode: "refresh" });
+      } catch (err) {
+        error = err;
+      }
+
+      expect(error).toBeInstanceOf(ResourceNotFoundError);
+      expect(error).toMatchObject({
+        code: ProtocolErrorCode.InvalidParams,
+        data: { uri: "b2://bucket/[redacted]" },
+      });
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          resource: "b2_bucket",
+          uri: "b2://bucket/[redacted]",
+          operation: "resources/read",
+          error: true,
+        }),
+        "resource.error",
+      );
+      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain(testConfig.applicationKey);
+    } finally {
+      await close();
+    }
+  });
+
   it("caps bucket resources/list for large bucket namespaces", async () => {
     const buckets = Array.from({ length: BUCKET_RESOURCE_LIST_LIMIT + 25 }, (_, index) =>
       bucketInfoFixture(
