@@ -393,4 +393,33 @@ describe("Prompt audit logging", () => {
     );
     expect(JSON.stringify(warn.mock.calls)).not.toContain("private-bucket-name");
   });
+
+  it("sanitizes labeled secrets reflected in the prompt result", async () => {
+    vi.spyOn(logger, "info").mockImplementation(() => undefined);
+    const auditConfig = { ...config, credentialFingerprint: "credential-fp" };
+
+    const reflect = createAuditedPromptCallback(
+      "b2_reflect_prompt",
+      async () => ({
+        description: "B2 prompt reflecting user input",
+        messages: [
+          {
+            role: "user",
+            content: {
+              type: "text",
+              text: "Use B2_APPLICATION_KEY=super-secret-value for the audit.",
+            },
+          },
+        ],
+      }),
+      auditConfig,
+    );
+
+    const result = (await reflect({ capabilities: "listBuckets" }, {})) as {
+      messages: { content: { text: string } }[];
+    };
+    const rendered = JSON.stringify(result);
+    expect(rendered).not.toContain("super-secret-value");
+    expect(result.messages[0].content.text).toContain("[redacted]");
+  });
 });

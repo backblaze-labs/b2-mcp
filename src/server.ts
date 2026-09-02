@@ -954,10 +954,18 @@ export function createAuditedPromptCallback(
   return async function auditedPromptCallback(args: any, extra: any) {
     const start = Date.now();
     const argKeys = argKeysOf(args);
+    const sanitizerOptions = sanitizerOptionsFromConfig(config);
     try {
-      const result = await runWithSanitizerOptions(sanitizerOptionsFromConfig(config), () =>
+      const rawResult = await runWithSanitizerOptions(sanitizerOptions, () =>
         original(args, extra),
       );
+      // Prompt templates echo arbitrary string arguments (capabilities,
+      // namePrefix, expectedEventTypes, ...). Installing sanitizer options is
+      // not enough: the raw callback result is returned verbatim, so a pasted
+      // labeled secret could reflect into MCP output. Sanitize before use.
+      const result = isSanitizedMcpResponse(rawResult)
+        ? rawResult
+        : sanitizeMcpResponse(rawResult, sanitizerOptions);
       const durationMs = Date.now() - start;
       const resultType =
         (result as { resultType?: unknown })?.resultType === "input_required"
@@ -976,7 +984,7 @@ export function createAuditedPromptCallback(
       );
       return result;
     } catch (err) {
-      const safeErr = sanitizeError(err, sanitizerOptionsFromConfig(config));
+      const safeErr = sanitizeError(err, sanitizerOptions);
       const durationMs = Date.now() - start;
       logger.warn(
         {
