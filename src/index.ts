@@ -136,7 +136,11 @@ function enterStdioDiscoveryModeIfNeeded(env: NodeJS.ProcessEnv = process.env): 
   if (env.B2_APPLICATION_KEY_ID && env.B2_APPLICATION_KEY) return false;
   env.B2_APPLICATION_KEY_ID = DISCOVERY_MODE_CREDENTIAL;
   env.B2_APPLICATION_KEY = DISCOVERY_MODE_CREDENTIAL;
-  if (!env.B2_SECRET_SINK) env.B2_SECRET_SINK = "off";
+  // Force the secret sink off unconditionally: an explicit `file` value would
+  // make loadConfig preflight/create the sink file (and can fail before
+  // tools/list), and `inline` emits an unrelated durable-secret warning. Either
+  // contradicts the discovery-mode guarantee that the sink is off.
+  env.B2_SECRET_SINK = "off";
   env.B2_REGISTER_ALL_TOOLS = "true";
   return true;
 }
@@ -153,10 +157,7 @@ export async function startStdio(): Promise<void> {
     "capability.fetch.stdio_starting",
   );
   if (discoveryMode) {
-    logger.warn(
-      { transport: "stdio", reason: "no_credentials" },
-      "server.stdio_discovery_mode",
-    );
+    logger.warn({ transport: "stdio", reason: "no_credentials" }, "server.stdio_discovery_mode");
   }
   flushLogsSync();
   try {

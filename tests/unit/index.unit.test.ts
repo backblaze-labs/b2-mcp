@@ -156,9 +156,12 @@ describe("stdio entry point", () => {
     // B2_REGISTER_ALL_TOOLS=true makes the real fetchCapabilities resolve null;
     // the mock stands in for that full-surface result.
     const fetchCapabilities = vi.spyOn(serverModule, "fetchCapabilities").mockResolvedValue(null);
-    const serveStdio = vi.mocked(stdioTransport.serveStdio).mockImplementation(
-      () => ({ close: vi.fn(async () => undefined) }) as ReturnType<typeof stdioTransport.serveStdio>,
-    );
+    const serveStdio = vi
+      .mocked(stdioTransport.serveStdio)
+      .mockImplementation(
+        () =>
+          ({ close: vi.fn(async () => undefined) }) as ReturnType<typeof stdioTransport.serveStdio>,
+      );
     const warn = vi.spyOn(loggerModule.logger, "warn").mockImplementation(() => undefined);
 
     await startStdio();
@@ -184,9 +187,12 @@ describe("stdio entry point", () => {
     const createServer = vi.spyOn(serverModule, "createServer").mockReturnValue(server as never);
     vi.spyOn(serverModule, "loadConfig").mockReturnValue(config);
     vi.spyOn(serverModule, "fetchCapabilities").mockResolvedValue(["listBuckets"]);
-    const serveStdio = vi.mocked(stdioTransport.serveStdio).mockImplementation(
-      () => ({ close: vi.fn(async () => undefined) }) as ReturnType<typeof stdioTransport.serveStdio>,
-    );
+    const serveStdio = vi
+      .mocked(stdioTransport.serveStdio)
+      .mockImplementation(
+        () =>
+          ({ close: vi.fn(async () => undefined) }) as ReturnType<typeof stdioTransport.serveStdio>,
+      );
 
     await startStdio();
     (serveStdio.mock.calls[0]?.[0] as (() => unknown) | undefined)?.();
@@ -306,7 +312,8 @@ describe("stdio entry point", () => {
     vi.spyOn(serverModule, "loadConfig").mockReturnValue(config);
     vi.spyOn(serverModule, "fetchCapabilities").mockResolvedValue(null);
     vi.mocked(stdioTransport.serveStdio).mockImplementation(
-      () => ({ close: vi.fn(async () => undefined) }) as ReturnType<typeof stdioTransport.serveStdio>,
+      () =>
+        ({ close: vi.fn(async () => undefined) }) as ReturnType<typeof stdioTransport.serveStdio>,
     );
 
     await expect(startStdio()).resolves.toBeUndefined();
@@ -454,9 +461,13 @@ describe("executable CLI entry point", () => {
     });
 
     // No longer exits with the missing-credential fatal (previously status 1);
-    // the server starts in discovery mode and closes on stdin EOF instead. The
-    // discovery warning itself is asserted in the mocked stdio-entry test above.
-    expect(result.status).not.toBe(1);
+    // the server starts in discovery mode and closes cleanly on stdin EOF. Assert
+    // an exact clean exit so a timeout (status null + error set) or any alternate
+    // startup crash cannot pass. The discovery warning itself is asserted in the
+    // mocked stdio-entry test above.
+    expect(result.error).toBeUndefined();
+    expect(result.signal).toBeNull();
+    expect(result.status).toBe(0);
     const output = `${result.stdout}${result.stderr}`;
     expect(output).not.toContain(
       "B2_APPLICATION_KEY_ID and B2_APPLICATION_KEY are required for stdio",

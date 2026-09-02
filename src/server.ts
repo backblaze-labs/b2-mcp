@@ -315,7 +315,7 @@ export function createServer(
     shouldRegister: shouldRegisterForResolvedAuthz,
     wrapCallback: (name, callback) =>
       options.credentialsMissing === true
-        ? async () => toolError(MISSING_CREDENTIALS_TOOL_ERROR)
+        ? createMissingCredentialsToolCallback(name, config)
         : createAuditedToolCallback(name, callback, config, {
             getClientCapabilities: () => getMcpClientCapabilities(server),
             getProtocolVersion: () => getMcpNegotiatedProtocolVersion(server),
@@ -876,6 +876,53 @@ export function createAuditedToolCallback(
       );
       throw safeErr;
     }
+  };
+}
+
+/**
+ * Build an audit-only tool callback for discovery mode.
+ *
+ * @remarks
+ * Discovery mode registers the full surface with placeholder credentials but
+ * must reject every execution ahead of provider/destructive handling. This short
+ * circuit returns the `missing_credentials` error without touching the real
+ * handler, yet still emits the `tool.call` audit event (with the classified
+ * code/status) so rejected attempts stay observable instead of leaving a gap.
+ *
+ * @param name - Registered tool name recorded in the audit event.
+ * @param config - Resolved B2 credentials and runtime policy.
+ *
+ * @returns A tool callback that logs the attempt and returns `missing_credentials`.
+ *
+ * @example
+ * ```ts
+ * const callback = createMissingCredentialsToolCallback("b2_list_buckets", config);
+ * ```
+ */
+export function createMissingCredentialsToolCallback(name: string, config: B2Config): ToolCallback {
+  const keyFingerprint = config.credentialFingerprint ?? fingerprintConfig(config);
+  const outputFormat = config.outputFormat ?? DEFAULT_MCP_OUTPUT_FORMAT;
+
+  return async function missingCredentialsToolCallback(args: any) {
+    const start = Date.now();
+    const argKeys =
+      args && typeof args === "object" && !Array.isArray(args) ? Object.keys(args) : [];
+    const result = toolError(MISSING_CREDENTIALS_TOOL_ERROR);
+    logger.info(
+      {
+        tool: name,
+        credential: keyFingerprint,
+        outputFormat,
+        argKeys,
+        durationMs: Date.now() - start,
+        error: true,
+        resultType: "complete",
+        code: MISSING_CREDENTIALS_TOOL_ERROR.code,
+        status: MISSING_CREDENTIALS_TOOL_ERROR.status,
+      },
+      "tool.call",
+    );
+    return result;
   };
 }
 

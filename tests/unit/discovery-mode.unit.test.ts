@@ -1,6 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createServer } from "../../src/server";
+import { logger } from "../../src/utils/logger";
 import { callTool, testConfig } from "../support/deterministic-fakes";
+
+afterEach(() => vi.restoreAllMocks());
 
 // createServer(config, null, { credentialsMissing: true }) is the credential-less
 // stdio discovery mode: the full tool surface is registered so directory services
@@ -18,6 +21,23 @@ describe("credential-less discovery mode", () => {
       expect(text).toContain("HTTP 401");
       expect(text).toContain("B2_APPLICATION_KEY_ID");
     }
+  });
+
+  it("emits a tool.call audit event for the rejected attempt", async () => {
+    const infoSpy = vi.spyOn(logger, "info").mockImplementation(() => undefined as never);
+    const server = createServer(testConfig, null, { credentialsMissing: true });
+
+    await callTool(server, "b2_list_buckets", {});
+
+    expect(infoSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tool: "b2_list_buckets",
+        error: true,
+        code: "missing_credentials",
+        status: 401,
+      }),
+      "tool.call",
+    );
   });
 
   it("guards even the bootstrap authorize tool", async () => {
