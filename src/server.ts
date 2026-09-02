@@ -353,9 +353,16 @@ export function createServer(
     : auth;
   const masterClient = masterIsDistinct ? new B2Client(masterAuth) : b2Client;
 
+  // Discovery mode advertises the full durable-secret schemas (decoupled from
+  // sink availability) so registries learn real inputs like keyName/capabilities/
+  // email; the discovery guard still rejects every call before execution.
+  const durableSecretOptions = {
+    registerDurableSecretSchemas: options.credentialsMissing === true,
+  };
+
   // ── B2 Native API tools (control plane: buckets, keys, object lock) ──────
   registerBucketTools(registrar, b2Client, config);
-  registerKeyTools(registrar, b2Client, auth, config);
+  registerKeyTools(registrar, b2Client, auth, config, durableSecretOptions);
   registerObjectLockTools(registrar, b2Client, config);
 
   // ── Partner API tools (master key) ──────────────────────────────────────
@@ -364,7 +371,7 @@ export function createServer(
   // distinct master key is configured; otherwise (and in full-surface mode) keep
   // the prior behavior of always registering them.
   if (!filterActive || masterIsDistinct) {
-    registerPartnerTools(registrar, masterClient, masterAuth, config);
+    registerPartnerTools(registrar, masterClient, masterAuth, config, durableSecretOptions);
   }
 
   // ── S3-Compatible API tools (data plane: objects + multipart) ────────────
@@ -408,8 +415,12 @@ export function createServer(
       (name) => !registrar.hasTool(name) && isToolAllowedByOAuthScopes(name, oauthScopes),
     );
   } else if (config.secretSink?.mode !== "inline") {
-    registerDurableSecretCompatibilityStubs(registrar, config.secretSink, (name) =>
-      isToolAllowedByOAuthScopes(name, oauthScopes),
+    // Skip names already registered: discovery mode advertises the full
+    // durable-secret schemas above, so a stub would duplicate the registration.
+    registerDurableSecretCompatibilityStubs(
+      registrar,
+      config.secretSink,
+      (name) => !registrar.hasTool(name) && isToolAllowedByOAuthScopes(name, oauthScopes),
     );
   }
 

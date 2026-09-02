@@ -3,7 +3,7 @@
  *
  * @packageDocumentation
  */
-import type { ToolRegistrar } from "../mcp.js";
+import type { DurableSecretRegistrationOptions, ToolRegistrar } from "../mcp.js";
 import type { Region } from "@backblaze-labs/b2-sdk/partner";
 import { z } from "zod";
 import { codedError, toolJson, toolError } from "../utils/errors.js";
@@ -242,6 +242,10 @@ function confirmedGroupMemberAccountIds(
  * compatibility.
  * @param config - Server configuration for destructive policy and secret-sink
  * behavior.
+ * @param options - Registration controls; `registerDurableSecretSchemas` forces
+ * the full `b2_create_group_member` / `b2_reserve_trial_create_account` schemas
+ * even without an active sink (discovery mode, where execution is guarded
+ * separately) so `tools/list` advertises real inputs.
  *
  * @example
  * ```ts
@@ -253,6 +257,7 @@ export function registerPartnerTools(
   client: B2Client,
   _auth: B2AuthManager,
   config: B2Config,
+  options: DurableSecretRegistrationOptions = {},
 ): void {
   // ── b2_list_groups ──────────────────────────────────────────────────────────
   server.registerTool(
@@ -299,7 +304,11 @@ export function registerPartnerTools(
   );
 
   // ── b2_create_group_member ────────────────────────────────────────────────
-  if (config.secretSink?.mode === "file" || config.secretSink?.mode === "inline") {
+  if (
+    config.secretSink?.mode === "file" ||
+    config.secretSink?.mode === "inline" ||
+    options.registerDurableSecretSchemas === true
+  ) {
     server.registerTool(
       "b2_create_group_member",
       {
@@ -540,7 +549,7 @@ export function registerPartnerTools(
   );
 
   // ── b2_reserve_trial_create_account ───────────────────────────────────────
-  if (config.secretSink?.mode === "inline") {
+  if (config.secretSink?.mode === "inline" || options.registerDurableSecretSchemas === true) {
     server.registerTool(
       "b2_reserve_trial_create_account",
       {

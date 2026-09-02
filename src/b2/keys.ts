@@ -3,7 +3,7 @@
  *
  * @packageDocumentation
  */
-import type { ToolRegistrar } from "../mcp.js";
+import type { DurableSecretRegistrationOptions, ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
 import { B2Client, type FullApplicationKeyResult, type ListKeysOptions } from "./client.js";
 import { B2AuthManager } from "../auth.js";
@@ -128,6 +128,9 @@ function normalizeCreateKeyBucketScope(args: { bucketId?: string; bucketIds?: st
  * @param client - Repository-owned B2 native client.
  * @param auth - Auth manager used for account-scoped key requests.
  * @param config - Server configuration for secret-sink and destructive policy.
+ * @param options - Registration controls; `registerDurableSecretSchemas` forces
+ * the full `b2_create_key` schema even without an active sink (discovery mode,
+ * where execution is guarded separately) so `tools/list` advertises real inputs.
  *
  * @example
  * ```ts
@@ -139,9 +142,14 @@ export function registerKeyTools(
   client: B2Client,
   auth: B2AuthManager,
   config: B2Config,
+  options: DurableSecretRegistrationOptions = {},
 ): void {
   // ── b2_create_key ─────────────────────────────────────────────────────────
-  if (config.secretSink?.mode === "file" || config.secretSink?.mode === "inline") {
+  if (
+    config.secretSink?.mode === "file" ||
+    config.secretSink?.mode === "inline" ||
+    options.registerDurableSecretSchemas === true
+  ) {
     server.registerTool(
       "b2_create_key",
       {
