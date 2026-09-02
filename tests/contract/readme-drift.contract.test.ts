@@ -98,6 +98,11 @@ describe("README project badges", () => {
     );
     expect(readme).toContain("glama.ai/mcp/servers/@backblaze-labs/b2-mcp");
     expect(readme).toContain("smithery.ai/server/@backblaze-labs/b2-mcp");
+    // The MCP Registry badge must query the nested `$.servers[0].server.version`
+    // path (encoded), matching the 2025-12-11 registry response shape. Guard
+    // against a regression back to the flat `$.servers[0].version` query.
+    expect(readme).toContain("query=%24.servers%5B0%5D.server.version");
+    expect(readme).not.toContain("query=%24.servers%5B0%5D.version");
     // Never link badges to fragile search-result URLs.
     expect(readme).not.toContain("registry.modelcontextprotocol.io/?search=");
     expect(readme).not.toContain("smithery.ai/servers?q=");
