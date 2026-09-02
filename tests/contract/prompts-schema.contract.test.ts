@@ -152,6 +152,35 @@ describe("Prompt inventory", () => {
     expect(Object.keys(getRegisteredPrompts(server) ?? {})).toEqual([]);
   });
 
+  it("rejects duplicate prompt names before commit", () => {
+    const server = createMcpServer({ name: "prompt-dup-test", version: "1.0.0" });
+    const registrar = new PromptRegistrationAdapter(server);
+    const message = () => ({
+      messages: [{ role: "user" as const, content: { type: "text" as const, text: "x" } }],
+    });
+
+    registrar.registerPrompt("b2_demo_prompt", { description: "first" }, message);
+    expect(() =>
+      registrar.registerPrompt("b2_demo_prompt", { description: "second" }, message),
+    ).toThrow("Duplicate MCP prompt registration: b2_demo_prompt");
+  });
+
+  it("rejects prompt registration after commit and is idempotent across commits", () => {
+    const server = createMcpServer({ name: "prompt-late-test", version: "1.0.0" });
+    const registrar = new PromptRegistrationAdapter(server);
+    const message = () => ({
+      messages: [{ role: "user" as const, content: { type: "text" as const, text: "x" } }],
+    });
+
+    registrar.registerPrompt("b2_demo_prompt", { description: "first" }, message);
+    expect(registrar.commit()).toBe(1);
+    expect(registrar.commit()).toBe(1);
+    expect(() =>
+      registrar.registerPrompt("b2_late_prompt", { description: "late" }, message),
+    ).toThrow("Prompt registered after commit: b2_late_prompt");
+    expect(Object.keys(getRegisteredPrompts(server) ?? {})).toEqual(["b2_demo_prompt"]);
+  });
+
   it("filters prompts declared without required tools when a filter is active", () => {
     const server = createMcpServer({ name: "prompt-filter-test", version: "1.0.0" });
     const registrar = new PromptRegistrationAdapter(server, {
