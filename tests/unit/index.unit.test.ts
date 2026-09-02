@@ -204,6 +204,33 @@ describe("stdio entry point", () => {
     });
   });
 
+  it("does not enter discovery mode with a partial credential pair", async () => {
+    // Only the key id is set: a partial/mistyped pair must still fail fast as
+    // invalid instead of overwriting the configured half and starting an unusable
+    // discovery server.
+    process.env.B2_APPLICATION_KEY_ID = "test-key-id";
+    delete process.env.B2_APPLICATION_KEY;
+    const config = testConfig();
+    const server = { close: vi.fn(async () => undefined) };
+    const createServer = vi.spyOn(serverModule, "createServer").mockReturnValue(server as never);
+    vi.spyOn(serverModule, "loadConfig").mockReturnValue(config);
+    vi.spyOn(serverModule, "fetchCapabilities").mockResolvedValue(["listBuckets"]);
+    vi.mocked(stdioTransport.serveStdio).mockImplementation(
+      () =>
+        ({ close: vi.fn(async () => undefined) }) as ReturnType<typeof stdioTransport.serveStdio>,
+    );
+
+    await startStdio();
+
+    // The configured half is left untouched (never overwritten with the
+    // placeholder) and discovery mode is not activated.
+    expect(process.env.B2_APPLICATION_KEY_ID).toBe("test-key-id");
+    expect(process.env.B2_APPLICATION_KEY).toBeUndefined();
+    expect(createServer).not.toHaveBeenCalledWith(config, expect.anything(), {
+      credentialsMissing: true,
+    });
+  });
+
   it("falls back to the full stdio surface when capability lookup is unavailable", async () => {
     const config = testConfig();
     const server = { close: vi.fn(async () => undefined) };

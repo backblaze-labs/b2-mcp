@@ -106,13 +106,18 @@ const DISCOVERY_MODE_CREDENTIAL = "b2-mcp-discovery-mode";
  * off. The placeholder credentials are never used: `createServer` is told
  * credentials are missing and short-circuits every tool call with a clear error.
  *
+ * Discovery mode is entered only when **both** credential variables are absent.
+ * A partial or mistyped pair (exactly one set) is left untouched so it still
+ * fails fast as invalid, rather than overwriting the configured half and
+ * starting an unusable server.
+ *
  * @param env - Environment record to inspect and mutate; defaults to
  * `process.env`.
  *
  * @returns `true` when discovery mode was entered, otherwise `false`.
  */
 function enterStdioDiscoveryModeIfNeeded(env: NodeJS.ProcessEnv = process.env): boolean {
-  if (env.B2_APPLICATION_KEY_ID && env.B2_APPLICATION_KEY) return false;
+  if (env.B2_APPLICATION_KEY_ID || env.B2_APPLICATION_KEY) return false;
   env.B2_APPLICATION_KEY_ID = DISCOVERY_MODE_CREDENTIAL;
   env.B2_APPLICATION_KEY = DISCOVERY_MODE_CREDENTIAL;
   // Force the secret sink off unconditionally: an explicit `file` value would
