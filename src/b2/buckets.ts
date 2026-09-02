@@ -21,37 +21,65 @@ import { badRequest, badRequestError, toolJson, toolError } from "../utils/error
 import { checkDestructive } from "../utils/destructive-gate.js";
 import { isTestRuntime } from "../utils/runtime.js";
 
+type NotificationCustomHeaders = EventNotificationRuleInput["targetConfiguration"]["customHeaders"];
+
 /**
  * Redact webhook secrets from a notification-rules API response before it reaches
- * the model — B2 echoes back hmacSha256SigningSecret and custom-header values on
+ * the model. B2 echoes back hmacSha256SigningSecret and custom-header values on
  * get/set, and a prompt-injected model should not be able to read them.
  */
 function redactWebhookUrl(raw: string | undefined): string | undefined {
   if (raw === undefined) return undefined;
   try {
     const u = new URL(raw);
-    return `${u.protocol}//${u.host}/[redacted]`;
+    return `${u.protocol}//[redacted]/[redacted]`;
   } catch {
     return "[redacted]";
   }
 }
 
-function redactNotificationSecrets(result: NotificationRulesResult): NotificationRulesResult {
-  for (const rule of result.eventNotificationRules) {
-    const tc = rule.targetConfiguration;
-    tc.url = redactWebhookUrl(tc.url) ?? tc.url;
-    if (tc.hmacSha256SigningSecret) tc.hmacSha256SigningSecret = "[redacted]";
-    if (Array.isArray(tc.customHeaders)) {
-      tc.customHeaders = tc.customHeaders.map((h) =>
-        h && typeof h === "object" ? { ...h, value: "[redacted]" } : h,
-      );
-    } else if (tc.customHeaders && typeof tc.customHeaders === "object") {
-      tc.customHeaders = Object.fromEntries(
-        Object.keys(tc.customHeaders).map((k) => [k, "[redacted]"]),
-      );
-    }
+function redactCustomHeaders(customHeaders: NotificationCustomHeaders): NotificationCustomHeaders {
+  if (Array.isArray(customHeaders)) {
+    return customHeaders.map((header) => ({ ...header, value: "[redacted]" }));
   }
-  return result;
+  if (customHeaders && typeof customHeaders === "object") {
+    return Object.fromEntries(Object.keys(customHeaders).map((name) => [name, "[redacted]"]));
+  }
+  return customHeaders;
+}
+
+/**
+ * Redact notification-rule response secrets while preserving the normalized shape.
+ *
+ * @param result - Notification-rule response to redact.
+ *
+ * @returns Redacted notification-rule response.
+ *
+ * @internal
+ */
+export function redactNotificationSecrets(
+  result: NotificationRulesResult,
+): NotificationRulesResult {
+  return {
+    ...(result.bucketId !== undefined ? { bucketId: result.bucketId } : {}),
+    eventNotificationRules: result.eventNotificationRules.map((rule) => {
+      const tc = rule.targetConfiguration;
+      return {
+        ...rule,
+        eventTypes: [...rule.eventTypes],
+        targetConfiguration: {
+          ...tc,
+          ...(tc.url !== undefined ? { url: redactWebhookUrl(tc.url) } : {}),
+          ...(tc.hmacSha256SigningSecret !== undefined
+            ? { hmacSha256SigningSecret: "[redacted]" }
+            : {}),
+          ...(tc.customHeaders !== undefined
+            ? { customHeaders: redactCustomHeaders(tc.customHeaders) }
+            : {}),
+        },
+      };
+    }),
+  };
 }
 
 const NON_GLOBAL_IPV4_CIDRS: Array<[string, number]> = [

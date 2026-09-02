@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and per-release steps (Glama, Smithery, LobeHub, mcp.so). (#300)
 - README "official server" note and an `Official …` MCP Registry manifest
   description to distinguish `backblaze-labs/b2-mcp` from community forks. (#301)
+- Read-only MCP resources for non-secret server config, credential
+  capability/tool profile, and a capability-gated `b2://bucket/{bucketName}`
+  template with notification webhook secrets redacted. The server now advertises
+  the MCP `resources` capability. (#165)
 
 ### Changed
 - The stdio server no longer exits when started without B2 credentials. It now

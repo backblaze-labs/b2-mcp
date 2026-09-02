@@ -426,11 +426,7 @@ export function createServer(
   }
 
   const toolCount = registrar.commit();
-  registerControlPlaneResources({
-    server,
-    config,
-    capabilities,
-    b2Client,
+  registerControlPlaneResources(server, b2Client, config, capabilities, {
     oauthScopes,
     credentialsMissing: options.credentialsMissing,
   });

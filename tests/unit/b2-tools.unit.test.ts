@@ -1900,7 +1900,7 @@ describe("bucket notification rules", () => {
     );
     expect(set.eventNotificationRules[0].objectNamePrefix).toBe("");
     expect(set.eventNotificationRules[0].targetConfiguration.url).toBe(
-      "https://hooks.slack.com/[redacted]",
+      "https://[redacted]/[redacted]",
     );
     expect(JSON.stringify(set)).not.toContain("webhook-token");
     expect(JSON.stringify(set)).not.toContain("slack-path-token");
@@ -1915,7 +1915,7 @@ describe("bucket notification rules", () => {
     );
     const tc = get.eventNotificationRules[0].targetConfiguration;
     expect(tc.hmacSha256SigningSecret).toBe("[redacted]");
-    expect(tc.url).toBe("https://hooks.slack.com/[redacted]");
+    expect(tc.url).toBe("https://[redacted]/[redacted]");
     expect(tc.customHeaders).toEqual({ Authorization: "[redacted]" });
     expect(JSON.stringify(get)).not.toContain("supersecret");
     expect(JSON.stringify(get)).not.toContain("webhook-token");
@@ -1977,7 +1977,7 @@ describe("bucket notification rules", () => {
     expect(json).not.toContain("rule-secret");
     expect(json).not.toContain("notification-secret");
     expect(get.eventNotificationRules[0].targetConfiguration.url).toBe(
-      "https://hooks.example.com/[redacted]",
+      "https://[redacted]/[redacted]",
     );
     expect(get.eventNotificationRules[0].targetConfiguration.customHeaders).toEqual({
       Authorization: "[redacted]",

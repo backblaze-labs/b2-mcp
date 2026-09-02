@@ -41,6 +41,14 @@ configured.
 
 Destructive actions are gated, durable B2 secrets stay out of the model's context in the default/file/off modes, and the unsafe `B2_SECRET_SINK=inline` escape hatch is explicit. The tool surface is deliberately lean (registration is capability-aware, so a key only ever sees tools it can use).
 
+The server also exposes read-only MCP resources for cacheable control-plane
+context: `b2://server-config`, `b2://capabilities`, and the
+`b2://bucket/{bucketName}` template. Resource visibility follows the same
+capability-aware and OAuth-scope policy as the corresponding tools. Bucket
+resource reads redact notification webhook hosts, paths, HMAC secrets, and
+custom-header values; `resources/list` caps advertised bucket resources at 100,
+while `resources/read` can target a known permitted bucket name directly.
+
 ---
 
 ## Quick start
@@ -388,6 +396,27 @@ with mixed `B2_MCP_OUTPUT_FORMAT` values can return either text shape.
 
 ---
 
+## Resources
+
+Read-only MCP resources expose stable control-plane state without requiring a
+tool call:
+
+- `b2://server-config` - non-secret server configuration, including transport,
+  credential mode, destructive policy, secret-sink mode, public URL, and version.
+- `b2://capabilities` - the current credential's B2 capability set and active
+  MCP tool profile.
+- `b2://bucket/{bucketName}` - bucket type/visibility, lifecycle rules, Object
+  Lock, default retention, encryption, CORS, replication, and notification
+  rules when the caller can read them. Notification webhook secrets are redacted.
+
+Bucket resource reads intentionally omit a client cache hint because visibility
+and notification targets are security-relevant after writes. Bucket
+`resources/list` is capped at 100 concrete bucket resources; use the template
+URI directly when you already know an authorized bucket name outside that
+advertised list.
+
+---
+
 ## Tools
 
 The server exposes **40 tools** (registration is capability-aware, so a given key sees only the subset it can use).
@@ -533,7 +562,7 @@ Scope follows the caller's key — a partner key sees its sub-accounts; a custom
 
 ## Security & self-hosting
 
-Built-in safeguards (on by default): destructive-action gating (`B2_DESTRUCTIVE_POLICY`), MCP form elicitation for destructive tools on clients that advertise it for the 2026 protocol, sink-backed durable-secret creation for local stdio with hosted HTTP fail-closed defaults, central recursive response sanitization, explicit credential-provider modes, capability-aware tool registration that fails closed, rate limiting, and a values-redacted audit log (non-secret credential fingerprints only — never secrets, values, or file contents). The server never phones home.
+Built-in safeguards (on by default): destructive-action gating (`B2_DESTRUCTIVE_POLICY`), MCP form elicitation for destructive tools on clients that advertise it for the 2026 protocol, sink-backed durable-secret creation for local stdio with hosted HTTP fail-closed defaults, central recursive response sanitization, explicit credential-provider modes, capability-aware tool and resource registration that fails closed, rate limiting, and a values-redacted audit log (non-secret credential fingerprints only — never secrets, values, or file contents). The server never phones home.
 
 Destructive actions have two layers. `B2_DESTRUCTIVE_POLICY=block` is the hard refusal and remains the required wall for internet-facing or untrusted-client HTTP deployments. Under `confirm`, capable 2026 MCP clients are asked for form elicitation first; clients without compatible elicitation, or servers with `B2_DESTRUCTIVE_ELICITATION=off`, fall back to the existing `confirm: true` retry. `elicit` is the stricter middle ground between `confirm` and `block`: it requires an accepted MCP form-elicitation response from a form-capable client and refuses (rather than falling back to a model `confirm: true`) whenever no such response can be obtained, for deployments that want human-in-the-loop friction on every destructive action without giving up the operation entirely. Because the response is relayed by the client, this is friction, not an independent authorization boundary. Under `allow`, both the confirm gate and elicitation are skipped for trusted single-user sessions. Elicitation responses are relayed by the MCP client, so they are useful human-in-the-loop friction but not an independent security boundary against a malicious or compromised internet-facing client.
 
