@@ -288,7 +288,7 @@ The `full` prompt profile enables an inline dummy secret sink so sink-dependent 
 
 ## `full` Prompt Surface
 
-Complete guided-workflow prompt surface: every B2 workflow launcher is advertised, including the write-, admin-, and Partner-capable prompts, for contract review and regression detection.
+Complete guided-workflow prompt surface: every B2 workflow launcher is advertised, including the write- and admin-capable prompts, for contract review and regression detection.
 
 Prompt profile hash: `c52599d06cdabc7017a82ac69bd71a0ae920984c652ab0517b29b6cd215c5e20`
 

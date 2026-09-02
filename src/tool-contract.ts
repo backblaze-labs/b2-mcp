@@ -370,7 +370,7 @@ export const PROFILE_DESCRIPTIONS: Record<ProfileName, string> = {
  * credential.
  */
 export const PROMPT_PROFILE_DESCRIPTIONS: Record<ProfileName, string> = {
-  full: "Complete guided-workflow prompt surface: every B2 workflow launcher is advertised, including the write-, admin-, and Partner-capable prompts, for contract review and regression detection.",
+  full: "Complete guided-workflow prompt surface: every B2 workflow launcher is advertised, including the write- and admin-capable prompts, for contract review and regression detection.",
   "live-b2-contract":
     "Prompt surface for the protected live B2 contract profile: workflow launchers right-sized to the non-master application key's release-evidence capabilities.",
   "phase1-default":

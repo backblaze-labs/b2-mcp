@@ -593,7 +593,7 @@
   "promptIssueUrl": "https://github.com/backblaze-labs/b2-mcp/issues/166",
   "promptProfiles": {
     "full": {
-      "description": "Complete guided-workflow prompt surface: every B2 workflow launcher is advertised, including the write-, admin-, and Partner-capable prompts, for contract review and regression detection.",
+      "description": "Complete guided-workflow prompt surface: every B2 workflow launcher is advertised, including the write- and admin-capable prompts, for contract review and regression detection.",
       "capabilities": null,
       "counts": {
         "total": 5
