@@ -8,16 +8,16 @@ Approved modern cache hint: `ttlMs=30000`, `cacheScope=private`
 
 | Profile | Total | `b2_*` | `s3_*` | `bz_*` | Hash prefix |
 | --- | ---: | ---: | ---: | ---: | --- |
-| `full` | 40 | 21 | 19 | 0 | `42e055281770` |
-| `live-b2-contract` | 39 | 20 | 19 | 0 | `e1e32132fc51` |
-| `phase1-default` | 37 | 18 | 19 | 0 | `dbfc89887472` |
-| `read-only` | 20 | 11 | 9 | 0 | `faf600962f2f` |
+| `full` | 40 | 21 | 19 | 0 | `21fc3a0fff02` |
+| `live-b2-contract` | 39 | 20 | 19 | 0 | `c0eeca9cf29a` |
+| `phase1-default` | 37 | 18 | 19 | 0 | `252d955c6638` |
+| `read-only` | 20 | 11 | 9 | 0 | `b5244ef8a3d5` |
 
 ## `full`
 
 Complete tool superset for contract review and regression detection across all backing categories; durable-secret producers are sink-backed when a secret sink is active and otherwise remain availability-annotated stubs.
 
-Profile hash: `42e0552817705abefb18838798be6ec33743dac58a79a9fa6f2e00a08b1acd32`
+Profile hash: `21fc3a0fff02ffbda42bfa91633dabe815b0d8cd64732718b4d2bfb830b2f214`
 
 ### Capability Input
 
@@ -79,7 +79,7 @@ Profile hash: `42e0552817705abefb18838798be6ec33743dac58a79a9fa6f2e00a08b1acd32`
 
 Protected live B2 contract profile: non-master application key with release-evidence capabilities, no key-management grants, and a distinct master key only for Partner/Groups API surface discovery.
 
-Profile hash: `e1e32132fc5173016036635e5f8e75e00486cc5fe812ccbbbc9059ce619a99eb`
+Profile hash: `c0eeca9cf29a3f5d0e1af5b7d21a5c2c872d392b49eba4b45d74b217a2a4be30`
 
 ### Capability Input
 
@@ -158,7 +158,7 @@ Profile hash: `e1e32132fc5173016036635e5f8e75e00486cc5fe812ccbbbc9059ce619a99eb`
 
 Default customer-hosted Phase 1 profile: standard B2 application key, no distinct Partner/master credential, and durable-secret producers exposed as sink-backed tools on local stdio or unavailable stubs when the sink is off.
 
-Profile hash: `dbfc89887472d7681922ce4cbf28dc646b4e35bf7771dba60b00d8286f306aa0`
+Profile hash: `252d955c6638f2248daeb93a3bf67a0a6f904de23a34c16731636b2ec448ff43`
 
 ### Capability Input
 
@@ -229,7 +229,7 @@ Profile hash: `dbfc89887472d7681922ce4cbf28dc646b4e35bf7771dba60b00d8286f306aa0`
 
 Deterministic read/list profile for safe production use and contract tests; write/delete/admin handlers are omitted while durable-secret producer names remain unavailable stubs unless a sink-backed admin profile is configured.
 
-Profile hash: `faf600962f2f0e3201684ac0770418afbb077b564c071f0eda22f026c35006c0`
+Profile hash: `b5244ef8a3d5d15f6a8c9a1e553401aeffaea0811740991a05cade76b6f238ec`
 
 ### Capability Input
 

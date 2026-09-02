@@ -528,7 +528,7 @@
     },
     {
       "name": "s3_list_multipart_uploads",
-      "descriptionSha256": "2c564295beaddf04da437ef2f03ff2191d6f4768a2c28291fc88a755d5c79722",
+      "descriptionSha256": "afaaeffd219e690e532fb156935c6200ca70d8067a3e26d27c4b0ad5d82d82fe",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -703,5 +703,5 @@
     "toolsListCacheHint": null,
     "discover": null
   },
-  "hash": "faf600962f2f0e3201684ac0770418afbb077b564c071f0eda22f026c35006c0"
+  "hash": "b5244ef8a3d5d15f6a8c9a1e553401aeffaea0811740991a05cade76b6f238ec"
 }

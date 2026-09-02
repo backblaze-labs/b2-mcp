@@ -1249,7 +1249,7 @@
             "type": "string"
           },
           "parts": {
-            "description": "Complete ordered part manifest. Include every part in ascending partNumber order; missing or stale ETags fail the completion call.",
+            "description": "Complete ordered part manifest. Include every part in ascending partNumber order (part numbers are 1-10000); missing or stale ETags fail the completion call.",
             "items": {
               "properties": {
                 "etag": {
@@ -1257,7 +1257,7 @@
                   "type": "string"
                 },
                 "partNumber": {
-                  "description": "Integer part number for this ETag; provide each uploaded part once.",
+                  "description": "Provider-valid multipart part number from 1-10000 for this ETag; provide each uploaded part once.",
                   "maximum": 9007199254740991,
                   "minimum": -9007199254740991,
                   "type": "integer"
@@ -1638,7 +1638,7 @@
     },
     {
       "name": "s3_list_multipart_uploads",
-      "descriptionSha256": "2c564295beaddf04da437ef2f03ff2191d6f4768a2c28291fc88a755d5c79722",
+      "descriptionSha256": "afaaeffd219e690e532fb156935c6200ca70d8067a3e26d27c4b0ad5d82d82fe",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -2058,5 +2058,5 @@
     "toolsListCacheHint": null,
     "discover": null
   },
-  "hash": "e1e32132fc5173016036635e5f8e75e00486cc5fe812ccbbbc9059ce619a99eb"
+  "hash": "c0eeca9cf29a3f5d0e1af5b7d21a5c2c872d392b49eba4b45d74b217a2a4be30"
 }

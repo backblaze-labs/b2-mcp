@@ -153,7 +153,9 @@ export function registerS3MultipartTools(
               partNumber: z
                 .number()
                 .int()
-                .describe("Integer part number for this ETag; provide each uploaded part once."),
+                .describe(
+                  "Provider-valid multipart part number from 1-10000 for this ETag; provide each uploaded part once.",
+                ),
               etag: z
                 .string()
                 .describe(
@@ -162,7 +164,7 @@ export function registerS3MultipartTools(
             }),
           )
           .describe(
-            "Complete ordered part manifest. Include every part in ascending partNumber order; missing or stale ETags fail the completion call.",
+            "Complete ordered part manifest. Include every part in ascending partNumber order (part numbers are 1-10000); missing or stale ETags fail the completion call.",
           ),
       },
     },
@@ -225,7 +227,7 @@ export function registerS3MultipartTools(
     "s3_list_multipart_uploads",
     {
       description:
-        "List in-progress S3-compatible multipart uploads for a B2 bucket. Use to resume or audit unfinished uploads before s3_presign_upload_part, s3_complete_multipart_upload, or s3_abort_multipart_upload; use b2_unfinished_uploads when you need storage-cost analysis across bounded listings. Requires listFiles. Results are paginated with maxUploads (default 100, max 1000) and key/upload markers.",
+        "List in-progress S3-compatible multipart uploads for a B2 bucket. Use to resume or audit unfinished uploads before s3_presign_upload_part, s3_complete_multipart_upload, or s3_abort_multipart_upload; use b2_unfinished_uploads when you need storage-cost analysis across bounded listings. Requires listFiles. Results are paginated with maxUploads (default 100, range 1-1000) and key/upload markers; delimiter responses include commonPrefixes.",
       inputSchema: {
         bucket: z.string().describe("Bucket name whose in-progress multipart uploads to list."),
         prefix: z
