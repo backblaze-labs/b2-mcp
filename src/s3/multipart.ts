@@ -137,15 +137,18 @@ export function registerS3MultipartTools(
     "s3_complete_multipart_upload",
     {
       description:
-        "Finalize an S3-compatible multipart upload. Provide the ETags of all uploaded parts in order.",
+        "Finalize an S3-compatible multipart upload in B2 by assembling uploaded parts. Use only after s3_create_multipart_upload and s3_presign_upload_part (or s3_upload_part_copy) have produced every required part; use s3_list_parts to verify uploaded parts before retrying. Requires writeFiles. Completion is idempotent only when B2 already committed the exact same part list; if the response is lost, reconcile with s3_head_object or s3_list_object_versions before retrying.",
       inputSchema: {
-        bucket: z.string().describe("The bucket name."),
-        key: z.string().describe("The object key."),
-        uploadId: z.string().describe("The UploadId."),
+        bucket: z.string().describe("Destination bucket name used to create the multipart upload."),
+        key: z.string().describe("Destination object key used to create the multipart upload."),
+        uploadId: z.string().describe("UploadId returned by s3_create_multipart_upload."),
         parts: z
           .array(
             z.object({
-              partNumber: z.number().int().describe("The part number."),
+              partNumber: z
+                .number()
+                .int()
+                .describe("Part number from 1-10000; provide each uploaded part once."),
               etag: z
                 .string()
                 .describe(
@@ -153,7 +156,9 @@ export function registerS3MultipartTools(
                 ),
             }),
           )
-          .describe("All uploaded parts in ascending part number order."),
+          .describe(
+            "Complete ordered part manifest. Include every part in ascending partNumber order; missing or stale ETags fail the completion call.",
+          ),
       },
     },
     async (args) => {
@@ -214,14 +219,36 @@ export function registerS3MultipartTools(
   server.registerTool(
     "s3_list_multipart_uploads",
     {
-      description: "List all in-progress S3-compatible multipart uploads for a bucket.",
+      description:
+        "List in-progress S3-compatible multipart uploads for a B2 bucket. Use to resume or audit unfinished uploads before s3_presign_upload_part, s3_complete_multipart_upload, or s3_abort_multipart_upload; use b2_unfinished_uploads when you need storage-cost analysis across bounded listings. Requires listFiles. Results are paginated with maxUploads (default 100, max 1000) and key/upload markers.",
       inputSchema: {
-        bucket: z.string().describe("The bucket name."),
-        prefix: z.string().optional().describe("Only list uploads for keys with this prefix."),
-        delimiter: z.string().optional(),
-        maxUploads: z.number().int().min(1).max(1000).optional().default(100),
-        keyMarker: z.string().optional().describe("Pagination cursor."),
-        uploadIdMarker: z.string().optional().describe("Pagination cursor."),
+        bucket: z.string().describe("Bucket name whose in-progress multipart uploads to list."),
+        prefix: z
+          .string()
+          .optional()
+          .describe("Only return multipart uploads whose object keys start with this prefix."),
+        delimiter: z
+          .string()
+          .optional()
+          .describe("Optional delimiter, usually '/', to group common key prefixes."),
+        maxUploads: z
+          .number()
+          .int()
+          .min(1)
+          .max(1000)
+          .optional()
+          .default(100)
+          .describe("Maximum uploads to return (default 100, range 1-1000)."),
+        keyMarker: z
+          .string()
+          .optional()
+          .describe("Pagination cursor: nextKeyMarker from a previous response."),
+        uploadIdMarker: z
+          .string()
+          .optional()
+          .describe(
+            "Pagination cursor paired with keyMarker: nextUploadIdMarker from a previous response.",
+          ),
       },
     },
     async (args) => {

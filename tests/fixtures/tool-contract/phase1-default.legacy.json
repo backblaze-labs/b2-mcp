@@ -144,7 +144,7 @@
     },
     {
       "name": "b2_create_bucket",
-      "descriptionSha256": "8c76f5be85dc27d50fda55282341fe75ec117a71ea3234102bd602ac79114d47",
+      "descriptionSha256": "dc3137d3190670a36187ff96ed34f03e7c3e84048927e595bf1aba68ee88fb0a",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -153,7 +153,7 @@
               "maxLength": 10000,
               "type": "string"
             },
-            "description": "Custom metadata: <=10 pairs. Keys: 1-50 UTF-8 bytes, chars A-Z a-z 0-9 . _ ` ~ ! # $ % ^ & * ' | + -, no b2- prefix. Values total <=10,000 UTF-8 bytes.",
+            "description": "Custom metadata: <=10 pairs. Keys: 1-50 UTF-8 bytes, chars A-Z a-z 0-9 . _ ` ~ ! # $ % ^ & * ' | + -, no b2- prefix. Values total <=10,000 UTF-8 bytes. On update, omit to leave unchanged.",
             "propertyNames": {
               "maxLength": 50,
               "minLength": 1,
@@ -163,16 +163,16 @@
             "type": "object"
           },
           "bucketName": {
-            "description": "The name for the new bucket. Must be globally unique.",
+            "description": "Globally unique bucket name: 6-63 characters, letters/digits/hyphens/periods, case-insensitive, no b2- prefix, no leading/trailing period, no '..', and not an IPv4 address.",
             "type": "string"
           },
           "bucketType": {
-            "description": "allPublic allows unauthenticated downloads; allPrivate requires authorization.",
+            "description": "Visibility for file downloads: allPrivate requires authorization; allPublic makes objects world-readable by URL.",
             "enum": ["allPublic", "allPrivate"],
             "type": "string"
           },
           "corsRules": {
-            "description": "CORS rules: <=100. allowedOrigins/allowedOperations require 1-100 non-empty strings; allowedHeaders/exposeHeaders allow <=100. Strings <=999 chars. Per-rule UTF-8 total <1,000. Names unique.",
+            "description": "CORS rules: <=100. allowedOrigins/allowedOperations require 1-100 non-empty strings; allowedHeaders/exposeHeaders allow <=100. Strings <=999 chars. Per-rule UTF-8 total <1,000. Names unique. On update, provided rules replace the existing set; omit to leave unchanged.",
             "items": {
               "properties": {
                 "allowedHeaders": {
@@ -237,12 +237,14 @@
             "type": "array"
           },
           "defaultServerSideEncryption": {
-            "description": "Default server-side encryption for new files in this bucket.",
+            "description": "Default server-side encryption for new files in this bucket. Omit on update to leave unchanged.",
             "properties": {
               "algorithm": {
+                "description": "Encryption algorithm. B2 supports AES256 for SSE-B2.",
                 "type": "string"
               },
               "mode": {
+                "description": "Use SSE-B2 to make AES256 the bucket default; use none to clear it.",
                 "enum": ["none", "SSE-B2"],
                 "type": "string"
               }
@@ -255,19 +257,23 @@
             "type": "boolean"
           },
           "lifecycleRules": {
-            "description": "Lifecycle rules for automatic file management.",
+            "description": "Optional B2 lifecycle rules applied after creation. Use for automatic hiding, deletion of hidden versions, or cancellation of unfinished large-file uploads; use s3_put_bucket_lifecycle only when you need the S3 lifecycle API shape.",
             "items": {
               "properties": {
                 "daysFromHidingToDeleting": {
+                  "description": "Optional days after a file is hidden before B2 permanently deletes it.",
                   "type": "number"
                 },
                 "daysFromStartingToCancelingUnfinishedLargeFiles": {
+                  "description": "Optional days before B2 cancels unfinished large-file uploads.",
                   "type": "number"
                 },
                 "daysFromUploadingToHiding": {
+                  "description": "Optional days after upload before B2 hides the current file version.",
                   "type": "number"
                 },
                 "fileNamePrefix": {
+                  "description": "Object-key prefix this rule matches; use an empty string to match the bucket.",
                   "type": "string"
                 }
               },
@@ -289,12 +295,12 @@
     },
     {
       "name": "b2_create_group_member",
-      "descriptionSha256": "1c67787ac9b46eb966bd4815b7c8a284e9202ad70ab581f781e719dbcb0a801b",
+      "descriptionSha256": "6d5c4dfd77683ad51b9c586f5b5760e1018ca6e3d01e9cb7d51014f55faf6e65",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
           "confirm": {
-            "description": "Confirm this destructive/irreversible compatibility stub. Required if this tool is re-enabled with a real handler under the default destructive policy.",
+            "description": "Confirm this destructive/irreversible compatibility stub. It performs no B2 call while unavailable; a real handler would still require destructive confirmation under the default policy.",
             "type": "boolean"
           }
         },
@@ -309,12 +315,12 @@
     },
     {
       "name": "b2_create_key",
-      "descriptionSha256": "1c67787ac9b46eb966bd4815b7c8a284e9202ad70ab581f781e719dbcb0a801b",
+      "descriptionSha256": "6d5c4dfd77683ad51b9c586f5b5760e1018ca6e3d01e9cb7d51014f55faf6e65",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
           "confirm": {
-            "description": "Confirm this destructive/irreversible compatibility stub. Required if this tool is re-enabled with a real handler under the default destructive policy.",
+            "description": "Confirm this destructive/irreversible compatibility stub. It performs no B2 call while unavailable; a real handler would still require destructive confirmation under the default policy.",
             "type": "boolean"
           }
         },
@@ -354,12 +360,12 @@
     },
     {
       "name": "b2_delete_key",
-      "descriptionSha256": "99b70ea3809fa6b93d81e376e8339f3d7e5840e014794ca9b5146d5428cb1d21",
+      "descriptionSha256": "ffebe8eb7a0214c0a15c94032cca6abc173bf8c73e9d908efe5637a35e454fcf",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
           "applicationKeyId": {
-            "description": "The ID of the application key to delete.",
+            "description": "Exact application key ID to delete; use b2_list_keys to look it up.",
             "type": "string"
           },
           "confirm": {
@@ -414,12 +420,12 @@
     },
     {
       "name": "b2_get_bucket_notification_rules",
-      "descriptionSha256": "66774dafbe9ef8e125d483fb5621a6cd148c13b30c962178120c975f980e60a4",
+      "descriptionSha256": "0d5905bfd63ffde70b05eb9854f4f054d6de05be98b6c829e778e9a065ae6b2d",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
           "bucketId": {
-            "description": "The bucket ID to get notification rules for.",
+            "description": "Exact bucket ID whose notification rules should be read.",
             "type": "string"
           }
         },
@@ -541,12 +547,12 @@
     },
     {
       "name": "b2_reserve_trial_create_account",
-      "descriptionSha256": "1c67787ac9b46eb966bd4815b7c8a284e9202ad70ab581f781e719dbcb0a801b",
+      "descriptionSha256": "6d5c4dfd77683ad51b9c586f5b5760e1018ca6e3d01e9cb7d51014f55faf6e65",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
           "confirm": {
-            "description": "Confirm this destructive/irreversible compatibility stub. Required if this tool is re-enabled with a real handler under the default destructive policy.",
+            "description": "Confirm this destructive/irreversible compatibility stub. It performs no B2 call while unavailable; a real handler would still require destructive confirmation under the default policy.",
             "type": "boolean"
           }
         },
@@ -561,12 +567,12 @@
     },
     {
       "name": "b2_set_bucket_notification_rules",
-      "descriptionSha256": "ef7d2679181192161673324ad85b7a4e52133445b83274fda6c281c9f5711622",
+      "descriptionSha256": "e724a95c30590d7119a542e36f52be0bc995ce00a1ce46b120c1f62979f5e990",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
           "bucketId": {
-            "description": "The bucket ID to set notification rules for.",
+            "description": "Exact bucket ID whose notification rules should be replaced.",
             "type": "string"
           },
           "confirm": {
@@ -574,37 +580,41 @@
             "type": "boolean"
           },
           "eventNotificationRules": {
+            "description": "Complete replacement rule set for the bucket. Include every rule that should remain; omitted existing rules are removed.",
             "items": {
               "properties": {
                 "eventTypes": {
-                  "description": "Event types to trigger notification, e.g. b2:ObjectCreated:*, b2:ObjectDeleted:*.",
+                  "description": "B2 event types that trigger delivery, for example b2:ObjectCreated:* or b2:ObjectDeleted:*.",
                   "items": {
                     "type": "string"
                   },
                   "type": "array"
                 },
                 "isEnabled": {
-                  "description": "Whether this rule is active.",
+                  "description": "Whether B2 should deliver events for this rule.",
                   "type": "boolean"
                 },
                 "name": {
-                  "description": "A name for this notification rule.",
+                  "description": "Name for this notification rule; must be unique per bucket.",
                   "type": "string"
                 },
                 "objectNamePrefix": {
                   "default": "",
-                  "description": "Only objects whose names start with this prefix trigger the rule. Empty string ('') matches all objects. Required by B2 on every rule.",
+                  "description": "Object-key prefix that triggers the rule. Defaults to empty string, which matches every object in the bucket.",
                   "type": "string"
                 },
                 "targetConfiguration": {
                   "properties": {
                     "customHeaders": {
+                      "description": "Optional custom headers sent with webhook deliveries.",
                       "items": {
                         "properties": {
                           "name": {
+                            "description": "Custom header name sent with webhook deliveries.",
                             "type": "string"
                           },
                           "value": {
+                            "description": "Custom header value; treated as sensitive and redacted.",
                             "type": "string"
                           }
                         },
@@ -614,15 +624,16 @@
                       "type": "array"
                     },
                     "hmacSha256SigningSecret": {
-                      "description": "Optional secret for HMAC-SHA256 request signing.",
+                      "description": "Optional HMAC-SHA256 signing secret. Treated as sensitive input and redacted from outputs/logs.",
                       "type": "string"
                     },
                     "targetType": {
                       "const": "webhook",
+                      "description": "Only webhook targets are supported.",
                       "type": "string"
                     },
                     "url": {
-                      "description": "The HTTPS URL to deliver notifications to.",
+                      "description": "Public https:// webhook URL. localhost, credentials in URLs, private IPs, and non-public DNS targets are rejected before B2 is called.",
                       "type": "string"
                     }
                   },
@@ -683,12 +694,12 @@
     },
     {
       "name": "b2_update_bucket",
-      "descriptionSha256": "17be672759fc3e137e04efa0eeead42044ded147a24ac11512a176eea8a11afb",
+      "descriptionSha256": "942fcb2c95b7f7fb01a9ac629d6097e4587e9cc6f945abf1bc980118806097dd",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
           "bucketId": {
-            "description": "The ID of the bucket to update.",
+            "description": "The exact bucket ID to update, not the bucket name.",
             "type": "string"
           },
           "bucketInfo": {
@@ -696,7 +707,7 @@
               "maxLength": 10000,
               "type": "string"
             },
-            "description": "Custom metadata: <=10 pairs. Keys: 1-50 UTF-8 bytes, chars A-Z a-z 0-9 . _ ` ~ ! # $ % ^ & * ' | + -, no b2- prefix. Values total <=10,000 UTF-8 bytes.",
+            "description": "Custom metadata: <=10 pairs. Keys: 1-50 UTF-8 bytes, chars A-Z a-z 0-9 . _ ` ~ ! # $ % ^ & * ' | + -, no b2- prefix. Values total <=10,000 UTF-8 bytes. On update, omit to leave unchanged.",
             "propertyNames": {
               "maxLength": 50,
               "minLength": 1,
@@ -706,6 +717,7 @@
             "type": "object"
           },
           "bucketType": {
+            "description": "Optional visibility change. allPublic makes objects world-readable by URL and requires confirmation under the default policy; omit to leave unchanged.",
             "enum": ["allPublic", "allPrivate"],
             "type": "string"
           },
@@ -714,7 +726,7 @@
             "type": "boolean"
           },
           "corsRules": {
-            "description": "CORS rules: <=100. allowedOrigins/allowedOperations require 1-100 non-empty strings; allowedHeaders/exposeHeaders allow <=100. Strings <=999 chars. Per-rule UTF-8 total <1,000. Names unique.",
+            "description": "CORS rules: <=100. allowedOrigins/allowedOperations require 1-100 non-empty strings; allowedHeaders/exposeHeaders allow <=100. Strings <=999 chars. Per-rule UTF-8 total <1,000. Names unique. On update, provided rules replace the existing set; omit to leave unchanged.",
             "items": {
               "properties": {
                 "allowedHeaders": {
@@ -821,11 +833,14 @@
             "type": "object"
           },
           "defaultServerSideEncryption": {
+            "description": "Default server-side encryption for new files in this bucket. Omit on update to leave unchanged.",
             "properties": {
               "algorithm": {
+                "description": "Encryption algorithm. B2 supports AES256 for SSE-B2.",
                 "type": "string"
               },
               "mode": {
+                "description": "Use SSE-B2 to make AES256 the bucket default; use none to clear it.",
                 "enum": ["none", "SSE-B2"],
                 "type": "string"
               }
@@ -842,18 +857,23 @@
             "type": "number"
           },
           "lifecycleRules": {
+            "description": "When provided, replaces the bucket's B2 lifecycle rule set; omit to leave unchanged. Rules that delete hidden versions are destructive in effect and require confirmation under the default policy.",
             "items": {
               "properties": {
                 "daysFromHidingToDeleting": {
+                  "description": "Optional days after a file is hidden before B2 permanently deletes it.",
                   "type": "number"
                 },
                 "daysFromStartingToCancelingUnfinishedLargeFiles": {
+                  "description": "Optional days before B2 cancels unfinished large-file uploads.",
                   "type": "number"
                 },
                 "daysFromUploadingToHiding": {
+                  "description": "Optional days after upload before B2 hides the current file version.",
                   "type": "number"
                 },
                 "fileNamePrefix": {
+                  "description": "Object-key prefix this rule matches; use an empty string to match the bucket.",
                   "type": "string"
                 }
               },
@@ -863,13 +883,16 @@
             "type": "array"
           },
           "replicationConfiguration": {
+            "description": "Optional replication configuration. Omit to leave unchanged; any provided value changes persistent copy behavior and is confirmation-gated.",
             "properties": {
               "asReplicationDestination": {
+                "description": "Destination replication settings for buckets receiving replicated data.",
                 "properties": {
                   "sourceToDestinationKeyMapping": {
                     "additionalProperties": {
                       "type": "string"
                     },
+                    "description": "Mapping from source key IDs to destination key IDs.",
                     "propertyNames": {
                       "type": "string"
                     },
@@ -880,26 +903,33 @@
                 "type": "object"
               },
               "asReplicationSource": {
+                "description": "Source replication settings. Provided rules replace the source config.",
                 "properties": {
                   "replicationRules": {
                     "items": {
                       "properties": {
                         "destinationBucketId": {
+                          "description": "Destination bucket ID that receives replicated objects.",
                           "type": "string"
                         },
                         "fileNamePrefix": {
+                          "description": "Optional object-key prefix to replicate; omit for all objects.",
                           "type": "string"
                         },
                         "includeExistingFiles": {
+                          "description": "If true, B2 also queues existing matching files for replication.",
                           "type": "boolean"
                         },
                         "isEnabled": {
+                          "description": "Whether this replication rule is active.",
                           "type": "boolean"
                         },
                         "priority": {
+                          "description": "Rule priority used by B2 when rules overlap.",
                           "type": "number"
                         },
                         "replicationRuleName": {
+                          "description": "Unique name for this rule.",
                           "type": "string"
                         }
                       },
@@ -914,6 +944,7 @@
                     "type": "array"
                   },
                   "sourceApplicationKeyId": {
+                    "description": "Application key ID B2 uses as the replication source credential.",
                     "type": "string"
                   }
                 },
@@ -1107,20 +1138,20 @@
     },
     {
       "name": "s3_complete_multipart_upload",
-      "descriptionSha256": "388fedfdb0d32019f07b7a5581fa1fd2f9d96a1a53d04684a85eccdf6ace8e76",
+      "descriptionSha256": "93027e8d91f571b719980d6810449551a8ed02e4e10c8c8879dc6207297f19d1",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
           "bucket": {
-            "description": "The bucket name.",
+            "description": "Destination bucket name used to create the multipart upload.",
             "type": "string"
           },
           "key": {
-            "description": "The object key.",
+            "description": "Destination object key used to create the multipart upload.",
             "type": "string"
           },
           "parts": {
-            "description": "All uploaded parts in ascending part number order.",
+            "description": "Complete ordered part manifest. Include every part in ascending partNumber order; missing or stale ETags fail the completion call.",
             "items": {
               "properties": {
                 "etag": {
@@ -1128,7 +1159,7 @@
                   "type": "string"
                 },
                 "partNumber": {
-                  "description": "The part number.",
+                  "description": "Part number from 1-10000; provide each uploaded part once.",
                   "maximum": 9007199254740991,
                   "minimum": -9007199254740991,
                   "type": "integer"
@@ -1140,7 +1171,7 @@
             "type": "array"
           },
           "uploadId": {
-            "description": "The UploadId.",
+            "description": "UploadId returned by s3_create_multipart_upload.",
             "type": "string"
           }
         },
@@ -1266,12 +1297,12 @@
     },
     {
       "name": "s3_delete_object",
-      "descriptionSha256": "05f96a0295e2b5392a6df2003ea122734d2e8637e33ad0db0329898551d6126d",
+      "descriptionSha256": "3f645716eb6120d0c3749b525a5617d5cfe957e6cadae082bda91f5222bdcda9",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
           "bucket": {
-            "description": "The bucket name.",
+            "description": "Bucket name containing the object to delete.",
             "type": "string"
           },
           "confirm": {
@@ -1279,11 +1310,11 @@
             "type": "boolean"
           },
           "key": {
-            "description": "The object key to delete.",
+            "description": "Exact object key to delete.",
             "type": "string"
           },
           "versionId": {
-            "description": "Version ID of the specific version to delete.",
+            "description": "Exact version ID to delete. Omit to delete the current object by S3 semantics, which may create a delete marker for versioned buckets.",
             "type": "string"
           }
         },
@@ -1509,33 +1540,35 @@
     },
     {
       "name": "s3_list_multipart_uploads",
-      "descriptionSha256": "01e22e220014f7d05b0fc629ac1575c116ecc8b1820817b5286ed880f5b4a48d",
+      "descriptionSha256": "2c564295beaddf04da437ef2f03ff2191d6f4768a2c28291fc88a755d5c79722",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
           "bucket": {
-            "description": "The bucket name.",
+            "description": "Bucket name whose in-progress multipart uploads to list.",
             "type": "string"
           },
           "delimiter": {
+            "description": "Optional delimiter, usually '/', to group common key prefixes.",
             "type": "string"
           },
           "keyMarker": {
-            "description": "Pagination cursor.",
+            "description": "Pagination cursor: nextKeyMarker from a previous response.",
             "type": "string"
           },
           "maxUploads": {
             "default": 100,
+            "description": "Maximum uploads to return (default 100, range 1-1000).",
             "maximum": 1000,
             "minimum": 1,
             "type": "integer"
           },
           "prefix": {
-            "description": "Only list uploads for keys with this prefix.",
+            "description": "Only return multipart uploads whose object keys start with this prefix.",
             "type": "string"
           },
           "uploadIdMarker": {
-            "description": "Pagination cursor.",
+            "description": "Pagination cursor paired with keyMarker: nextUploadIdMarker from a previous response.",
             "type": "string"
           }
         },
@@ -1551,33 +1584,35 @@
     },
     {
       "name": "s3_list_object_versions",
-      "descriptionSha256": "11639a7bc862a85b6b24432a922b0b734a8f929cc13e9292f15274be9fc30c08",
+      "descriptionSha256": "d56b3c4b709d742af271651f2dc8d5bae0d7e2dc2127387ee69ade83c010f834",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
           "bucket": {
-            "description": "The bucket name.",
+            "description": "Bucket name whose object versions should be listed.",
             "type": "string"
           },
           "delimiter": {
+            "description": "Optional delimiter, usually '/', to group common key prefixes.",
             "type": "string"
           },
           "keyMarker": {
-            "description": "Pagination cursor — key from a previous response.",
+            "description": "Pagination cursor: nextKeyMarker from a previous response.",
             "type": "string"
           },
           "maxKeys": {
             "default": 1000,
+            "description": "Maximum versions/delete markers to return (default 1000, range 1-1000).",
             "maximum": 1000,
             "minimum": 1,
             "type": "integer"
           },
           "prefix": {
-            "description": "Only list versions for objects with this prefix.",
+            "description": "Only list versions and delete markers for keys that start with this prefix.",
             "type": "string"
           },
           "versionIdMarker": {
-            "description": "Pagination cursor — version ID from a previous response.",
+            "description": "Pagination cursor paired with keyMarker: nextVersionIdMarker from a previous response.",
             "type": "string"
           }
         },
@@ -1925,5 +1960,5 @@
     "toolsListCacheHint": null,
     "discover": null
   },
-  "hash": "de997e8002adb8c1c38147202b4a8f8507d98c37ca1870f928eef281b5523e1c"
+  "hash": "e6902fdd0a829f0acdb1e87482e64e7ee40e0b529dc40e9e6576da7de7533950"
 }

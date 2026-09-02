@@ -154,17 +154,24 @@ export function registerKeyTools(
       "b2_create_key",
       {
         description:
-          "Create a B2 application key. In file sink mode, the one-time key secret is written to the configured out-of-band secret sink and the MCP response contains only redacted metadata plus a secretSink pointer. In inline mode, the secret is returned with an explicit warning.",
+          "Create a B2 application key and route its one-time secret through the configured secret sink. Use for least-privilege scoped credentials; use b2_list_keys to inspect existing keys and b2_delete_key to revoke retired keys. Requires writeKeys, idempotencyKey, and destructive confirmation by policy. File sink mode returns redacted metadata plus a secretSink pointer; inline mode returns the secret only when explicitly enabled. Policy refuses key-management grants and unscoped write/delete grants unless explicit environment overrides are enabled; when B2_MAX_KEY_DURATION_SECONDS is set, it also refuses non-expiring keys or durations above that limit.",
         inputSchema: {
-          keyName: z.string().min(1).describe("Human-readable name for the new key."),
+          keyName: z
+            .string()
+            .min(1)
+            .describe("Human-readable key name for audits and b2_list_keys output."),
           capabilities: z
             .array(z.enum(ALL_CAPABILITIES))
             .min(1)
-            .describe("B2 capabilities to grant to the new key."),
+            .describe(
+              "B2 capabilities to grant. They must be allowed by the creating key; listKeys/writeKeys/deleteKeys are refused unless B2_ALLOW_KEY_MGMT_GRANTS=true.",
+            ),
           bucketIds: z
             .array(z.string())
             .optional()
-            .describe("Optional bucket restrictions. Omit for account-wide access."),
+            .describe(
+              "Optional bucket ID restrictions. Required by default for keys with write*/delete* capabilities; omit only for intentional account-wide access, and do not combine with bucketId.",
+            ),
           bucketId: z
             .string()
             .optional()
@@ -176,16 +183,20 @@ export function registerKeyTools(
             .int()
             .positive()
             .optional()
-            .describe("Optional key lifetime in seconds. Omit for no expiration."),
+            .describe(
+              "Optional positive key lifetime in seconds. Omit for no expiration only when B2_MAX_KEY_DURATION_SECONDS is not configured.",
+            ),
           namePrefix: z
             .string()
             .optional()
-            .describe("Optional file-name prefix restriction for file capabilities."),
+            .describe(
+              "Optional file-name prefix restriction for file capabilities; omit for no prefix restriction.",
+            ),
           idempotencyKey: z
             .string()
             .min(1)
             .describe(
-              "Caller-generated idempotency key. Reuse the same value only when retrying the identical durable-key creation request.",
+              "Caller-generated idempotency key. Reuse the same value only for an identical retry by the same caller; conflicting reuse is rejected.",
             ),
           confirm: z
             .boolean()
@@ -292,9 +303,11 @@ export function registerKeyTools(
     "b2_delete_key",
     {
       description:
-        "Permanently delete a B2 application key. This action is irreversible. Any system using the deleted key will lose access immediately.",
+        "Permanently delete a B2 application key. Use b2_list_keys first to verify applicationKeyId, keyName, capabilities, and dependent systems; use b2_create_key before deletion when rotating credentials. Requires deleteKeys and destructive confirmation by policy. The key secret cannot be recovered, and anything still using the deleted key loses access immediately.",
       inputSchema: {
-        applicationKeyId: z.string().describe("The ID of the application key to delete."),
+        applicationKeyId: z
+          .string()
+          .describe("Exact application key ID to delete; use b2_list_keys to look it up."),
         confirm: z
           .boolean()
           .optional()
