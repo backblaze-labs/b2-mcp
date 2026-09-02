@@ -282,10 +282,21 @@ function anonymousRegistryEnv({ signatureRepo }) {
 }
 
 function signDigest({ registryImage, digest, signatureRepo }) {
-  run("cosign", ["sign", "--yes", `${registryImage}@${digest}`], {
-    attempts: 3,
-    env: cosignEnv({ signatureRepo }),
-  });
+  // Force the legacy `sha256-<digest>.sig` tag scheme. cosign v3 defaults to the
+  // OCI 1.1 referrers API when the registry advertises it (GHCR now does), which
+  // stores signatures as a referrers index tagged `sha256-<digest>` (no `.sig`).
+  // A separate COSIGN_REPOSITORY can only hold tag-based signatures, and the
+  // anonymous `cosign verify` below (like end users) looks up `sha256-<digest>.sig`,
+  // so referrers-mode signatures verify as "no signatures found". Pinning legacy
+  // keeps sign and verify on the same `.sig` tag scheme.
+  run(
+    "cosign",
+    ["sign", "--yes", "--registry-referrers-mode", "legacy", `${registryImage}@${digest}`],
+    {
+      attempts: 3,
+      env: cosignEnv({ signatureRepo }),
+    },
+  );
 }
 
 function escapeRegex(value) {

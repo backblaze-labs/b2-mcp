@@ -428,7 +428,15 @@ describe("container image policy", () => {
     const cosignCalls = state.cosignCalls ?? [];
     expect(cosignCalls).toContainEqual(
       expect.objectContaining({
-        args: ["sign", "--yes", `${registryImage}@${imageDigest}`],
+        // Legacy referrers mode keeps signatures on the `sha256-<digest>.sig`
+        // tag scheme that the sibling signature repo and anonymous verify need.
+        args: [
+          "sign",
+          "--yes",
+          "--registry-referrers-mode",
+          "legacy",
+          `${registryImage}@${imageDigest}`,
+        ],
         env: expect.objectContaining({ COSIGN_REPOSITORY: signatureRepo }),
       }),
     );
