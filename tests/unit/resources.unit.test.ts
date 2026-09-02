@@ -1,5 +1,9 @@
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
-import type { ReadResourceResult } from "@modelcontextprotocol/server";
+import {
+  ProtocolErrorCode,
+  ResourceNotFoundError,
+  type ReadResourceResult,
+} from "@modelcontextprotocol/server";
 import {
   BUCKET_RESOURCE_LIST_LIMIT,
   BUCKET_RESOURCE_TEMPLATE_URI,
@@ -557,6 +561,44 @@ describe("MCP control-plane resources", () => {
         "resource.error",
       );
       expect(JSON.stringify(warnSpy.mock.calls)).not.toContain(testConfig.applicationKey);
+    } finally {
+      await close();
+    }
+  });
+
+  it("preserves SDK resource-not-found errors for missing buckets", async () => {
+    const fake = new DeterministicB2NativeFake({ capabilities: ["listBuckets"] }).respond(
+      "b2_list_buckets",
+      new StaticHttpResponse(200, { buckets: [] }),
+    );
+    const { client, close } = await connectResourceClient({
+      capabilities: ["listBuckets"],
+      fake,
+    });
+
+    try {
+      const uri = "b2://bucket/missing-bucket";
+      let error: unknown;
+      try {
+        await client.readResource({ uri }, { cacheMode: "refresh" });
+      } catch (err) {
+        error = err;
+      }
+
+      expect(error).toBeInstanceOf(ResourceNotFoundError);
+      expect(error).toMatchObject({
+        code: ProtocolErrorCode.InvalidParams,
+        data: { uri },
+      });
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          resource: "b2_bucket",
+          uri,
+          operation: "resources/read",
+          error: true,
+        }),
+        "resource.error",
+      );
     } finally {
       await close();
     }

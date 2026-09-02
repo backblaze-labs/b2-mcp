@@ -5,6 +5,7 @@
  */
 
 import {
+  ProtocolError,
   ResourceNotFoundError,
   ResourceTemplate,
   type ListResourcesResult,
@@ -233,6 +234,7 @@ async function withResourceGuards<T>(
       },
       "resource.error",
     );
+    if (err instanceof ProtocolError) throw err;
     throw safeErr;
   }
 }
