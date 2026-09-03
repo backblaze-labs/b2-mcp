@@ -2459,9 +2459,7 @@ describe("OAuth resource metadata", () => {
     expect(config.tokenCacheTtlSeconds).not.toBe(120);
     expect(
       warn.mock.calls.some((call) =>
-        String(call[0]).includes(
-          "B2_OAUTH_INTROSPECTION_CACHE_TTL_SECONDS is no longer read",
-        ),
+        String(call[0]).includes("B2_OAUTH_INTROSPECTION_CACHE_TTL_SECONDS is no longer read"),
       ),
     ).toBe(true);
     warn.mockRestore();
@@ -2580,7 +2578,9 @@ describe("OAuth resource metadata", () => {
     expect(response?.status).toBe(204);
     expect(response?.headers.get("access-control-allow-origin")).toBe("*");
     expect(response?.headers.get("access-control-allow-methods")).toBe("GET, HEAD, OPTIONS");
-    expect(response?.headers.get("access-control-allow-headers")).toBe("authorization,x-b2-mcp-key");
+    expect(response?.headers.get("access-control-allow-headers")).toBe(
+      "authorization,x-b2-mcp-key",
+    );
     expect(response?.headers.get("vary")).toBe("Access-Control-Request-Headers");
   });
 

@@ -552,9 +552,7 @@ describe("removed credential env alias warning", () => {
     warnRemovedCredentialEnvAliases();
 
     expect(
-      warn.mock.calls.some((call) =>
-        String(call[0]).includes("B2_CREDENTIAL_<REF>_APP_KEY"),
-      ),
+      warn.mock.calls.some((call) => String(call[0]).includes("B2_CREDENTIAL_<REF>_APP_KEY")),
     ).toBe(true);
     warn.mockRestore();
   });
@@ -564,9 +562,7 @@ describe("removed credential env alias warning", () => {
 
     warnRemovedCredentialEnvAliases();
 
-    expect(
-      warn.mock.calls.some((call) => String(call[0]).includes("removed_alias")),
-    ).toBe(false);
+    expect(warn.mock.calls.some((call) => String(call[0]).includes("removed_alias"))).toBe(false);
     warn.mockRestore();
   });
 });
