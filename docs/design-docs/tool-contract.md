@@ -75,7 +75,8 @@ renaming a tool.
 **Lockstep on any add/rename.** A name change touches many artifacts; update all
 of them in the same change, then regenerate:
 
-1. Tool registration (`server.tool(name, …)` in the relevant `register*` file).
+1. Tool registration (`server.registerTool(name, config, cb)` via the
+   `ToolRegistrar` adapter in the relevant `register*` file).
 2. `src/utils/tool-capabilities.ts` (capability map and access class).
 3. `src/tool-contract.ts` backing-category map.
 4. README/`docs/` tool tables and any skill playbooks that name the tool.
