@@ -17,7 +17,8 @@
  */
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 
 const root = process.cwd();
@@ -167,10 +168,43 @@ if (manifestVersion !== packageVersion) {
   process.exit(2);
 }
 
-// Invoke the lockfile-resolved mcpb binary (pinned as an exact dev dependency)
-// so the packer's full dependency graph is frozen with the rest of the repo,
-// rather than re-resolving transitive deps via `npx -y` on each release.
+// Resolve the lockfile-installed mcpb CLI (pinned as an exact dev dependency)
+// and run its JavaScript entry point directly through the current Node binary,
+// so the packer's full dependency graph is frozen with the rest of the repo
+// rather than re-resolving transitive deps via `npx -y` on each release. Running
+// the CLI's JS entry point through `process.execPath` (instead of invoking the
+// `pnpm`/`mcpb` shims via `execFileSync`) is Windows-safe: on Windows those
+// shims are `.cmd` files that `execFileSync` cannot launch without a shell, which
+// would break the cross-platform reproducible build this script promises.
 //
+// Resolve the package's main entry (its `exports` map does not expose
+// package.json), then walk up to the package root so the bin path is read from
+// the installed manifest rather than hard-coded.
+const require = createRequire(import.meta.url);
+function mcpbPackageRoot() {
+  let dir = path.dirname(require.resolve("@anthropic-ai/mcpb"));
+  while (true) {
+    const manifest = path.join(dir, "package.json");
+    if (
+      existsSync(manifest) &&
+      JSON.parse(readFileSync(manifest, "utf8")).name === "@anthropic-ai/mcpb"
+    ) {
+      return dir;
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir)
+      throw new Error("build-mcpb: could not locate the @anthropic-ai/mcpb package root");
+    dir = parent;
+  }
+}
+const mcpbRoot = mcpbPackageRoot();
+const mcpbBin = JSON.parse(readFileSync(path.join(mcpbRoot, "package.json"), "utf8")).bin;
+const mcpbBinRelative = typeof mcpbBin === "string" ? mcpbBin : mcpbBin?.mcpb;
+if (!mcpbBinRelative) {
+  throw new Error("build-mcpb: could not resolve the mcpb CLI entry point from its package.json");
+}
+const mcpbCli = path.join(mcpbRoot, mcpbBinRelative);
+
 // The packer prints its own SHA-1 of the bytes it writes, but we mutate those
 // bytes below to normalize metadata, so that digest never matches the final
 // artifact. Capture (rather than inherit) the packer's chatty output so its
@@ -183,7 +217,7 @@ if (manifestVersion !== packageVersion) {
 const packFile = path.join(outDir, "b2-mcp.unnormalized.mcpb");
 rmSync(packFile, { force: true });
 try {
-  execFileSync("pnpm", ["exec", "mcpb", "pack", "mcpb", packFile], {
+  execFileSync(process.execPath, [mcpbCli, "pack", "mcpb", packFile], {
     cwd: root,
     stdio: ["ignore", "pipe", "pipe"],
   });
