@@ -69,8 +69,6 @@ function readJson(root, relativePath) {
 const NPX_VALUE_FLAGS = new Set([
   "-p",
   "--package",
-  "-c",
-  "--call",
   "--registry",
   "--userconfig",
   "--cache",
@@ -79,6 +77,10 @@ const NPX_VALUE_FLAGS = new Set([
   "--node-options",
   "--npm",
 ]);
+
+// npx call-mode flags: the following token is a shell command, not a package, so
+// the positional scan cannot interpret it. The launcher must not use call mode.
+const NPX_CALL_FLAGS = new Set(["-c", "--call"]);
 
 /**
  * Return the package spec npx would actually execute: the first positional
@@ -132,6 +134,15 @@ export function verifyReleaseInput(root, tag) {
   );
   const mcpbArgs = (mcpbConfig.args ?? []).map(String);
   const pinnedSpec = `${canonicalPackageName}@${pkg.version}`;
+  // Reject npx call mode outright: it runs the following token as a shell command
+  // rather than the pinned package, so the positional scan below cannot reason
+  // about it. The launcher must be the direct `npx -y <pinnedSpec>` form.
+  for (const arg of mcpbArgs) {
+    assert(
+      !NPX_CALL_FLAGS.has(arg),
+      `mcpb/manifest.json npx launcher must not use call mode (${arg})`,
+    );
+  }
   // The spec npx actually launches must be exactly the pinned version, not just
   // present somewhere in args (an earlier `@latest` positional would win).
   assert(
