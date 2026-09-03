@@ -40,6 +40,12 @@ const credentialEnvKeys = [
   "B2_APPLICATION_KEY",
   "B2_MASTER_KEY_ID",
   "B2_MASTER_KEY",
+  // Retired aliases (issue #386) are no longer parsed, but they must stay scrubbed
+  // from child-process fixtures: an ambient B2_APP_KEY(_ID) would trigger the
+  // startup config.removed_alias warn and displace the server.fatal log line the
+  // bootstrap tests parse.
+  "B2_APP_KEY_ID",
+  "B2_APP_KEY",
 ] as const;
 
 const tsxBin = join(
