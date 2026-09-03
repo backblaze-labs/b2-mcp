@@ -154,6 +154,55 @@ describe("documentation example validator policy", () => {
     },
   );
 
+  it("rejects a pinned client fence whose --package command is not a package binary", () => {
+    const readme = read("README.md").replace(
+      '"command": "npx",\n     "args": ["-y", "@backblaze-labs/b2-mcp@0.2.0"]',
+      '"command": "npx",\n     "args": ["--package=@backblaze-labs/b2-mcp@0.2.0", "node", "./other.js"]',
+    );
+    const expectedLine = lineOf(readme, '```json\n   {\n     "command": "npx",');
+    const result = runDocExamplesWithOverrides({ "README.md": readme });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(`README.md:${expectedLine}`);
+    expect(result.stderr).toContain("pinned client config command node must be an exported package binary");
+  });
+
+  it("accepts a pinned client fence whose --package command is a package binary", () => {
+    const readme = read("README.md").replace(
+      '"command": "npx",\n     "args": ["-y", "@backblaze-labs/b2-mcp@0.2.0"]',
+      '"command": "npx",\n     "args": ["--package=@backblaze-labs/b2-mcp@0.2.0", "b2-mcp"]',
+    );
+    const result = runDocExamplesWithOverrides({ "README.md": readme });
+
+    expect(result.status).toBe(0);
+  });
+
+  it("accepts a pinned client fence using npm exec with options before the subcommand", () => {
+    const readme = read("README.md").replace(
+      '"command": "npx",\n     "args": ["-y", "@backblaze-labs/b2-mcp@0.2.0"]',
+      '"command": "npm",\n     "args": ["--loglevel", "warn", "exec", "@backblaze-labs/b2-mcp@0.2.0"]',
+    );
+    const result = runDocExamplesWithOverrides({ "README.md": readme });
+
+    expect(result.status).toBe(0);
+  });
+
+  it.each([
+    ["mutable version", "npx.cmd -y @backblaze-labs/b2-mcp@latest --version", "must not execute mutable-versioned package examples"],
+    ["package drift", "npx.cmd -y @attacker/b2-mcp@0.2.0 --version", "references package @attacker/b2-mcp@0.2.0"],
+  ])("rejects an npx.cmd launcher with a %s", (_label, command, message) => {
+    const readme = read("README.md").replace(
+      "npx -y @backblaze-labs/b2-mcp@0.2.0 --version",
+      command,
+    );
+    const expectedLine = lineOf(readme, command);
+    const result = runDocExamplesWithOverrides({ "README.md": readme });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(`README.md:${expectedLine}`);
+    expect(result.stderr).toContain(message);
+  });
+
   it("rejects an npx launcher with an extra option before a drifting package", () => {
     const readme = read("README.md").replace(
       "npx -y @backblaze-labs/b2-mcp@0.2.0 --version",

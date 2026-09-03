@@ -594,7 +594,10 @@ function validatePackageCommand(file, line, commandConfig, expectedPackage, opti
     return;
   }
 
-  const packageSpecs = packagesExecutedByCommand(command, args);
+  const tokens = [command, ...args];
+  const argsStart = packageExecutorArgsStart(tokens, 0);
+  const execArgs = argsStart === null ? [] : tokens.slice(argsStart);
+  const packageSpecs = argsStart === null ? [] : allPackageArgs(execArgs);
   if (packageSpecs.length === 0) {
     addFinding(
       file,
@@ -619,6 +622,19 @@ function validatePackageCommand(file, line, commandConfig, expectedPackage, opti
     }
     if (options.requireExactVersion && !isExactPackageVersion(parsedPackageSpec?.version)) {
       addFinding(file, line, `${command} client config must pin an exact package version`);
+    }
+  }
+  // With an explicit `--package`, the positional token is the command the config
+  // launches. The strict pinned fence must confirm it is an exported package
+  // binary so a pinned package spec cannot front an unrelated executable.
+  if (options.requireExactVersion) {
+    const runCommand = explicitPackageRunCommand(execArgs);
+    if (runCommand !== null && !new Set(Object.keys(pkg.bin ?? {})).has(runCommand)) {
+      addFinding(
+        file,
+        line,
+        `pinned client config command ${runCommand} must be an exported package binary`,
+      );
     }
   }
 }
@@ -648,21 +664,6 @@ function validateDirectClientCommand(file, line, commandConfig, options = {}) {
   if (!binNames.has(command)) {
     addFinding(file, line, `direct client command ${command} must be an exported package binary`);
   }
-}
-
-function packagesExecutedByCommand(command, args) {
-  if (command === "npx") return allPackageArgs(args);
-  if (command === "npm") {
-    const [subcommand, ...rest] = args;
-    if (subcommand !== "exec") return [];
-    return allPackageArgs(rest);
-  }
-  if (command === "pnpm") {
-    const [subcommand, ...rest] = args;
-    if (subcommand !== "dlx") return [];
-    return allPackageArgs(rest);
-  }
-  return [];
 }
 
 // Collect every package operand an npx/exec/dlx invocation fetches: each
@@ -697,6 +698,36 @@ function allPackageArgs(args) {
     break;
   }
   return packages;
+}
+
+// When an explicit `--package`/`-p` is supplied, npx/exec/dlx run the first
+// positional token as a command (expected to be a binary the fetched package
+// exports), not as another package operand. Return that command so the strict
+// pinned fence can require an exported package binary; otherwise a config such
+// as `npx --package=<pinned-pkg> node ./other.js` pins a version but launches
+// an unrelated executable unchecked. Returns null when no explicit package was
+// supplied (the positional is then the package itself, validated elsewhere).
+function explicitPackageRunCommand(args) {
+  let sawExplicitPackage = false;
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--") continue;
+    if (arg.startsWith("--package=")) {
+      sawExplicitPackage = true;
+      continue;
+    }
+    if (arg === "--package" || arg === "-p") {
+      sawExplicitPackage = true;
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith("-")) {
+      if (!arg.includes("=") && npxValueOptions.has(arg)) index += 1;
+      continue;
+    }
+    return sawExplicitPackage ? arg : null;
+  }
+  return null;
 }
 
 function parsePackageSpec(packageSpec) {
@@ -921,7 +952,10 @@ function executablePackageSpecsInLine(logicalLine) {
 // subcommand (for example `npm --loglevel warn exec <pkg>`) so a shared policy
 // covers `npx`, `npm exec`, and `pnpm dlx`.
 function packageExecutorArgsStart(tokens, index) {
-  if (tokens[index] === "npx") return index + 1;
+  // Recognize the Windows `.cmd` shims too; documented PowerShell examples use
+  // `npx.cmd`, and omitting it let `npx.cmd -y <pkg>@latest` bypass both the
+  // package-name and mutable-version checks that `npm.cmd`/`pnpm.cmd` already hit.
+  if (tokens[index] === "npx" || tokens[index] === "npx.cmd") return index + 1;
   const isNpm = tokens[index] === "npm" || tokens[index] === "npm.cmd";
   const isPnpm = tokens[index] === "pnpm" || tokens[index] === "pnpm.cmd";
   if (!isNpm && !isPnpm) return null;
