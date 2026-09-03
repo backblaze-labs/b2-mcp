@@ -40,6 +40,7 @@ SLSA
 spdxjson
 slsaprovenance
 SUIDSGID
+TDQS
 thiennq
 tmpfs
 toon
