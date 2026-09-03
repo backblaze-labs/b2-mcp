@@ -12,10 +12,10 @@ export const REPO_BLOB_URL = "https://github.com/backblaze-labs/b2-mcp/blob/main
 
 // Supported Markdown subset for PRIVACY.md: blank lines, paragraphs, #/##/###
 // headings, top-level "- " bullets with two- or three-space indented
-// continuation lines, inline links whose destinations do not contain spaces or
-// parentheses, optional quoted link titles, and inline code spans. The generator
-// fails closed on unsupported constructs so the hosted page cannot silently
-// drift from the canonical file.
+// continuation lines, inline links whose destinations do not contain spaces,
+// angle brackets, or parentheses, optional quoted link titles, and inline code
+// spans. The generator fails closed on unsupported constructs so the hosted page
+// cannot silently drift from the canonical file.
 
 function escapeHtml(value) {
   return value
@@ -41,7 +41,7 @@ function linkTarget(rawTarget) {
 }
 
 function supportedLinkPattern() {
-  return /\[([^\]\n]+)\]\(([^() \n]+)(?:\s+"([^"\n]+)")?\)/g;
+  return /\[([^\]\n]+)\]\(([^()<>\s]+)(?:\s+"([^"\n]+)")?\)/g;
 }
 
 function withoutSupportedInline(markdown) {
@@ -144,7 +144,7 @@ export function assertSupportedMarkdown(markdown) {
 }
 
 export function renderInline(markdown) {
-  const inlinePattern = /\[([^\]\n]+)\]\(([^() \n]+)(?:\s+"([^"\n]+)")?\)|`([^`\n]+)`/g;
+  const inlinePattern = /\[([^\]\n]+)\]\(([^()<>\s]+)(?:\s+"([^"\n]+)")?\)|`([^`\n]+)`/g;
   let output = "";
   let cursor = 0;
   for (const match of markdown.matchAll(inlinePattern)) {

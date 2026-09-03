@@ -71,6 +71,7 @@ describe("privacy page generator", () => {
     ["bold link label", "[**Policy**](https://example.com)"],
     ["HTML link label", "[<b>Policy</b>](https://example.com)"],
     ["parenthesized link target", "[Policy](https://example.com/legal_(terms))"],
+    ["angle-delimited link target", "[Policy](<https://example.com/privacy>)"],
     ["indented continuation fence", "- item\n    ```text\n    secret\n    ```"],
     ["indented continuation quote", "- item\n    > quote"],
   ])("rejects unsupported Markdown: %s", async (_name, markdown) => {
