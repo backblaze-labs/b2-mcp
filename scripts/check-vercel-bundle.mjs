@@ -21,12 +21,13 @@ const VERCEL_SOURCE_BUDGET_BYTES = 1_500_000;
 // The estimate is all source bytes + the full clean-consumer production install
 // (see below), which grew with the reviewed aws-sdk 3.1119.0 and b2-sdk 0.4.0
 // bumps, the stdio discovery-mode source, the read-only resource surface, the
-// prompt workflow source and contract fixtures, and the TDQS pass-2 tool
-// description expansions (issue #376). The whole function estimate lands near
-// 33.71 MB on Linux — of which the dependency install itself is ~32.24 MB
+// prompt workflow source and contract fixtures, the TDQS pass-2 tool
+// description expansions (issue #376), and the issue #371 README npx cache
+// troubleshooting content. The whole function estimate lands near 33.71 MB on
+// Linux — of which the dependency install itself is ~32.24 MB
 // (reports/package-budget/metrics.json), not b2-sdk alone — so the budget
 // carries modest headroom above the full estimate.
-const VERCEL_FUNCTION_BUNDLE_BUDGET_BYTES = 33_750_000;
+const VERCEL_FUNCTION_BUNDLE_BUDGET_BYTES = 33_760_000;
 
 function readJson(relativePath) {
   return JSON.parse(readFileSync(path.join(root, relativePath), "utf8"));
