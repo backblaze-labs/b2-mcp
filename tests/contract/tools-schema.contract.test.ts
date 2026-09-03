@@ -177,7 +177,12 @@ describe("Tool annotations match the generated MCP contract", () => {
 // ── Required parameters check ─────────────────────────────────────────────────
 
 describe("Tools that need a bucket param declare it as required", () => {
-  const bucketTools = ["s3_head_bucket", "s3_put_bucket_lifecycle", "s3_get_bucket_location"];
+  const bucketTools = [
+    "s3_head_bucket",
+    "s3_get_bucket_lifecycle",
+    "s3_put_bucket_lifecycle",
+    "s3_get_bucket_location",
+  ];
 
   test.each(bucketTools)("%s requires a 'bucket' parameter", (name) => {
     const schema = tools[name]?.inputSchema;

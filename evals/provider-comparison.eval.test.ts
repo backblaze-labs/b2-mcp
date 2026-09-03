@@ -519,7 +519,7 @@ describe("provider pass-rate comparison", () => {
   });
 
   it("uses the shared live case set for the Claude and OpenAI providers", () => {
-    expect(FULL_PROFILE_EVAL_CASES).toHaveLength(40);
+    expect(FULL_PROFILE_EVAL_CASES).toHaveLength(41);
     expect(FULL_PROFILE_EVAL_CASES.map((evalCase) => evalCase.expected.toolName).sort()).toContain(
       "b2_delete_bucket",
     );

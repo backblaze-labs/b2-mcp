@@ -17,6 +17,7 @@ import {
   CreateMultipartUploadCommand,
   DeleteBucketLifecycleCommand,
   DeleteObjectCommand,
+  GetBucketLifecycleConfigurationCommand,
   GetBucketLocationCommand,
   GetObjectCommand,
   HeadBucketCommand,
@@ -30,6 +31,7 @@ import {
   S3Client,
   UploadPartCommand,
   UploadPartCopyCommand,
+  type GetBucketLifecycleConfigurationCommandOutput,
   type S3ClientConfig as AwsS3ClientConfig,
   type S3ClientResolvedConfig,
   type ServiceInputTypes,
@@ -54,46 +56,52 @@ type S3SendCommand<
 /** AWS S3 client configuration accepted by the B2 peer facade. */
 export type B2S3PeerClientConfig = AwsS3ClientConfig;
 
-/** Prefix filter for a B2 S3 lifecycle rule. */
+/** Lifecycle prefix filter. */
 export interface B2S3LifecycleFilter {
-  /** Object-key prefix matched by the lifecycle rule. */
+  /** Matched object-key prefix. */
   prefix?: string;
 }
 
-/** Current-version expiration action for a lifecycle rule. */
+/** Current-version expiration action. */
 export interface B2S3LifecycleExpiration {
-  /** Number of days after creation when current versions expire. */
+  /** Days after creation. */
   days?: number;
-  /** Whether expired delete markers should be removed automatically. */
+  /** Expired delete-marker cleanup. */
   expiredObjectDeleteMarker?: boolean;
 }
 
-/** Noncurrent-version expiration action for a lifecycle rule. */
+/** Noncurrent-version expiration action. */
 export interface B2S3LifecycleNoncurrentVersionExpiration {
-  /** Number of days after becoming noncurrent when versions expire. */
+  /** Days after becoming noncurrent. */
   noncurrentDays: number;
 }
 
-/** Incomplete multipart upload cleanup action for a lifecycle rule. */
+/** Incomplete multipart upload cleanup action. */
 export interface B2S3LifecycleAbortIncompleteMultipartUpload {
-  /** Number of days after initiation when incomplete multipart uploads are aborted. */
+  /** Days after initiation. */
   daysAfterInitiation: number;
 }
 
-/** S3 lifecycle rule subset supported by the B2 MCP tool surface. */
+/** B2-supported S3 lifecycle rule. */
 export interface B2S3LifecycleRule {
-  /** Rule identifier supplied to S3 lifecycle APIs. */
+  /** Rule identifier. */
   id: string;
-  /** Whether the lifecycle rule is active. */
+  /** Rule status. */
   status: "Enabled" | "Disabled";
-  /** Optional object-key prefix filter. */
+  /** Prefix filter. */
   filter?: B2S3LifecycleFilter;
-  /** Optional current-version expiration action. */
+  /** Current-version expiration. */
   expiration?: B2S3LifecycleExpiration;
-  /** Optional noncurrent-version expiration action. */
+  /** Noncurrent-version expiration. */
   noncurrentVersionExpiration?: B2S3LifecycleNoncurrentVersionExpiration;
-  /** Optional cleanup action for incomplete multipart uploads. */
+  /** Incomplete multipart cleanup. */
   abortIncompleteMultipartUpload?: B2S3LifecycleAbortIncompleteMultipartUpload;
+}
+
+/** S3 lifecycle configuration. */
+export interface B2S3LifecycleConfigurationResult {
+  /** Lifecycle rules. */
+  rules: B2S3LifecycleRule[];
 }
 
 /** Completed multipart part supplied to S3 CompleteMultipartUpload. */
@@ -816,6 +824,33 @@ export function assertSafeObjectContentType(
   }
 }
 
+function lifecycleRuleFromAws(
+  rule: NonNullable<GetBucketLifecycleConfigurationCommandOutput["Rules"]>[number],
+): B2S3LifecycleRule {
+  const prefix = rule.Filter?.Prefix ?? rule.Prefix;
+  const days = rule.Expiration?.Days;
+  const deleteMarker = rule.Expiration?.ExpiredObjectDeleteMarker;
+  const noncurrentDays = rule.NoncurrentVersionExpiration?.NoncurrentDays;
+  const uploadDays = rule.AbortIncompleteMultipartUpload?.DaysAfterInitiation;
+  return {
+    id: rule.ID ?? "",
+    status: rule.Status === "Disabled" ? "Disabled" : "Enabled",
+    ...(prefix === undefined ? {} : { filter: { prefix } }),
+    ...(days === undefined && deleteMarker === undefined
+      ? {}
+      : {
+          expiration: {
+            ...(days === undefined ? {} : { days }),
+            ...(deleteMarker === undefined ? {} : { expiredObjectDeleteMarker: deleteMarker }),
+          },
+        }),
+    ...(noncurrentDays === undefined ? {} : { noncurrentVersionExpiration: { noncurrentDays } }),
+    ...(uploadDays === undefined
+      ? {}
+      : { abortIncompleteMultipartUpload: { daysAfterInitiation: uploadDays } }),
+  };
+}
+
 /**
  * Repository-owned facade over the AWS S3 SDK for B2's S3-compatible endpoint.
  *
@@ -897,6 +932,20 @@ export class B2S3PeerClient {
    */
   async headBucket(bucket: string): Promise<void> {
     await this.sendWithCircuit(new HeadBucketCommand({ Bucket: bucket }));
+  }
+
+  /**
+   * Read the S3 lifecycle configuration for a bucket.
+   *
+   * @param bucket - Bucket name.
+   *
+   * @returns Lifecycle rules.
+   */
+  async getBucketLifecycle(bucket: string): Promise<B2S3LifecycleConfigurationResult> {
+    const result = await this.sendWithCircuit(
+      new GetBucketLifecycleConfigurationCommand({ Bucket: bucket }),
+    );
+    return { rules: (result.Rules ?? []).map(lifecycleRuleFromAws) };
   }
 
   /**

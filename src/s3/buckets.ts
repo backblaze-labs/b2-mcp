@@ -6,7 +6,7 @@
 import type { B2S3LifecycleRule, B2S3PeerClient } from "./aws-sdk-adapter.js";
 import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
-import { toolError, toolSuccess } from "../utils/errors.js";
+import { toolError, toolJson, toolSuccess } from "../utils/errors.js";
 import { B2Config } from "../utils/types.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
 
@@ -29,7 +29,10 @@ import { checkDestructive } from "../utils/destructive-gate.js";
  */
 export function registerS3BucketTools(
   server: ToolRegistrar,
-  s3: Pick<B2S3PeerClient, "headBucket" | "putBucketLifecycle" | "deleteBucketLifecycle">,
+  s3: Pick<
+    B2S3PeerClient,
+    "headBucket" | "getBucketLifecycle" | "putBucketLifecycle" | "deleteBucketLifecycle"
+  >,
   config: B2Config,
 ): void {
   server.registerTool(
@@ -45,6 +48,25 @@ export function registerS3BucketTools(
       try {
         await s3.headBucket(args.bucket);
         return toolSuccess(`Bucket '${args.bucket}' exists and is accessible.`);
+      } catch (err) {
+        return toolError(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "s3_get_bucket_lifecycle",
+    {
+      description:
+        "Read S3 lifecycle rules for a B2 bucket. Returns B2-supported fields: prefix filter, Expiration, NoncurrentVersionExpiration, and AbortIncompleteMultipartUpload.",
+      inputSchema: {
+        bucket: z.string().describe("The bucket name."),
+      },
+    },
+    async (args) => {
+      try {
+        const result = await s3.getBucketLifecycle(args.bucket);
+        return toolJson(result);
       } catch (err) {
         return toolError(err);
       }

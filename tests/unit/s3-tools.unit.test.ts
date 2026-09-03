@@ -996,6 +996,75 @@ describe("s3_head_object and s3_copy_object", () => {
   });
 });
 
+describe("s3_get_bucket_lifecycle", () => {
+  it("returns lifecycle rules from the S3-compatible API", async () => {
+    sendSpy.mockResolvedValueOnce({
+      Rules: [
+        {
+          ID: "expire-logs-after-30-days",
+          Status: "Enabled",
+          Filter: { Prefix: "logs/" },
+          Expiration: { Days: 30 },
+        },
+        {
+          ID: "remove-log-delete-markers",
+          Status: "Enabled",
+          Filter: { Prefix: "logs/" },
+          Expiration: { ExpiredObjectDeleteMarker: true },
+        },
+        {
+          ID: "delete-old-document-versions",
+          Status: "Enabled",
+          Filter: { Prefix: "documents/" },
+          NoncurrentVersionExpiration: { NoncurrentDays: 90 },
+        },
+        {
+          ID: "abort-incomplete-uploads",
+          Status: "Enabled",
+          Filter: { Prefix: "" },
+          AbortIncompleteMultipartUpload: { DaysAfterInitiation: 7 },
+        },
+      ],
+    });
+
+    const result = parseResult(
+      await callTool(server, "s3_get_bucket_lifecycle", { bucket: "my-bucket" }),
+    );
+
+    expect(result).toEqual({
+      rules: [
+        {
+          id: "expire-logs-after-30-days",
+          status: "Enabled",
+          filter: { prefix: "logs/" },
+          expiration: { days: 30 },
+        },
+        {
+          id: "remove-log-delete-markers",
+          status: "Enabled",
+          filter: { prefix: "logs/" },
+          expiration: { expiredObjectDeleteMarker: true },
+        },
+        {
+          id: "delete-old-document-versions",
+          status: "Enabled",
+          filter: { prefix: "documents/" },
+          noncurrentVersionExpiration: { noncurrentDays: 90 },
+        },
+        {
+          id: "abort-incomplete-uploads",
+          status: "Enabled",
+          filter: { prefix: "" },
+          abortIncompleteMultipartUpload: { daysAfterInitiation: 7 },
+        },
+      ],
+    });
+    const command = sendSpy.mock.calls[0][0];
+    expect(command.constructor.name).toBe("GetBucketLifecycleConfigurationCommand");
+    expect(command.input).toMatchObject({ Bucket: "my-bucket" });
+  });
+});
+
 describe("s3_put_bucket_lifecycle", () => {
   it("sends lifecycle rules and returns success", async () => {
     const rules = [

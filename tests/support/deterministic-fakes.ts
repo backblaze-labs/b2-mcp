@@ -217,6 +217,7 @@ export type DeterministicS3PeerClient = Pick<
   B2S3PeerClient,
   | "headBucket"
   | "deleteBucketLifecycle"
+  | "getBucketLifecycle"
   | "putBucketLifecycle"
   | "getBucketLocation"
   | "putObject"
@@ -272,6 +273,10 @@ export class DeterministicS3ClientFake implements DeterministicS3PeerClient {
 
   async deleteBucketLifecycle(input: string): Promise<void> {
     await this.next("deleteBucketLifecycle", input, undefined);
+  }
+
+  async getBucketLifecycle(input: string): Promise<{ rules: B2S3LifecycleRule[] }> {
+    return this.next("getBucketLifecycle", input, { rules: [] });
   }
 
   async putBucketLifecycle(input: { bucket: string; rules: B2S3LifecycleRule[] }): Promise<void> {

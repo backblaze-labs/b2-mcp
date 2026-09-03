@@ -79,6 +79,7 @@ describe("OAuth scope-aware tool registration", () => {
     expect(tools.has("b2_list_buckets")).toBe(true);
     expect(tools.has("s3_get_object")).toBe(true);
     expect(tools.has("s3_list_objects_v2")).toBe(true);
+    expect(tools.has("s3_get_bucket_lifecycle")).toBe(true);
     expect(tools.has("s3_get_presigned_url")).toBe(true);
     expect(tools.has("s3_put_object")).toBe(false);
     expect(tools.has("b2_create_bucket")).toBe(false);

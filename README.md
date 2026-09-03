@@ -28,10 +28,10 @@ A [Model Context Protocol](https://modelcontextprotocol.io) server for [Backblaz
 
 > **This is the official Backblaze B2 MCP server** — `backblaze-labs/b2-mcp`, published as [`@backblaze-labs/b2-mcp`](https://www.npmjs.com/package/@backblaze-labs/b2-mcp) on npm and listed in the [Official MCP Registry](https://registry.modelcontextprotocol.io/v0/servers?search=io.github.backblaze-labs/b2-mcp) as `io.github.backblaze-labs/b2-mcp`. Community forks and third-party wrappers are not maintained by Backblaze.
 
-**40 tools, assigned by backing category:**
+**41 tools, assigned by backing category:**
 
 - **Native B2 SDK (`@backblaze-labs/b2-sdk`) (17)** — B2 control-plane operations the S3 API has no equivalent for: buckets, application keys, Object Lock, event notifications, and Partner/Groups operations.
-- **AWS S3 SDK (`@aws-sdk/client-s3`) (19)** — the S3-compatible data plane: object upload/download/copy/list/delete, multipart, bucket reachability, lifecycle, and presigned URL paths.
+- **AWS S3 SDK (`@aws-sdk/client-s3`) (20)** — the S3-compatible data plane: object upload/download/copy/list/delete, multipart, bucket reachability, lifecycle, and presigned URL paths.
 - **Neither SDK (custom MCP code) (4)** — repository-owned analytics over B2 reports and bounded live listings: storage growth, egress leaders, largest files, and abandoned uploads.
 
 Availability is a per-tool annotation, separate from those backing categories:
@@ -94,7 +94,7 @@ Restart Claude Desktop and the B2 tools appear. To persist local stdio logs from
 
 > **One non-master application key covers normal storage work:** B2 native, S3, and key management. SDK-backed Partner/Groups tools require `B2_MASTER_KEY_ID` / `B2_MASTER_KEY` on an account authorized for the Partner API. B2's S3 endpoint rejects master keys, which is why the application key remains the primary credential. See [Configuration](#configuration) for the full list.
 >
-> **Why your client may show fewer than 40 tools:** registration is capability-aware, so a client only sees the tools its key can actually use. With a non-master key and no master key configured, the three Partner/Groups tools that require a master key (`b2_list_groups`, `b2_list_group_members`, `b2_eject_group_member`) are not surfaced, so `tools/list` reports 37. Add `B2_MASTER_KEY_ID` / `B2_MASTER_KEY` on a Partner-entitled account to get the full 40. A read-only key trims the surface further, and durable-secret tools appear as non-secret "unavailable" stubs unless a secret sink is configured. This is expected, not a missing-install problem.
+> **Why your client may show fewer than 41 tools:** registration is capability-aware, so a client only sees the tools its key can actually use. With a non-master key and no master key configured, the three Partner/Groups tools that require a master key (`b2_list_groups`, `b2_list_group_members`, `b2_eject_group_member`) are not surfaced, so `tools/list` reports 38. Add `B2_MASTER_KEY_ID` / `B2_MASTER_KEY` on a Partner-entitled account to get the full 41. A read-only key trims the surface further, and durable-secret tools appear as non-secret "unavailable" stubs unless a secret sink is configured. This is expected, not a missing-install problem.
 
 > **Other clients:** [`docs/CLIENTS.md`](docs/CLIENTS.md) has copy-paste setup for Cursor, VS Code, Cline, Windsurf, Zed, Continue, Goose, Claude.ai, and hosted (Streamable HTTP), plus a compatibility matrix.
 
@@ -420,7 +420,7 @@ advertised list.
 
 ## Tools
 
-The server exposes **40 tools** (registration is capability-aware, so a given key sees only the subset it can use).
+The server exposes **41 tools** (registration is capability-aware, so a given key sees only the subset it can use).
 
 **Native B2 SDK (17):**
 
@@ -442,7 +442,7 @@ The server exposes **40 tools** (registration is capability-aware, so a given ke
 - `b2_create_group_member` — Create a Partner group member (Partner API credential)
 - `b2_reserve_trial_create_account` — Reserve a trial account (Partner API credential)
 
-**AWS S3 SDK — data plane (19):**
+**AWS S3 SDK — data plane (20):**
 
 - `s3_put_object` — Inline upload of a small (≤1 MiB) control-plane object
 - `s3_get_object` — Inline download of a small (≤1 MiB) control-plane object
@@ -461,6 +461,7 @@ The server exposes **40 tools** (registration is capability-aware, so a given ke
 - `s3_upload_part_copy` — Server-side copy of a part
 - `s3_get_presigned_url` — Short-lived presigned PUT/GET bearer URL
 - `s3_head_bucket` — Check a bucket is reachable on the S3 endpoint
+- `s3_get_bucket_lifecycle` — Read S3 lifecycle rules
 - `s3_get_bucket_location` — Bucket region / location constraint
 - `s3_put_bucket_lifecycle` — Set S3 lifecycle rules
 
@@ -489,7 +490,7 @@ prompt fixtures are referenced from `docs/tool-profile-contract.json`.
 
 ### Tool details and availability
 
-**40 total — 17 Native B2 SDK + 19 AWS S3 SDK + 4 Neither SDK/custom MCP tools.** Prefix counts remain 21 native `b2_*` names + 19 data-plane `s3_*` names. Availability is orthogonal to backing: `b2_create_key` and `b2_create_group_member` are available when `B2_SECRET_SINK=file` or `inline`; `b2_reserve_trial_create_account` is available only with explicit `inline` mode because Reserve Trial has no provider-side recovery path after a file sink write failure. These names are non-secret compatibility stubs when unavailable. The inherited `s3_*` aliases use the AWS S3 SDK against B2's S3-compatible endpoint, with configuration derived from the official B2 SDK `/s3` helper. Under stdio's default `confirm` policy, fifteen destructive, durable-secret-producing, or protection-weakening tool names require `confirm: true` or MCP form elicitation before execution: the explicit deletes (`s3_delete_object`, `s3_delete_objects`, `s3_abort_multipart_upload`, `b2_delete_bucket`, `b2_delete_key`), durable key creation (`b2_create_key`), PutObject presigning (`s3_get_presigned_url` with `operation: "PutObject"`), Partner group membership changes (`b2_eject_group_member`, `b2_create_group_member`), trial-account reservation (`b2_reserve_trial_create_account`), persistent outbound webhook replacement (`b2_set_bucket_notification_rules`), and the protection-removal or copy/delete policy paths (`b2_update_file_retention` when clearing/bypassing, `b2_update_file_legal_hold` when set off, `b2_update_bucket` for bucketType allPublic, fileLockEnabled false, defaultRetention.mode null, lifecycleRules with daysFromHidingToDeleting, or any replicationConfiguration update, and `s3_put_bucket_lifecycle` when a rule schedules deletion). HTTP defaults to `block`, so the same calls are refused unless the operator explicitly selects `confirm` or `allow`.
+**41 total — 17 Native B2 SDK + 20 AWS S3 SDK + 4 Neither SDK/custom MCP tools.** Prefix counts remain 21 native `b2_*` names + 20 data-plane `s3_*` names. Availability is orthogonal to backing: `b2_create_key` and `b2_create_group_member` are available when `B2_SECRET_SINK=file` or `inline`; `b2_reserve_trial_create_account` is available only with explicit `inline` mode because Reserve Trial has no provider-side recovery path after a file sink write failure. These names are non-secret compatibility stubs when unavailable. The inherited `s3_*` aliases use the AWS S3 SDK against B2's S3-compatible endpoint, with configuration derived from the official B2 SDK `/s3` helper. Under stdio's default `confirm` policy, fifteen destructive, durable-secret-producing, or protection-weakening tool names require `confirm: true` or MCP form elicitation before execution: the explicit deletes (`s3_delete_object`, `s3_delete_objects`, `s3_abort_multipart_upload`, `b2_delete_bucket`, `b2_delete_key`), durable key creation (`b2_create_key`), PutObject presigning (`s3_get_presigned_url` with `operation: "PutObject"`), Partner group membership changes (`b2_eject_group_member`, `b2_create_group_member`), trial-account reservation (`b2_reserve_trial_create_account`), persistent outbound webhook replacement (`b2_set_bucket_notification_rules`), and the protection-removal or copy/delete policy paths (`b2_update_file_retention` when clearing/bypassing, `b2_update_file_legal_hold` when set off, `b2_update_bucket` for bucketType allPublic, fileLockEnabled false, defaultRetention.mode null, lifecycleRules with daysFromHidingToDeleting, or any replicationConfiguration update, and `s3_put_bucket_lifecycle` when a rule schedules deletion). HTTP defaults to `block`, so the same calls are refused unless the operator explicitly selects `confirm` or `allow`.
 
 <details>
 <summary><b>Category 1 — Native B2 SDK (17)</b></summary>
@@ -540,7 +541,7 @@ Partner/Groups tools remain available only when a distinct master key is
 configured and the account is authorized for the Partner API.
 
 <details>
-<summary><b>Category 2 — AWS S3 SDK (19)</b></summary>
+<summary><b>Category 2 — AWS S3 SDK (20)</b></summary>
 
 | Tool                                                                                     | Availability | Description                                                                                      |
 | ---------------------------------------------------------------------------------------- | ------------ | ------------------------------------------------------------------------------------------------ |
@@ -554,6 +555,7 @@ configured and the account is authorized for the Partner API.
 | `s3_upload_part_copy`                                                                    | Available    | Server-side copy of a part                                                                       |
 | `s3_get_presigned_url`                                                                   | Available    | Short-lived presigned PUT/GET bearer URL (browser/CORS handoff)                                  |
 | `s3_head_bucket`                                                                         | Available    | Check bucket exists/reachable on the S3 endpoint                                                 |
+| `s3_get_bucket_lifecycle`                                                                | Available    | Read S3 lifecycle rules                                                                          |
 | `s3_get_bucket_location`                                                                 | Available    | Bucket region / location constraint                                                              |
 | `s3_put_bucket_lifecycle`                                                                | Available    | Lifecycle rules incl. `AbortIncompleteMultipartUpload`                                           |
 

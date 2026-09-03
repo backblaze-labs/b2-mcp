@@ -46,10 +46,10 @@ describe("getRegisteredTools", () => {
       fileRoot: null,
     });
     const names = Object.keys(getRegisteredTools(server) ?? {});
-    expect(names.length).toBe(40);
+    expect(names.length).toBe(41);
     expect(names).toEqual([...names].sort());
     expect(infoSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ toolCount: 40, outputFormat: "json" }),
+      expect.objectContaining({ toolCount: 41, outputFormat: "json" }),
       "server.ready",
     );
   });

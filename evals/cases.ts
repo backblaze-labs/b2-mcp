@@ -630,6 +630,14 @@ export const S3_DATA_PLANE_EVAL_CASES: readonly EvalCase[] = [
     result: s3InvalidAccessKeyError,
   }),
   evalToolCase({
+    name: "get bucket lifecycle",
+    category: "s3-data-plane",
+    toolName: "s3_get_bucket_lifecycle",
+    args: { bucket: "eval-bucket" },
+    request: "Read the S3-compatible lifecycle configuration for a Backblaze B2 bucket.",
+    result: s3InvalidAccessKeyError,
+  }),
+  evalToolCase({
     name: "get object",
     category: "s3-data-plane",
     toolName: "s3_get_object",

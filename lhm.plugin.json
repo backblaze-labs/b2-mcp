@@ -1509,6 +1509,27 @@
       }
     },
     {
+      "name": "s3_get_bucket_lifecycle",
+      "description": "Read S3 lifecycle rules for a B2 bucket. Returns B2-supported fields: prefix filter, Expiration, NoncurrentVersionExpiration, and AbortIncompleteMultipartUpload.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "bucket": {
+            "type": "string",
+            "description": "The bucket name."
+          }
+        },
+        "required": ["bucket"]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
       "name": "s3_get_bucket_location",
       "description": "Get the region (location constraint) of a B2 bucket via the S3-compatible API. No native b2_* equivalent — used to verify region/endpoint pairing.",
       "inputSchema": {

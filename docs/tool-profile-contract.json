@@ -57,6 +57,7 @@
     "s3_create_multipart_upload": "awsS3Sdk",
     "s3_delete_object": "awsS3Sdk",
     "s3_delete_objects": "awsS3Sdk",
+    "s3_get_bucket_lifecycle": "awsS3Sdk",
     "s3_get_bucket_location": "awsS3Sdk",
     "s3_get_object": "awsS3Sdk",
     "s3_get_presigned_url": "awsS3Sdk",
@@ -76,14 +77,14 @@
       "description": "Complete tool superset for contract review and regression detection across all backing categories; durable-secret producers are sink-backed when a secret sink is active and otherwise remain availability-annotated stubs.",
       "capabilities": null,
       "counts": {
-        "total": 40,
+        "total": 41,
         "b2": 21,
-        "s3": 19,
+        "s3": 20,
         "bz": 0
       },
       "backingCounts": {
         "nativeB2Sdk": 17,
-        "awsS3Sdk": 19,
+        "awsS3Sdk": 20,
         "customMcp": 4
       },
       "names": [
@@ -114,6 +115,7 @@
         "s3_create_multipart_upload",
         "s3_delete_object",
         "s3_delete_objects",
+        "s3_get_bucket_lifecycle",
         "s3_get_bucket_location",
         "s3_get_object",
         "s3_get_presigned_url",
@@ -156,6 +158,7 @@
         "s3_create_multipart_upload": ["bucket", "key"],
         "s3_delete_object": ["bucket", "key"],
         "s3_delete_objects": ["bucket", "objects"],
+        "s3_get_bucket_lifecycle": ["bucket"],
         "s3_get_bucket_location": ["bucket"],
         "s3_get_object": ["bucket", "key"],
         "s3_get_presigned_url": ["bucket", "key", "operation"],
@@ -204,7 +207,7 @@
         "s3_get_presigned_url",
         "s3_put_bucket_lifecycle"
       ],
-      "hash": "ad333c068ae3b04f447bb0a1f22d657429b826a081baeba4948f6d11275e993b",
+      "hash": "39c4203b0c8554884c026d7318d623970d734ae158ffdf8fce248a3f891cee93",
       "fixtures": {
         "modern": "tests/fixtures/tool-contract/full.modern.json",
         "legacy": "tests/fixtures/tool-contract/full.legacy.json"
@@ -234,14 +237,14 @@
         "writeFiles"
       ],
       "counts": {
-        "total": 39,
+        "total": 40,
         "b2": 20,
-        "s3": 19,
+        "s3": 20,
         "bz": 0
       },
       "backingCounts": {
         "nativeB2Sdk": 16,
-        "awsS3Sdk": 19,
+        "awsS3Sdk": 20,
         "customMcp": 4
       },
       "names": [
@@ -271,6 +274,7 @@
         "s3_create_multipart_upload",
         "s3_delete_object",
         "s3_delete_objects",
+        "s3_get_bucket_lifecycle",
         "s3_get_bucket_location",
         "s3_get_object",
         "s3_get_presigned_url",
@@ -312,6 +316,7 @@
         "s3_create_multipart_upload": ["bucket", "key"],
         "s3_delete_object": ["bucket", "key"],
         "s3_delete_objects": ["bucket", "objects"],
+        "s3_get_bucket_lifecycle": ["bucket"],
         "s3_get_bucket_location": ["bucket"],
         "s3_get_object": ["bucket", "key"],
         "s3_get_presigned_url": ["bucket", "key", "operation"],
@@ -358,7 +363,7 @@
         "s3_get_presigned_url",
         "s3_put_bucket_lifecycle"
       ],
-      "hash": "05def86bfd9c3c49dc3c8d994ec1f37a1570761b46d75ef9bff5bea46509fbdc",
+      "hash": "d775e5b1f3bf192beb7939e971aa1083bf2c6c20c82921b390ab069852c388ef",
       "fixtures": {
         "modern": "tests/fixtures/tool-contract/live-b2-contract.modern.json",
         "legacy": "tests/fixtures/tool-contract/live-b2-contract.legacy.json"
@@ -382,14 +387,14 @@
         "writeFiles"
       ],
       "counts": {
-        "total": 37,
+        "total": 38,
         "b2": 18,
-        "s3": 19,
+        "s3": 20,
         "bz": 0
       },
       "backingCounts": {
         "nativeB2Sdk": 14,
-        "awsS3Sdk": 19,
+        "awsS3Sdk": 20,
         "customMcp": 4
       },
       "names": [
@@ -417,6 +422,7 @@
         "s3_create_multipart_upload",
         "s3_delete_object",
         "s3_delete_objects",
+        "s3_get_bucket_lifecycle",
         "s3_get_bucket_location",
         "s3_get_object",
         "s3_get_presigned_url",
@@ -456,6 +462,7 @@
         "s3_create_multipart_upload": ["bucket", "key"],
         "s3_delete_object": ["bucket", "key"],
         "s3_delete_objects": ["bucket", "objects"],
+        "s3_get_bucket_lifecycle": ["bucket"],
         "s3_get_bucket_location": ["bucket"],
         "s3_get_object": ["bucket", "key"],
         "s3_get_presigned_url": ["bucket", "key", "operation"],
@@ -502,7 +509,7 @@
         "s3_get_presigned_url",
         "s3_put_bucket_lifecycle"
       ],
-      "hash": "2f60e933766c9b698536d5b38fce4dd23e27285a079df085e7cba17f981bb1bc",
+      "hash": "63b404465a6d30fbb7f43d4dc09625ee30b31e66c1685ebcc465df36cfad7598",
       "fixtures": {
         "modern": "tests/fixtures/tool-contract/phase1-default.modern.json",
         "legacy": "tests/fixtures/tool-contract/phase1-default.legacy.json"
@@ -518,14 +525,14 @@
         "readFiles"
       ],
       "counts": {
-        "total": 20,
+        "total": 21,
         "b2": 11,
-        "s3": 9,
+        "s3": 10,
         "bz": 0
       },
       "backingCounts": {
         "nativeB2Sdk": 7,
-        "awsS3Sdk": 9,
+        "awsS3Sdk": 10,
         "customMcp": 4
       },
       "names": [
@@ -540,6 +547,7 @@
         "b2_reserve_trial_create_account",
         "b2_unfinished_uploads",
         "b2_usage_growth",
+        "s3_get_bucket_lifecycle",
         "s3_get_bucket_location",
         "s3_get_object",
         "s3_get_presigned_url",
@@ -562,6 +570,7 @@
         "b2_reserve_trial_create_account": [],
         "b2_unfinished_uploads": ["bucket"],
         "b2_usage_growth": [],
+        "s3_get_bucket_lifecycle": ["bucket"],
         "s3_get_bucket_location": ["bucket"],
         "s3_get_object": ["bucket", "key"],
         "s3_get_presigned_url": ["bucket", "key", "operation"],
@@ -582,7 +591,7 @@
         "b2_create_key",
         "b2_reserve_trial_create_account"
       ],
-      "hash": "b5244ef8a3d5d15f6a8c9a1e553401aeffaea0811740991a05cade76b6f238ec",
+      "hash": "429ff952decdaec6ad123b9e7036ed3ef7e2b95dbe422e36192fdbec1a856df0",
       "fixtures": {
         "modern": "tests/fixtures/tool-contract/read-only.modern.json",
         "legacy": "tests/fixtures/tool-contract/read-only.legacy.json"

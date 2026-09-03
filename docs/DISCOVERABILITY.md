@@ -41,7 +41,7 @@ Directories that enumerate tools by launching the stdio server (mcp.so, Glama
 build tests, LobeHub `plugin init`) need `tools/list` to work without a real B2
 account. Since #356 this is the **default** — no env required. Launching with no
 `B2_APPLICATION_KEY_ID` / `B2_APPLICATION_KEY` enters credential-less discovery
-mode automatically: the full 40-tool surface (including the real durable-secret
+mode automatically: the full 41-tool surface (including the real durable-secret
 schemas) registers, a `server.stdio_discovery_mode` warning is logged, and every
 tool *call* returns a clear `missing_credentials` error. So most scanners work
 against `npx -y @backblaze-labs/b2-mcp` with no configuration at all.

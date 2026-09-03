@@ -27,7 +27,7 @@ unpublished branches.
 
 ## Tool Backing Taxonomy
 
-The public 40-tool surface is documented by backing category, not by separate
+The public 41-tool surface is documented by backing category, not by separate
 functional buckets. Every tool belongs to exactly one of three categories:
 
 1. Native B2 SDK (`@backblaze-labs/b2-sdk`) for B2 control-plane operations the
@@ -35,7 +35,7 @@ functional buckets. Every tool belongs to exactly one of three categories:
    Lock, event notifications, and Partner/Groups operations.
 2. AWS S3 SDK (`@aws-sdk/client-s3`) for the S3-compatible data plane:
    objects, presigning, multipart uploads, bucket reachability/location, and S3
-   lifecycle operations.
+   lifecycle read/write operations.
 3. Neither SDK for repository-owned MCP analytics, such as usage growth, egress
    leaders, largest files, and unfinished uploads, where no SDK exposes the
    requested aggregate operation as a primitive.

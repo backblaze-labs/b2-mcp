@@ -213,6 +213,7 @@ describe("SDK adoption contract", () => {
     expectMatrixPath("s3_list_objects_v2", "s3", "B2S3PeerClient.listObjectsV2");
     expectMatrixPath("s3_list_object_versions", "s3", "B2S3PeerClient.listObjectVersions");
     expectMatrixPath("s3_get_presigned_url", "s3", "B2S3PeerClient.presignObjectUrl");
+    expectMatrixPath("s3_get_bucket_lifecycle", "s3", "B2S3PeerClient.getBucketLifecycle");
     expect(b2Client).not.toContain("s3PutObject");
     expect(b2Client).not.toContain("presignS3GetObjectUrl");
     expect(s3Objects).toContain("putObject");
