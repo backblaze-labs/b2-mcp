@@ -89,6 +89,10 @@ describe("privacy page generator", () => {
     ["lazy list continuation", "- item\ncontinuation"],
     ["trailing-space hard break", "line one  \nline two"],
     ["backslash hard break", "line one\\\nline two"],
+    ["backslash-escaped link", "\\[Policy](https://example.com)"],
+    ["HTML entity reference", "Copyright &copy; 2026"],
+    ["ATX closing hash sequence", "## Contact ##"],
+    ["tab after list marker", "-\titem"],
   ])("rejects unsupported Markdown: %s", async (_name, markdown) => {
     const { renderMarkdown } = await privacyPageModule();
 
