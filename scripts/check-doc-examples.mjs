@@ -733,16 +733,23 @@ function validatePackageScriptReferences(file, text, startLine) {
 }
 
 function validatePackageNameReferences(file, text, startLine) {
+  // Fold backslash-continued shell commands first, matching the launcher policy.
+  // Otherwise a continued `npx -y \` + `@attacker/b2-mcp@0.2.0` splits the
+  // executable and package spec across physical lines, the regex never matches,
+  // and the drift passes unchecked (the launcher check only searches for the
+  // canonical package, so it will not catch a different name either).
   const npxPackagePattern = /\bnpx\s+(?:-y\s+)?(@[a-z0-9._-]+\/[a-z0-9._-]+(?:@[^\s`"',\]]+)?)/g;
-  for (const match of text.matchAll(npxPackagePattern)) {
-    const packageSpec = match[1];
-    const parsedPackageSpec = parsePackageSpec(packageSpec);
-    if (parsedPackageSpec?.name !== pkg.name) {
-      addFinding(
-        file,
-        startLine + lineOfOffset(text, match.index ?? 0) - 1,
-        `references package ${packageSpec}, expected ${pkg.name}`,
-      );
+  for (const { line, text: logicalLine } of foldShellContinuations(text)) {
+    for (const match of logicalLine.matchAll(npxPackagePattern)) {
+      const packageSpec = match[1];
+      const parsedPackageSpec = parsePackageSpec(packageSpec);
+      if (parsedPackageSpec?.name !== pkg.name) {
+        addFinding(
+          file,
+          startLine + line - 1,
+          `references package ${packageSpec}, expected ${pkg.name}`,
+        );
+      }
     }
   }
 }

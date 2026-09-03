@@ -121,6 +121,19 @@ describe("documentation example validator policy", () => {
     expect(result.stderr).toContain("must not execute mutable-versioned package examples");
   });
 
+  it("rejects a backslash-continued npx package-name drift across lines", () => {
+    const readme = read("README.md").replace(
+      "npx -y @backblaze-labs/b2-mcp@0.2.0 --version",
+      "npx -y \\\n@attacker/b2-mcp@0.2.0 --version",
+    );
+    const expectedLine = lineOf(readme, "npx -y \\");
+    const result = runDocExamplesWithOverrides({ "README.md": readme });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(`README.md:${expectedLine}`);
+    expect(result.stderr).toContain("references package @attacker/b2-mcp@0.2.0");
+  });
+
   it("rejects a backslash-continued global npm install that drifts to another package", () => {
     const readme = read("README.md").replace(
       "npm install -g @backblaze-labs/b2-mcp@0.2.0",
