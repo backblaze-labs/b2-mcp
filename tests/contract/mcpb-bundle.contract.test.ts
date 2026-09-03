@@ -164,6 +164,10 @@ describe("MCPB desktop-extension bundle", () => {
   it("produces byte-reproducible output across repeated builds", () => {
     // A second pack of the same inputs must reproduce the shared build's digest;
     // this is what lets a third party rebuild and confirm the release SHA-256.
+    // This proves intra-host reproducibility; the cross-OS comparison (that every
+    // supported build OS emits the SAME bytes) is enforced by the
+    // `cross-platform-minimum` job in .github/workflows/test.yml, which compares
+    // this bundle's digest across the ubuntu/windows/macos matrix legs.
     expect(sha256(Uint8Array.from(buildBundle()))).toBe(digest);
   }, 60_000);
 

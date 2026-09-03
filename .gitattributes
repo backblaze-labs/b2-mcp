@@ -1,0 +1,16 @@
+# Normalize line endings so every OS checks out identical bytes.
+#
+# The MCPB desktop-extension bundle (dist-mcpb/b2-mcp.mcpb) packs
+# mcpb/manifest.json verbatim, and its release SHA-256 must be reproducible on
+# every build OS. Without this, a Windows checkout with core.autocrlf=true would
+# rewrite tracked text files to CRLF and change the packed manifest bytes, so a
+# Windows rebuild would not match the Linux release checksum. Forcing LF on
+# checkout removes that divergence at its source; see scripts/build-mcpb.mjs.
+* text=auto eol=lf
+
+# Binary assets git must never touch.
+*.mcpb binary
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
