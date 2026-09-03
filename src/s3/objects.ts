@@ -3,21 +3,22 @@
  *
  * @packageDocumentation
  */
-import type { ToolRegistrar } from "../mcp.js";
-import { z } from "zod";
+
+import type { ReadableStream as WebReadableStream } from "node:stream/web";
 import * as fs from "fs";
 import * as path from "path";
 import { Readable, Transform } from "stream";
 import { pipeline } from "stream/promises";
-import type { ReadableStream as WebReadableStream } from "node:stream/web";
-import { badRequestError, codedError, toolJson, toolError, toolSuccess } from "../utils/errors.js";
-import { resolveLocalPath } from "../utils/fs-guard.js";
-import type { B2Config } from "../utils/types.js";
-import { checkDestructive } from "../utils/destructive-gate.js";
-import { withS3Circuit, withS3LongCircuit } from "../utils/circuit-breaker.js";
+import { z } from "zod";
+import type { ToolRegistrar } from "../mcp.js";
 import { currentMcpRequestSignal } from "../request-context.js";
-import type { B2S3FileVersionBinding, B2S3VersionGuard } from "../utils/types.js";
+import { withS3Circuit, withS3LongCircuit } from "../utils/circuit-breaker.js";
+import { checkDestructive } from "../utils/destructive-gate.js";
+import { badRequestError, codedError, toolError, toolJson, toolSuccess } from "../utils/errors.js";
+import { resolveLocalPath } from "../utils/fs-guard.js";
 import { logger } from "../utils/logger.js";
+import { timeoutError } from "../utils/named-error.js";
+import type { B2Config, B2S3FileVersionBinding, B2S3VersionGuard } from "../utils/types.js";
 import type {
   B2S3DeleteObjectsResult,
   B2S3HeadObjectResult,
@@ -25,7 +26,6 @@ import type {
   B2S3PeerClient,
 } from "./aws-sdk-adapter.js";
 import { assertSafeObjectContentType, b2S3DeleteErrorEntry } from "./aws-sdk-adapter.js";
-import { timeoutError } from "../utils/named-error.js";
 
 const CONFIRM_DESC =
   "Fallback confirmation for this destructive/irreversible operation when the effective server destructive policy is 'confirm' and MCP elicitation cannot run.";
@@ -671,7 +671,7 @@ export function registerS3ObjectTools(
     "s3_delete_object",
     {
       description:
-        "Delete one B2 object through the S3-compatible API. Use s3_list_object_versions first when you need to target a specific version or delete marker; use s3_delete_objects for batches up to 1000. Requires deleteFiles and destructive confirmation by policy. Omitting versionId applies normal S3 delete semantics and can create a delete marker in versioned buckets; providing versionId permanently removes that version after native B2 version binding is verified.",
+        "Delete one B2 object through the S3-compatible API. Use s3_list_object_versions first when you need to target a specific version or delete marker; use s3_delete_objects for batches up to 1000. Requires deleteFiles and destructive confirmation by policy; targeting a specific versionId additionally requires readFiles, because native B2 version binding is verified first. Omitting versionId applies normal S3 delete semantics and can create a delete marker in versioned buckets; providing versionId permanently removes that version after that binding check.",
       inputSchema: {
         bucket: z.string().describe("Bucket name containing the object to delete."),
         key: z.string().describe("Exact object key to delete."),

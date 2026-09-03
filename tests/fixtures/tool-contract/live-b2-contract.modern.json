@@ -792,7 +792,7 @@
     },
     {
       "name": "b2_update_bucket",
-      "descriptionSha256": "d7db2868733a59e126556d3006517297c31bb6f1a051807e08ef878586a464ed",
+      "descriptionSha256": "a214056438cc9cd941073897ba6eeb7953df49905719019303bbe37823cfb271",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -1395,7 +1395,7 @@
     },
     {
       "name": "s3_delete_object",
-      "descriptionSha256": "3f645716eb6120d0c3749b525a5617d5cfe957e6cadae082bda91f5222bdcda9",
+      "descriptionSha256": "60f42a04a7b4c8472184db2daf3941a2bf00e8e9f2e18bb87d49847abaa9e53f",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -2077,5 +2077,5 @@
       "resultType": "complete"
     }
   },
-  "hash": "c0eeca9cf29a3f5d0e1af5b7d21a5c2c872d392b49eba4b45d74b217a2a4be30"
+  "hash": "05def86bfd9c3c49dc3c8d994ec1f37a1570761b46d75ef9bff5bea46509fbdc"
 }

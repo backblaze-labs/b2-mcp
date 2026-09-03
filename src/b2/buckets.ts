@@ -3,10 +3,15 @@
  *
  * @packageDocumentation
  */
-import type { ToolRegistrar } from "../mcp.js";
+
 import * as dns from "node:dns/promises";
 import { isIP } from "node:net";
 import { z } from "zod";
+import type { ToolRegistrar } from "../mcp.js";
+import { checkDestructive } from "../utils/destructive-gate.js";
+import { badRequest, badRequestError, toolError, toolJson } from "../utils/errors.js";
+import { isTestRuntime } from "../utils/runtime.js";
+import { B2Config } from "../utils/types.js";
 import {
   B2Client,
   type BucketFilters,
@@ -16,10 +21,6 @@ import {
   type ServerSideEncryptionInput,
   type UpdateBucketOptions,
 } from "./client.js";
-import { B2Config } from "../utils/types.js";
-import { badRequest, badRequestError, toolJson, toolError } from "../utils/errors.js";
-import { checkDestructive } from "../utils/destructive-gate.js";
-import { isTestRuntime } from "../utils/runtime.js";
 
 type NotificationCustomHeaders = EventNotificationRuleInput["targetConfiguration"]["customHeaders"];
 
@@ -807,7 +808,7 @@ export function registerBucketTools(
     "b2_update_bucket",
     {
       description:
-        "Update persistent settings on an existing B2 bucket: visibility, metadata, CORS, lifecycle, default encryption, replication, Object Lock, and default retention. Use b2_list_buckets first to inspect the current bucketId/revision and use ifRevisionIs for safer retries; use s3_put_bucket_lifecycle only when you specifically need the S3 lifecycle API shape. Gated cases: bucketType allPublic, fileLockEnabled false, defaultRetention.mode null, lifecycleRules with daysFromHidingToDeleting, and any replicationConfiguration update.",
+        "Update persistent settings on an existing B2 bucket: visibility, metadata, CORS, lifecycle, default encryption, replication, Object Lock, and default retention. Requires the writeBuckets capability. Use b2_list_buckets first to inspect the current bucketId/revision and use ifRevisionIs for safer retries; use s3_put_bucket_lifecycle only when you specifically need the S3 lifecycle API shape. Gated cases: bucketType allPublic, fileLockEnabled false, defaultRetention.mode null, lifecycleRules with daysFromHidingToDeleting, and any replicationConfiguration update.",
       inputSchema: {
         bucketId: z.string().describe("The exact bucket ID to update, not the bucket name."),
         bucketType: z

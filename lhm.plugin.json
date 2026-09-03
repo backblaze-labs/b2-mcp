@@ -821,7 +821,7 @@
     },
     {
       "name": "b2_update_bucket",
-      "description": "Update persistent settings on an existing B2 bucket: visibility, metadata, CORS, lifecycle, default encryption, replication, Object Lock, and default retention. Use b2_list_buckets first to inspect the current bucketId/revision and use ifRevisionIs for safer retries; use s3_put_bucket_lifecycle only when you specifically need the S3 lifecycle API shape. Gated cases: bucketType allPublic, fileLockEnabled false, defaultRetention.mode null, lifecycleRules with daysFromHidingToDeleting, and any replicationConfiguration update.",
+      "description": "Update persistent settings on an existing B2 bucket: visibility, metadata, CORS, lifecycle, default encryption, replication, Object Lock, and default retention. Requires the writeBuckets capability. Use b2_list_buckets first to inspect the current bucketId/revision and use ifRevisionIs for safer retries; use s3_put_bucket_lifecycle only when you specifically need the S3 lifecycle API shape. Gated cases: bucketType allPublic, fileLockEnabled false, defaultRetention.mode null, lifecycleRules with daysFromHidingToDeleting, and any replicationConfiguration update.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -1424,7 +1424,7 @@
     },
     {
       "name": "s3_delete_object",
-      "description": "Delete one B2 object through the S3-compatible API. Use s3_list_object_versions first when you need to target a specific version or delete marker; use s3_delete_objects for batches up to 1000. Requires deleteFiles and destructive confirmation by policy. Omitting versionId applies normal S3 delete semantics and can create a delete marker in versioned buckets; providing versionId permanently removes that version after native B2 version binding is verified.",
+      "description": "Delete one B2 object through the S3-compatible API. Use s3_list_object_versions first when you need to target a specific version or delete marker; use s3_delete_objects for batches up to 1000. Requires deleteFiles and destructive confirmation by policy; targeting a specific versionId additionally requires readFiles, because native B2 version binding is verified first. Omitting versionId applies normal S3 delete semantics and can create a delete marker in versioned buckets; providing versionId permanently removes that version after that binding check.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
