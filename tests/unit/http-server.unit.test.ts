@@ -41,12 +41,21 @@ const credentialEnvKeys = [
   "B2_MASTER_KEY_ID",
   "B2_MASTER_KEY",
   // Retired aliases (issue #386) are no longer parsed, but they must stay scrubbed
-  // from child-process fixtures: an ambient B2_APP_KEY(_ID) would trigger the
+  // from child-process fixtures: any ambient retired alias would trigger the
   // startup config.removed_alias warn and displace the server.fatal log line the
-  // bootstrap tests parse.
+  // bootstrap tests parse. Mirror the full warner set in credentials.ts —
+  // top-level and `_FILE` secret-file variants (the principal-mode
+  // B2_CREDENTIAL_<REF>_APP_KEY(_ID)(_FILE) form is scrubbed by pattern below).
   "B2_APP_KEY_ID",
   "B2_APP_KEY",
+  "B2_APP_KEY_ID_FILE",
+  "B2_APP_KEY_FILE",
 ] as const;
+
+// Matches the principal-mode retired credential aliases in credentials.ts
+// (REMOVED_CREDENTIAL_ENV_ALIAS_PATTERN) so an ambient B2_CREDENTIAL_<REF>_APP_KEY*
+// cannot emit config.removed_alias ahead of the server.fatal line under test.
+const RETIRED_CREDENTIAL_ALIAS_PATTERN = /^B2_CREDENTIAL_[A-Z0-9_]+_APP_KEY(?:_ID)?(?:_FILE)?$/;
 
 const tsxBin = join(
   process.cwd(),
@@ -58,6 +67,9 @@ const tsxBin = join(
 function executableEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env, NODE_ENV: "test", LOG_LEVEL: "info" };
   for (const key of credentialEnvKeys) delete env[key];
+  for (const key of Object.keys(env)) {
+    if (RETIRED_CREDENTIAL_ALIAS_PATTERN.test(key)) delete env[key];
+  }
   for (const key of [
     "B2_ALLOW_LOCAL_FILES",
     "B2_HTTP_CREDENTIAL_MODE",

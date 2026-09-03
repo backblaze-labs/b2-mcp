@@ -567,9 +567,12 @@ evidence.
   `B2_MCP_EXPECTED_TOOL_PROFILE`, `B2_MCP_REQUIRE_SMOKE_BUCKET=1`, and
   `MCP_AUTHORIZATION` / `VERCEL_PROTECTION_BYPASS` according to the deployment.
 
-Remove obsolete repository-level B2 secrets named `B2_KEY` and `B2_KEY_ID` in
-the GitHub UI. The live workflows use the environment-scoped secrets above and
-do not reference those repository-level secrets.
+Remove obsolete repository-level B2 secrets named `B2_KEY` and `B2_KEY_ID`, and
+the retired `B2_APP_KEY` / `B2_APP_KEY_ID` pair (issue #386), in the GitHub UI.
+Also delete the now-unused `LIVE_B2_APP_KEY` / `LIVE_B2_APP_KEY_ID` environment
+secrets from `live-b2-smoke` — the smoke workflow reads only `LIVE_B2_KEY_ID` /
+`LIVE_B2_KEY`. The live workflows use the environment-scoped secrets above and do
+not reference those repository-level secrets.
 
 ## Live B2 Smoke Gate
 
