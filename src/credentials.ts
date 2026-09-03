@@ -22,7 +22,23 @@ const HEADER_NAMES = {
   masterKey: ["x-b2-mcp-master-key"],
 } as const;
 
-const ALL_CREDENTIAL_HEADER_NAMES = new Set<string>(Object.values(HEADER_NAMES).flat());
+// Detection guard for hasCredentialHeaders(). Deliberately broader than the
+// canonical parsing set above: it also lists the retired credential header names
+// (issue #386) so that in server/principal mode a lagging client still sending a
+// legacy X-B2-* / X-B2-App-Key-* header gets a clean credential_headers_rejected
+// failure instead of silently executing under the server-held credential.
+// Parsing stays canonical-only via HEADER_NAMES.
+const CREDENTIAL_HEADER_DETECTION_NAMES = new Set<string>([
+  ...Object.values(HEADER_NAMES).flat(),
+  "x-b2-key-id",
+  "x-b2-key",
+  "x-b2-master-key-id",
+  "x-b2-master-key",
+  "x-b2-app-key-id",
+  "x-b2-app-key",
+  "x-b2-mcp-app-key-id",
+  "x-b2-mcp-app-key",
+]);
 
 /** Supported HTTP credential routing modes. */
 export type HttpCredentialMode = "server" | "principal" | "headers";
@@ -371,7 +387,9 @@ function headerMaterial(headers: http.IncomingHttpHeaders): CredentialMaterial {
  * @returns `true` when a B2 credential header is present.
  */
 export function hasCredentialHeaders(headers: http.IncomingHttpHeaders): boolean {
-  return Object.keys(headers).some((name) => ALL_CREDENTIAL_HEADER_NAMES.has(name.toLowerCase()));
+  return Object.keys(headers).some((name) =>
+    CREDENTIAL_HEADER_DETECTION_NAMES.has(name.toLowerCase()),
+  );
 }
 
 function httpConfigOptions(): ConfigOptions {

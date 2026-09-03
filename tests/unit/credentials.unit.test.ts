@@ -510,12 +510,17 @@ describe("credential fingerprints and header detection", () => {
     expect(a).not.toContain("secret-a");
   });
 
-  it("detects canonical B2 credential headers and ignores removed short aliases", () => {
+  it("detects canonical and retired B2 credential headers for the rejection guard", () => {
     expect(hasCredentialHeaders({ "x-b2-mcp-key-id": "k" })).toBe(true);
     expect(hasCredentialHeaders({ "x-b2-mcp-master-key-id": "k" })).toBe(true);
-    // The short x-b2-* aliases were dropped in favor of the namespaced form.
-    expect(hasCredentialHeaders({ "x-b2-key-id": "k" })).toBe(false);
-    expect(hasCredentialHeaders({ "x-b2-app-key-id": "k" })).toBe(false);
+    // Retired aliases are no longer parsed, but the detection guard stays broad so
+    // a lagging legacy client is cleanly rejected in server/principal mode rather
+    // than silently running under the server-held credential.
+    expect(hasCredentialHeaders({ "x-b2-key-id": "k" })).toBe(true);
+    expect(hasCredentialHeaders({ "x-b2-key": "k" })).toBe(true);
+    expect(hasCredentialHeaders({ "x-b2-master-key": "k" })).toBe(true);
+    expect(hasCredentialHeaders({ "x-b2-app-key-id": "k" })).toBe(true);
+    expect(hasCredentialHeaders({ "x-b2-mcp-app-key": "k" })).toBe(true);
     expect(hasCredentialHeaders({ authorization: "Bearer t" })).toBe(false);
   });
 });
