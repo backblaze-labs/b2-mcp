@@ -11,12 +11,17 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-// Strip the blob-URL prefix only when it opens an `href` whose next character is
-// NOT another "/". A legitimate relative rewrite yields `.../blob/main/docs/x`
-// (next char is a path segment); a mis-rewrite of a root/network-path target
-// yields `.../blob/main//host` or `.../blob/main///host`, which must stay
-// visible so the divergence is not normalized into a false match.
-const BLOB_HREF_PREFIX = new RegExp(`href="${escapeRegExp(REPO_BLOB_URL)}(?!/)`, "g");
+// Strip the blob-URL prefix only when it opens an `href` whose remaining value
+// is a validated repository-relative file path: the next character is not "/",
+// "?", or "#", and the value does not begin with a URI scheme (`ftp:`, ...). A
+// legitimate relative rewrite yields `.../blob/main/docs/x`; a mis-rewrite of a
+// root/network-path (`.../blob/main//host`), query-only (`.../blob/main/?x`), or
+// absolute-scheme (`.../blob/main/ftp://host`) target fails these guards and
+// stays visible, so the divergence is not normalized into a false match.
+const BLOB_HREF_PREFIX = new RegExp(
+  `href="${escapeRegExp(REPO_BLOB_URL)}(?![/?#])(?![a-zA-Z][a-zA-Z0-9+.-]*:)`,
+  "g",
+);
 
 // Private-use sentinel delimiters wrapping a masked code span's index. Escaped
 // HTML output can never contain them, and they are neither whitespace nor
@@ -47,12 +52,12 @@ export function renderReferenceHtml(markdown: string): string {
  *   tags (the hosted renderer adds them; the reference omits them). An `id` on
  *   any other element survives and forces a mismatch.
  * - the relative-to-`REPO_BLOB_URL` href rewrite only: the blob-URL prefix is
- *   removed solely when it opens an `href="..."` value AND the next character is
- *   not another "/" (a legitimate relative rewrite; the hosted renderer rewrites
- *   relative links to their repository blob URL while the reference keeps them
- *   relative). The blob URL appearing as literal text, prepended to a
- *   root/network-path destination (`.../blob/main//host`), or on any absolute
- *   destination, survives and forces a mismatch.
+ *   removed solely when it opens an `href="..."` value whose remainder is a
+ *   validated repository-relative file path (the hosted renderer rewrites those
+ *   to their repository blob URL while the reference keeps them relative). The
+ *   blob URL appearing as literal text, or prepended to a root/network-path
+ *   (`.../blob/main//host`), query-only (`.../blob/main/?x`), or absolute-scheme
+ *   (`.../blob/main/ftp://host`) destination, survives and forces a mismatch.
  * - insignificant whitespace (a softbreak newline vs a joined space,
  *   indentation) OUTSIDE `<code>` spans. Whitespace inside a code span is
  *   significant: CommonMark strips a single boundary space the constrained
