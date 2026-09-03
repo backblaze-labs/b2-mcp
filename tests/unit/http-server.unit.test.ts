@@ -310,13 +310,16 @@ describe("configFromHeaders — credential model", () => {
     ).toThrow(/both id and secret/i);
   });
 
-  it("ignores the removed short X-B2-App-Key-* S3 override headers", () => {
+  it.each([
+    { prefix: "x-b2-app-key", label: "short X-B2-App-Key-*" },
+    { prefix: "x-b2-mcp-app-key", label: "namespaced X-B2-MCP-App-Key-*" },
+  ])("ignores the removed $label S3 override headers", ({ prefix }) => {
     const cfg = configFromHeaders({
       headers: {
         "x-b2-mcp-key-id": "app-id",
         "x-b2-mcp-key": "app-secret",
-        "x-b2-app-key-id": "s3-id",
-        "x-b2-app-key": "s3-secret",
+        [`${prefix}-id`]: "s3-id",
+        [prefix]: "s3-secret",
       },
     });
     // The legacy S3 key override is gone; S3 signs with the application key.
