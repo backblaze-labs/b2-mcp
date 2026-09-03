@@ -602,6 +602,8 @@ describe("secret sanitizer canary policy", () => {
       "x-b2-key": "legacy-key-secret-value",
       "x-b2-master-key": "legacy-master-secret-value",
       "x-b2-app-key": "legacy-app-secret-value",
+      // The namespaced retired app-key form is also kept in SECRET_REQUEST_HEADERS.
+      "x-b2-mcp-app-key": "legacy-mcp-app-secret-value",
     };
     const headers = new Headers(legacySecrets);
     const secrets = webRequestSecrets(headers);
