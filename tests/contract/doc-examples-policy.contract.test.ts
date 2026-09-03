@@ -145,6 +145,24 @@ describe("documentation example validator policy", () => {
     expect(result.stderr).toContain("global npm install examples must install");
   });
 
+  it("rejects a chained second global npm install that drifts to another package", () => {
+    // Regression: the validator only inspected the first `npm install` segment,
+    // so a second `&&`-chained global install of another package slipped past.
+    const readme = read("README.md").replace(
+      "npm install -g @backblaze-labs/b2-mcp@0.2.0",
+      "npm install -g @backblaze-labs/b2-mcp@0.2.0 && npm install -g @attacker/b2-mcp@0.2.0",
+    );
+    const expectedLine = lineOf(
+      readme,
+      "npm install -g @backblaze-labs/b2-mcp@0.2.0 && npm install -g @attacker/b2-mcp@0.2.0",
+    );
+    const result = runDocExamplesWithOverrides({ "README.md": readme });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(`README.md:${expectedLine}`);
+    expect(result.stderr).toContain("global npm install examples must install");
+  });
+
   it.each(["next", "^0.2.0", "0.x"])(
     "rejects mutable global npm install spec @%s in release docs",
     (version) => {

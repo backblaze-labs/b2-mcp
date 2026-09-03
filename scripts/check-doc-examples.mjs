@@ -4,13 +4,13 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join, resolve } from "node:path";
 import { createRequire } from "node:module";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
@@ -811,17 +811,27 @@ function packageSpecsInText(text) {
 }
 
 function globalNpmInstallPackageSpecs(line) {
-  const match = line.match(/\bnpm\s+(?:install|i)\b(?<args>[^`\n]*)/);
-  const args = match?.groups?.args;
-  if (!args) return [];
-
-  const commandArgs = args.split(/\s+(?:&&|\|\||[;|])\s+/, 1)[0] ?? "";
-  return commandArgs
-    .split(/\s+/)
-    .map((arg) => arg.replace(/^[`'"]+|[`'",\]]+$/g, ""))
-    .filter((arg) => arg && !arg.startsWith("-"))
-    .map((arg) => parsePackageSpec(arg))
-    .filter(Boolean);
+  // Validate every chained global install, not just the first. Splitting on the
+  // first operator (or matching only the first `npm install`) let a second
+  // `npm install -g <attacker>` after `&&`/`;`/`|` slip through unchecked, and
+  // let a non-global first install mask a later global one. Strip a trailing
+  // shell comment, split into command segments, and validate each segment that
+  // is itself a global `npm install`.
+  const withoutComment = line.replace(/(?:^|\s)#.*$/, "");
+  const specs = [];
+  for (const segment of withoutComment.split(/\s*(?:&&|\|\||[;|])\s*/)) {
+    const match = segment.match(/\bnpm\s+(?:install|i)\b(?<args>[^`\n]*)/);
+    const args = match?.groups?.args;
+    if (!args) continue;
+    if (!/(?:^|\s)(?:-g|--global)(?:\s|$)/.test(args)) continue;
+    for (const arg of args.split(/\s+/)) {
+      const cleaned = arg.replace(/^[`'"]+|[`'",\]]+$/g, "");
+      if (!cleaned || cleaned.startsWith("-")) continue;
+      const spec = parsePackageSpec(cleaned);
+      if (spec) specs.push(spec);
+    }
+  }
+  return specs;
 }
 
 function isExactPackageVersion(version) {
