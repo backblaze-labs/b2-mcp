@@ -63,10 +63,14 @@ presigned URLs and the object bytes move directly between your client or worker
 and Backblaze B2. Those bytes do not pass through the b2-mcp server or the model
 context.
 
-The inline `s3_put_object` and `s3_get_object` tools are bounded to small
-control-plane objects of 1 MiB or less for manifests, sidecars, and tiny
-configuration files. Use presigned URL or multipart workflows for real object
-data and bulk transfers.
+The inline `s3_put_object` tool and response-inline `s3_get_object` reads are
+bounded to small control-plane objects of 1 MiB or less for manifests, sidecars,
+and tiny configuration files. When local filesystem access is enabled,
+`s3_get_object` can stream a requested object through the b2-mcp process to the
+configured `saveToPath`. HTTP transport disables local-file access by default
+and requires an operator-configured filesystem sandbox to enable it. Use
+presigned URL or multipart workflows for ordinary object data and bulk
+transfers.
 
 ## Logs
 
@@ -83,11 +87,12 @@ system are responsible for that system's privacy, access, and retention policy.
 ## Analytics, Telemetry, And Tracking
 
 b2-mcp does not include analytics, telemetry, advertising pixels, tracking
-cookies, crash reporting, or phone-home behavior. The only routine outbound
-identifier added by the software is the User-Agent product token sent to
-Backblaze B2, such as `b2-mcp/<version>` for published releases or `b2-mcp/dev`
-for source and development builds. If an operator sets `B2_MCP_UA_SUFFIX`, that
-operator-supplied deployment tag is appended to the same outbound User-Agent.
+cookies, crash reporting, or phone-home behavior. Routine outbound request
+metadata added by the software is limited to User-Agent metadata sent to
+Backblaze B2: the product token, such as `b2-mcp/<version>` for published
+releases or `b2-mcp/dev` for source and development builds; the active transport
+label, such as `stdio` or `http`; optional S3 tool-surface labels; and, if an
+operator sets `B2_MCP_UA_SUFFIX`, that operator-supplied deployment tag.
 
 ## Third Parties
 

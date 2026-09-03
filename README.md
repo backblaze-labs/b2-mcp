@@ -656,7 +656,7 @@ pnpm run evals                    # deterministic LLM eval harness; live provide
 pnpm run evals:provider-comparison # opt-in Claude vs OpenAI comparison; requires provider keys and current dist/
 pnpm run docs                     # TypeDoc API docs plus hosted privacy page
 pnpm run docs:privacy             # regenerate the privacy page from PRIVACY.md
-pnpm run docs:watch               # regenerate privacy once, then watch TypeDoc only
+pnpm run docs:watch               # regenerate privacy once, then watch TypeDoc without cleaning output
 pnpm start                        # stdio transport
 pnpm run start:http --port 3000   # MCP 2026-07-28 HTTP transport
 b2-mcp --help                     # installed package CLI help after publish/install

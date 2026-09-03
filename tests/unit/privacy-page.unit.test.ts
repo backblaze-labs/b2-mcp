@@ -75,6 +75,17 @@ describe("privacy page generator", () => {
     );
   });
 
+  it("renders supported Markdown links with optional titles", async () => {
+    const { renderMarkdown } = await privacyPageModule();
+
+    expect(renderMarkdown('[Policy](https://example.com "legal")')).toBe(
+      '<p><a href="https://example.com" title="legal">Policy</a></p>',
+    );
+    expect(renderMarkdown("[Runbook](docs/DISCOVERABILITY.md)")).toBe(
+      '<p><a href="https://github.com/backblaze-labs/b2-mcp/blob/main/docs/DISCOVERABILITY.md">Runbook</a></p>',
+    );
+  });
+
   it("writes both hosted privacy page paths from the canonical Markdown", async () => {
     const { HOSTED_PRIVACY_URL, pageHtml, writePrivacyPage } = await privacyPageModule();
     const outputRoot = mkdtempSync(join(tmpdir(), "b2-mcp-privacy-page-"));
@@ -102,6 +113,7 @@ describe("privacy page generator", () => {
     expect(packageJson.scripts["docs:privacy"]).toBe("node scripts/write-privacy-page.mjs");
     expect(packageJson.scripts.docs).toBe("typedoc && pnpm run docs:privacy");
     expect(packageJson.scripts["docs:watch"]).toContain("pnpm run docs:privacy");
+    expect(packageJson.scripts["docs:watch"]).toContain("--cleanOutputDir false");
     expect(mcpb.privacy_policies).toEqual([HOSTED_PRIVACY_URL]);
     expect(read("README.md")).toContain(HOSTED_PRIVACY_URL);
     expect(read("docs/DISCOVERABILITY.md")).toContain(HOSTED_PRIVACY_URL);

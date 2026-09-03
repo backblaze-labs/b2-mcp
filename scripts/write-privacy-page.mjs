@@ -129,16 +129,17 @@ export function assertSupportedMarkdown(markdown) {
 }
 
 export function renderInline(markdown) {
-  const inlinePattern = /\[([^\]\n]+)\]\(([^)\n]+)\)|`([^`\n]+)`/g;
+  const inlinePattern = /\[([^\]\n]+)\]\(([^) \n]+)(?:\s+"([^"\n]+)")?\)|`([^`\n]+)`/g;
   let output = "";
   let cursor = 0;
   for (const match of markdown.matchAll(inlinePattern)) {
     output += escapeHtml(markdown.slice(cursor, match.index));
     if (match[1] !== undefined && match[2] !== undefined) {
       const href = escapeHtml(linkTarget(match[2].trim()));
-      output += `<a href="${href}">${escapeHtml(match[1])}</a>`;
+      const title = match[3] === undefined ? "" : ` title="${escapeHtml(match[3])}"`;
+      output += `<a href="${href}"${title}>${escapeHtml(match[1])}</a>`;
     } else {
-      output += `<code>${escapeHtml(match[3])}</code>`;
+      output += `<code>${escapeHtml(match[4])}</code>`;
     }
     cursor = match.index + match[0].length;
   }
