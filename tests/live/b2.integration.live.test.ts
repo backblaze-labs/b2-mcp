@@ -407,40 +407,43 @@ describe("Object Lock live file contracts", () => {
 });
 
 describe("Insight scans, cancellation, and error mapping", () => {
-  liveIt("b2_list_largest_files and b2_unfinished_uploads scan only the run-owned bucket", async () => {
-    const key = contractObjectKey("insights", "largest.txt");
-    expectLiveSuccess(
-      await callTool(server, "s3_put_object", {
-        bucket: bucketName(),
-        key,
-        content: base64("insight fixture"),
-        contentType: "text/plain",
-      }),
-      "s3_put_object insight fixture",
-    );
+  liveIt(
+    "b2_list_largest_files and b2_unfinished_uploads scan only the run-owned bucket",
+    async () => {
+      const key = contractObjectKey("insights", "largest.txt");
+      expectLiveSuccess(
+        await callTool(server, "s3_put_object", {
+          bucket: bucketName(),
+          key,
+          content: base64("insight fixture"),
+          contentType: "text/plain",
+        }),
+        "s3_put_object insight fixture",
+      );
 
-    const largest = parseResult(
-      await callTool(server, "b2_list_largest_files", {
-        bucket: bucketName(),
-        prefix: `${liveRunPrefix()}/insights/`,
-        limit: 5,
-        max_scan: 1000,
-      }),
-    );
-    expect(largest.scanned).toBeGreaterThanOrEqual(1);
-    expect(largest.files.some((file: any) => file.name === key || file.fileName === key)).toBe(
-      true,
-    );
+      const largest = parseResult(
+        await callTool(server, "b2_list_largest_files", {
+          bucket: bucketName(),
+          prefix: `${liveRunPrefix()}/insights/`,
+          limit: 5,
+          max_scan: 1000,
+        }),
+      );
+      expect(largest.scanned).toBeGreaterThanOrEqual(1);
+      expect(largest.files.some((file: any) => file.name === key || file.fileName === key)).toBe(
+        true,
+      );
 
-    const unfinished = parseResult(
-      await callTool(server, "b2_unfinished_uploads", {
-        bucket: bucketName(),
-        prefix: `${liveRunPrefix()}/`,
-        max_uploads: 100,
-      }),
-    );
-    expect(unfinished).toHaveProperty("unfinished_count");
-  });
+      const unfinished = parseResult(
+        await callTool(server, "b2_unfinished_uploads", {
+          bucket: bucketName(),
+          prefix: `${liveRunPrefix()}/`,
+          max_uploads: 100,
+        }),
+      );
+      expect(unfinished).toHaveProperty("unfinished_count");
+    },
+  );
 
   liveIt("propagates cancellation through a live SDK-backed tool", async () => {
     const controller = new AbortController();

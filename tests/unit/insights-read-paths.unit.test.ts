@@ -203,7 +203,11 @@ describe("insight usage-report read paths", () => {
     const tools = registerTools(report.client);
 
     const result = parseResult(
-      await tools.call("b2_report_usage_growth", { period: "month", order: "most_grown", limit: 10 }),
+      await tools.call("b2_report_usage_growth", {
+        period: "month",
+        order: "most_grown",
+        limit: 10,
+      }),
     );
 
     expect(result.reports_enabled).toBe(false);
@@ -215,7 +219,11 @@ describe("insight usage-report read paths", () => {
     const tools = registerTools(report.client);
 
     const result = parseResult(
-      await tools.call("b2_report_usage_growth", { period: "month", order: "most_grown", limit: 10 }),
+      await tools.call("b2_report_usage_growth", {
+        period: "month",
+        order: "most_grown",
+        limit: 10,
+      }),
     );
 
     expect(result.reports_enabled).toBe(true);
@@ -416,7 +424,11 @@ describe("insight usage-report read paths", () => {
     const tools = registerTools(report.client);
 
     const result = parseResult(
-      await tools.call("b2_report_usage_growth", { period: "month", order: "most_grown", limit: 10 }),
+      await tools.call("b2_report_usage_growth", {
+        period: "month",
+        order: "most_grown",
+        limit: 10,
+      }),
     );
 
     expect(result.reports_enabled).toBe(true);
@@ -441,7 +453,11 @@ describe("insight usage-report read paths", () => {
     const tools = registerTools(report.client);
 
     const result = parseResult(
-      await tools.call("b2_report_usage_growth", { period: "month", order: "most_grown", limit: 10 }),
+      await tools.call("b2_report_usage_growth", {
+        period: "month",
+        order: "most_grown",
+        limit: 10,
+      }),
     );
 
     expect(result.reports_enabled).toBe(true);

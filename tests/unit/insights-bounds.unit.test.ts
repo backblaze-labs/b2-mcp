@@ -119,7 +119,11 @@ describe("b2_list_largest_files — scan bound", () => {
     });
 
     const result = parseResult(
-      await callTool(server, "b2_list_largest_files", { bucket: "test-bucket", limit: 3, max_scan: 5 }),
+      await callTool(server, "b2_list_largest_files", {
+        bucket: "test-bucket",
+        limit: 3,
+        max_scan: 5,
+      }),
     );
 
     expect(result.truncated).toBe(true);
@@ -140,7 +144,11 @@ describe("b2_list_largest_files — scan bound", () => {
     });
 
     const result = parseResult(
-      await callTool(server, "b2_list_largest_files", { bucket: "test-bucket", limit: 3, max_scan: 2 }),
+      await callTool(server, "b2_list_largest_files", {
+        bucket: "test-bucket",
+        limit: 3,
+        max_scan: 2,
+      }),
     );
 
     expect(result.truncated).toBe(true);
