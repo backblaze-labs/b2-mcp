@@ -59,7 +59,11 @@ transmitted to the publisher.
 Generated application-key secrets from `b2_create_key` are handled separately by
 the durable secret sink. In local stdio mode on supported POSIX systems, the
 default sink is `file`, which writes newly created application-key secrets to
-`~/.b2-mcp/secrets.jsonl` unless configured differently. In HTTP and serverless
+`~/.b2-mcp/secrets.jsonl` unless configured differently — but only when that
+owner-only ledger can be opened safely. If the default ledger cannot be
+validated (for example, it is a symlink or its parent directory has unsafe
+permissions), b2-mcp falls back to `off` and the credential-producing tools
+return a compatibility stub instead of writing the secret. In HTTP and serverless
 deployments, the default sink is `off` and the tool returns a compatibility
 stub unless the operator explicitly enables a sink mode. If an operator enables
 `B2_SECRET_SINK=file` for HTTP or serverless, b2-mcp writes newly created

@@ -1,3 +1,4 @@
+import { spawnSync } from "child_process";
 import {
   chmodSync,
   existsSync,
@@ -10,7 +11,6 @@ import {
 import { createRequire } from "module";
 import { tmpdir } from "os";
 import { delimiter, join } from "path";
-import { spawnSync } from "child_process";
 
 const root = join(__dirname, "../..");
 const nodeRequire = createRequire(__filename);
