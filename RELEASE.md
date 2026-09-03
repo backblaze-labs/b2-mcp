@@ -279,6 +279,45 @@ with a direct reason and publish a fixed higher patch or prerelease version from
 the protected workflow. If credentials, provenance, or package contents may be
 compromised, follow `docs/design-docs/supply-chain-security.md` before publishing again.
 
+## Breaking Tool-Name Changes
+
+Tool names are part of the public contract. When a release renames tools with no
+transitional aliases (a hard cutover rather than expand-contract), the breaking
+change is deliberate and its transient operator impact is accepted — but it must
+be surfaced in the release/runbook notes so operators expect the transient errors
+and do not page on them.
+
+`v0.2.1` renames four tools with the old names removed and **no aliases**:
+
+| Old | New |
+| --- | --- |
+| `b2_usage_growth` | `b2_report_usage_growth` |
+| `b2_egress_leaders` | `b2_rank_egress_leaders` |
+| `b2_largest_files` | `b2_list_largest_files` |
+| `s3_presign_upload_part` | `s3_get_presigned_upload_part_url` |
+
+Expected transient impact — call this out in the release notes so on-call does
+not treat it as an incident:
+
+- **Rolling deploys.** During the window where old and new replicas run
+  simultaneously, the stateless HTTP transport routes each request independently.
+  A client that discovered the old surface from an old replica and then calls a
+  new replica (or vice-versa) gets a clean MCP `unknown tool` error for these
+  four tools until the fleet is fully on the new version. This fails safely (a
+  tool-not-found error, not a crash) but is a functional outage of the four
+  tools for the deploy window. Prefer a fast, non-overlapping cutover (or sticky
+  routing) to shrink the window.
+- **Cached client sessions.** Any already-running agent/session that captured the
+  old tool surface keeps calling the removed names and fails until it re-lists
+  `tools/list`. Clients recover by re-listing; there is no server-side rollback.
+- **Monitoring, alerts, and log queries.** `tool.call` audit logs and metrics
+  emit the tool name as a dimension/label. Any dashboard panel, saved log query,
+  or alert rule keyed on `b2_usage_growth`, `b2_egress_leaders`,
+  `b2_largest_files`, or `s3_presign_upload_part` stops matching the instant the
+  new code is live and silently reports zero instead of erroring. Update every
+  such query/alert to the new names as part of the release so per-tool
+  usage/error visibility is not lost.
+
 ## Deprecation
 
 Deprecate only after the replacement version is available and installable:
