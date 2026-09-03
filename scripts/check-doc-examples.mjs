@@ -666,20 +666,26 @@ function packagesExecutedByCommand(command, args) {
 }
 
 // Collect every package operand an npx/exec/dlx invocation fetches: each
-// `--package`/`-p` value (which npx allows repeated) plus the first positional
-// operand. Returning only the first let `npx --package=A --package=B` fetch B
-// while only A was validated.
+// `--package`/`-p` value (which npx allows repeated) plus, only when no explicit
+// `--package` was supplied, the first positional operand. Returning only the
+// first `--package` let `npx --package=A --package=B` fetch B while only A was
+// validated; conversely, once an explicit `--package` is present the first
+// positional token is the command to run, not a package, so validating it
+// mis-flagged the valid `npx --package=<pkg> b2-mcp` form as drift.
 function allPackageArgs(args) {
   const packages = [];
+  let sawExplicitPackage = false;
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === "--") continue;
     if (arg.startsWith("--package=")) {
       packages.push(arg.slice("--package=".length));
+      sawExplicitPackage = true;
       continue;
     }
     if (arg === "--package" || arg === "-p") {
       if (args[index + 1] !== undefined) packages.push(args[index + 1]);
+      sawExplicitPackage = true;
       index += 1;
       continue;
     }
@@ -687,7 +693,7 @@ function allPackageArgs(args) {
       if (!arg.includes("=") && npxValueOptions.has(arg)) index += 1;
       continue;
     }
-    packages.push(arg);
+    if (!sawExplicitPackage) packages.push(arg);
     break;
   }
   return packages;
@@ -871,7 +877,7 @@ function validatePackageNameReferences(file, text, startLine) {
   // executable and package spec across physical lines and the drift passes
   // unchecked (the launcher check only searches for the canonical package).
   for (const { line, text: logicalLine } of foldShellContinuations(text)) {
-    for (const packageSpec of npxPackageSpecsInLine(logicalLine)) {
+    for (const packageSpec of executablePackageSpecsInLine(logicalLine)) {
       const parsedPackageSpec = parsePackageSpec(packageSpec);
       if (!parsedPackageSpec) continue;
       const drifts = parsedPackageSpec.name.startsWith("@")
@@ -888,21 +894,87 @@ function validatePackageNameReferences(file, text, startLine) {
   }
 }
 
-// Locate the package operand of every `npx` invocation on a logical line by
-// tokenizing and parsing options through the same `allPackageArgs` logic used
-// for JSON client configs. Scanning tokens (rather than a fixed regex) means an
-// extra option such as `npx --yes --offline @attacker/pkg` no longer captures
-// the option as the package, and both scoped and unscoped operands are covered.
-function npxPackageSpecsInLine(logicalLine) {
-  const tokens = logicalLine.split(/\s+/).map(stripShellToken).filter(Boolean);
+// Locate the package operand of every package-executor invocation on a logical
+// line by tokenizing and parsing options through the same `allPackageArgs`
+// logic used for JSON client configs. Every executor the mutable-version policy
+// recognizes (`npx`, `npm exec`, `pnpm dlx`) is parsed here too; checking only
+// `npx` let `npm exec @attacker/b2-mcp@0.2.0` (or the `pnpm dlx` equivalent)
+// drift to another package with no canonical spec to inspect. Scanning tokens
+// (rather than a fixed regex) means an extra option such as
+// `npx --yes --offline @attacker/pkg` no longer captures the option as the
+// package, and both scoped and unscoped operands are covered.
+function executablePackageSpecsInLine(logicalLine) {
+  const tokens = tokenizeShell(logicalLine).map(stripShellToken).filter(Boolean);
   const specs = [];
   for (let index = 0; index < tokens.length; index += 1) {
-    if (tokens[index] !== "npx") continue;
-    for (const operand of allPackageArgs(tokens.slice(index + 1))) {
+    const argsStart = packageExecutorArgsStart(tokens, index);
+    if (argsStart === null) continue;
+    for (const operand of allPackageArgs(tokens.slice(argsStart))) {
       if (operand) specs.push(operand);
     }
   }
   return specs;
+}
+
+// Return the index of the first argument after a package executor at `index`,
+// or null when no executor starts there. Handles options before the `exec`/`dlx`
+// subcommand (for example `npm --loglevel warn exec <pkg>`) so a shared policy
+// covers `npx`, `npm exec`, and `pnpm dlx`.
+function packageExecutorArgsStart(tokens, index) {
+  if (tokens[index] === "npx") return index + 1;
+  const isNpm = tokens[index] === "npm" || tokens[index] === "npm.cmd";
+  const isPnpm = tokens[index] === "pnpm" || tokens[index] === "pnpm.cmd";
+  if (!isNpm && !isPnpm) return null;
+  let cursor = index + 1;
+  while (cursor < tokens.length && tokens[cursor].startsWith("-")) {
+    if (!tokens[cursor].includes("=") && npxValueOptions.has(tokens[cursor])) cursor += 1;
+    cursor += 1;
+  }
+  if (isNpm && tokens[cursor] === "exec") return cursor + 1;
+  if (isPnpm && tokens[cursor] === "dlx") return cursor + 1;
+  return null;
+}
+
+// Split a shell command into tokens while preserving single- and double-quoted
+// spans and backslash escapes. A plain `split(/\s+/)` loses shell quoting, so a
+// value-taking option with spaces such as `npx --cache "/tmp/npm cache" <pkg>`
+// hid the real operand: only the first half of the quoted path was skipped and
+// `cache` was misread as the package. Quote-aware tokenizing keeps the quoted
+// value together so the operand parser still reaches `<pkg>`.
+function tokenizeShell(text) {
+  const tokens = [];
+  let current = "";
+  let hasToken = false;
+  let quote = null;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (quote) {
+      if (char === quote) quote = null;
+      else current += char;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      hasToken = true;
+      continue;
+    }
+    if (char === "\\" && index + 1 < text.length) {
+      current += text[index + 1];
+      hasToken = true;
+      index += 1;
+      continue;
+    }
+    if (/\s/.test(char)) {
+      if (hasToken) tokens.push(current);
+      current = "";
+      hasToken = false;
+      continue;
+    }
+    current += char;
+    hasToken = true;
+  }
+  if (hasToken) tokens.push(current);
+  return tokens;
 }
 
 function stripShellToken(token) {
@@ -1026,21 +1098,9 @@ function isExecutablePackageLine(line) {
 }
 
 function segmentIsPackageExecutor(segment) {
-  const tokens = segment.split(/\s+/).map(stripShellToken).filter(Boolean);
+  const tokens = tokenizeShell(segment).map(stripShellToken).filter(Boolean);
   for (let index = 0; index < tokens.length; index += 1) {
-    const command = tokens[index];
-    if (command === "npx") return true;
-    const isNpm = command === "npm" || command === "npm.cmd";
-    const isPnpm = command === "pnpm" || command === "pnpm.cmd";
-    if (!isNpm && !isPnpm) continue;
-    let cursor = index + 1;
-    while (cursor < tokens.length && tokens[cursor].startsWith("-")) {
-      if (!tokens[cursor].includes("=") && npxValueOptions.has(tokens[cursor])) cursor += 1;
-      cursor += 1;
-    }
-    const subcommand = tokens[cursor];
-    if (isNpm && subcommand === "exec") return true;
-    if (isPnpm && subcommand === "dlx") return true;
+    if (packageExecutorArgsStart(tokens, index) !== null) return true;
   }
   return false;
 }
@@ -1054,7 +1114,11 @@ function isGlobalNpmInstallLine(line) {
 // `npm --global install <pkg>`). Returns null when the segment is not an npm
 // install; otherwise reports whether it is global and the package operands.
 function npmInstallInvocation(segment) {
-  const tokens = segment.split(/\s+/).map(stripShellToken).filter(Boolean);
+  // Tokenize quote-aware so a value-taking option with spaces before the
+  // subcommand (`npm --prefix "/tmp/npm cache" install -g <pkg>`) keeps the
+  // quoted value intact. A plain `split(/\s+/)` made `cache` look like the
+  // subcommand, returned null, and skipped every global package check.
+  const tokens = tokenizeShell(segment).map(stripShellToken).filter(Boolean);
   const npmIndex = tokens.findIndex((token) => token === "npm" || token === "npm.cmd");
   if (npmIndex === -1) return null;
 

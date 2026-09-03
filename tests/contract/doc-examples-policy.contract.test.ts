@@ -294,6 +294,62 @@ describe("documentation example validator policy", () => {
     expect(result.stderr).toContain("must not execute mutable-versioned package examples");
   });
 
+  it("rejects an npx launcher whose quoted option value hides a drift", () => {
+    const command = 'npx --cache "/tmp/npm cache" @attacker/b2-mcp@0.2.0 --version';
+    const readme = read("README.md").replace(
+      "npx -y @backblaze-labs/b2-mcp@0.2.0 --version",
+      command,
+    );
+    const expectedLine = lineOf(readme, command);
+    const result = runDocExamplesWithOverrides({ "README.md": readme });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(`README.md:${expectedLine}`);
+    expect(result.stderr).toContain("references package @attacker/b2-mcp@0.2.0");
+  });
+
+  it.each([
+    ["npm exec", "npm exec @attacker/b2-mcp@0.2.0"],
+    ["pnpm dlx", "pnpm dlx @attacker/b2-mcp@0.2.0"],
+    ["unscoped npm exec", "npm exec b2-mcp@0.2.0"],
+  ])("rejects a %s launcher that drifts to another package", (_label, command) => {
+    const readme = read("README.md").replace(
+      "npx -y @backblaze-labs/b2-mcp@0.2.0 --version",
+      command,
+    );
+    const expectedLine = lineOf(readme, command);
+    const result = runDocExamplesWithOverrides({ "README.md": readme });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(`README.md:${expectedLine}`);
+    expect(result.stderr).toContain("references package");
+  });
+
+  it("rejects a global npm install whose quoted option value hides the subcommand", () => {
+    const command = 'npm --prefix "/tmp/npm cache" install -g @attacker/b2-mcp@0.2.0';
+    const readme = read("README.md").replace(
+      "npm install -g @backblaze-labs/b2-mcp@0.2.0",
+      command,
+    );
+    const expectedLine = lineOf(readme, command);
+    const result = runDocExamplesWithOverrides({ "README.md": readme });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(`README.md:${expectedLine}`);
+    expect(result.stderr).toContain("global npm install examples must install");
+  });
+
+  it("accepts an npx --package spec whose command name is a package binary", () => {
+    const command = "npx --package=@backblaze-labs/b2-mcp@0.2.0 b2-mcp --version";
+    const readme = read("README.md").replace(
+      "npx -y @backblaze-labs/b2-mcp@0.2.0 --version",
+      command,
+    );
+    const result = runDocExamplesWithOverrides({ "README.md": readme });
+
+    expect(result.status).toBe(0);
+  });
+
   it("rejects an npx --yes long-form launcher that drifts to another package", () => {
     const readme = read("README.md").replace(
       "npx -y @backblaze-labs/b2-mcp@0.2.0 --version",
