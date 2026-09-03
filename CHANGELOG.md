@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   manifest alongside `server.json` and `lhm.plugin.json`. (#300)
 - Flat, visible `## Tools` list of all 40 tools in the README so directory
   auto-extractors (mcp.so, Glama, ...) can populate the tool section. (#300)
-- `docs/DISCOVERABILITY.md` runbook documenting the registry/directory listings
+- `docs/references/discoverability.md` runbook documenting the registry/directory listings
   and per-release steps (Glama, Smithery, LobeHub, mcp.so). (#300)
 - README "official server" note and an `Official …` MCP Registry manifest
   description to distinguish `backblaze-labs/b2-mcp` from community forks. (#301)

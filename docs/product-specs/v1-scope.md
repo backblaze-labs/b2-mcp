@@ -113,7 +113,7 @@ major lines. Other Node.js lines are not part of the `v0.1.0` support contract.
 
 The official Backblaze TypeScript SDK is the required B2 integration boundary
 for Phase 1. The reviewed adoption and parity matrix lives in
-[`SDK_ADOPTION_CONTRACT.md`](SDK_ADOPTION_CONTRACT.md) and supersedes the prior
+[`../design-docs/sdk-adoption-contract.md`](../design-docs/sdk-adoption-contract.md) and supersedes the prior
 implementation allowance from #55 that accepted direct B2 HTTP calls and direct
 AWS SDK S3 calls as the default architecture.
 
@@ -620,7 +620,7 @@ are not required for the Phase 1 definition of done.
 The Phase 1 tool contract must satisfy these requirements directly:
 
 - Freeze only after the SDK adoption matrix in
-  [`SDK_ADOPTION_CONTRACT.md`](SDK_ADOPTION_CONTRACT.md) and its implementation
+  [`../design-docs/sdk-adoption-contract.md`](../design-docs/sdk-adoption-contract.md) and its implementation
   follow-ups are complete.
 - Use the profile count table and enumerated profile lists above as the approved
   human-readable profile source of truth.

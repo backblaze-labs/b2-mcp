@@ -81,7 +81,7 @@ function matrixRows(
 }
 
 describe("SDK adoption contract", () => {
-  const contract = readFileSync(join(ROOT, "docs/SDK_ADOPTION_CONTRACT.md"), "utf8");
+  const contract = readFileSync(join(ROOT, "docs/design-docs/sdk-adoption-contract.md"), "utf8");
 
   it("pins the reviewed Backblaze SDK package exactly", () => {
     const pkg = readJson<{

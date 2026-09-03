@@ -67,7 +67,10 @@ describe("supply-chain audit policy", () => {
     allowBuilds?: Record<string, boolean>;
     minimumReleaseAgeExclude?: string[];
   };
-  const sdkAdoptionContract = readFileSync(join(root, "docs/SDK_ADOPTION_CONTRACT.md"), "utf8");
+  const sdkAdoptionContract = readFileSync(
+    join(root, "docs/design-docs/sdk-adoption-contract.md"),
+    "utf8",
+  );
   const workflowDirectory = join(root, ".github/workflows");
   const allWorkflows = readdirSync(workflowDirectory)
     .filter((name) => name.endsWith(".yml") || name.endsWith(".yaml"))

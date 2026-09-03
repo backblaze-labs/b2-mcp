@@ -55,6 +55,7 @@ zod
 # People and account names
 goanpeca
 Gonza
+Lopopolo
 sophiecarreras
 
 # Cloud, network, storage, and security terms

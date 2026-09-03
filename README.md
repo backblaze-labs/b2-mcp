@@ -96,7 +96,7 @@ Restart Claude Desktop and the B2 tools appear. To persist local stdio logs from
 >
 > **Why your client may show fewer than 40 tools:** registration is capability-aware, so a credentialed client only sees the tools its key can actually use. With a non-master key and no master key configured, the three Partner/Groups tools that require a master key (`b2_list_groups`, `b2_list_group_members`, `b2_eject_group_member`) are not surfaced, so `tools/list` reports 37. Add `B2_MASTER_KEY_ID` / `B2_MASTER_KEY` on a Partner-entitled account to get the full 40. A read-only key trims the surface further, and durable-secret tools appear as non-secret "unavailable" stubs unless a secret sink is configured. Credential-free scanners see the full advertised surface for discovery, but every `tools/call` returns `missing_credentials` until valid B2 credentials are supplied.
 
-> **Other clients:** [`docs/CLIENTS.md`](docs/CLIENTS.md) has copy-paste setup for Cursor, VS Code, Cline, Windsurf, Zed, Continue, Goose, Claude.ai, and hosted (Streamable HTTP), plus a compatibility matrix.
+> **Other clients:** [`docs/product-specs/clients.md`](docs/product-specs/clients.md) has copy-paste setup for Cursor, VS Code, Cline, Windsurf, Zed, Continue, Goose, Claude.ai, and hosted (Streamable HTTP), plus a compatibility matrix.
 
 <details>
 <summary><b>Run from a source checkout instead</b></summary>
@@ -207,17 +207,17 @@ limits, and in-flight request caps. The deployment index is
 [`docs/DEPLOY.md`](docs/DEPLOY.md), and the OAuth-secured Vercel adapter
 runbook is [`deploy/vercel`](deploy/vercel/README.md). Direct deployment guides
 are available for
-[`Vercel`](docs/deployment/vercel.md),
-[`Cloudflare Workers`](docs/deployment/cloudflare-workers.md),
-[`Cloudflare Containers`](docs/deployment/cloudflare-containers.md),
-[`Docker/OCI`](docs/deployment/docker.md),
-[`Google Cloud Run`](docs/deployment/google-cloud-run.md),
-[`AWS ECS Fargate`](docs/deployment/aws.md),
-[`Azure Container Apps`](docs/deployment/azure-container-apps.md),
-[`Render`](docs/deployment/render.md),
-[`Railway`](docs/deployment/railway.md), and
-[`Fly.io`](docs/deployment/fly-io.md). All hosted paths share the
-[`security and credential contract`](docs/deployment/security-and-credentials.md).
+[`Vercel`](docs/references/deployment/vercel.md),
+[`Cloudflare Workers`](docs/references/deployment/cloudflare-workers.md),
+[`Cloudflare Containers`](docs/references/deployment/cloudflare-containers.md),
+[`Docker/OCI`](docs/references/deployment/docker.md),
+[`Google Cloud Run`](docs/references/deployment/google-cloud-run.md),
+[`AWS ECS Fargate`](docs/references/deployment/aws.md),
+[`Azure Container Apps`](docs/references/deployment/azure-container-apps.md),
+[`Render`](docs/references/deployment/render.md),
+[`Railway`](docs/references/deployment/railway.md), and
+[`Fly.io`](docs/references/deployment/fly-io.md). All hosted paths share the
+[`security and credential contract`](docs/references/deployment/security-and-credentials.md).
 
 The image healthcheck applies to HTTP mode. For stdio containers, pass
 `--no-healthcheck`. For HTTP containers, set the listen port through `PORT` so
@@ -589,17 +589,17 @@ Running it safely:
   contains the portable container, compose, and nginx/OAuth edge example.
   [`deploy/vercel`](deploy/vercel/README.md) contains the OAuth-secured Vercel
   runtime adapter. The deployment index links the current provider guides:
-  [`Vercel`](docs/deployment/vercel.md),
-  [`Cloudflare Workers`](docs/deployment/cloudflare-workers.md),
-  [`Cloudflare Containers`](docs/deployment/cloudflare-containers.md),
-  [`Docker/OCI`](docs/deployment/docker.md),
-  [`Google Cloud Run`](docs/deployment/google-cloud-run.md),
-  [`AWS ECS Fargate`](docs/deployment/aws.md),
-  [`Azure Container Apps`](docs/deployment/azure-container-apps.md),
-  [`Render`](docs/deployment/render.md),
-  [`Railway`](docs/deployment/railway.md),
-  [`Fly.io`](docs/deployment/fly-io.md), and
-  [`shared security`](docs/deployment/security-and-credentials.md).
+  [`Vercel`](docs/references/deployment/vercel.md),
+  [`Cloudflare Workers`](docs/references/deployment/cloudflare-workers.md),
+  [`Cloudflare Containers`](docs/references/deployment/cloudflare-containers.md),
+  [`Docker/OCI`](docs/references/deployment/docker.md),
+  [`Google Cloud Run`](docs/references/deployment/google-cloud-run.md),
+  [`AWS ECS Fargate`](docs/references/deployment/aws.md),
+  [`Azure Container Apps`](docs/references/deployment/azure-container-apps.md),
+  [`Render`](docs/references/deployment/render.md),
+  [`Railway`](docs/references/deployment/railway.md),
+  [`Fly.io`](docs/references/deployment/fly-io.md), and
+  [`shared security`](docs/references/deployment/security-and-credentials.md).
 - **Use a least-privilege key** — a non-master key is correct for normal storage operations. Local stdio can create scoped keys through the file sink; hosted HTTP deployments should create and rotate keys outside the MCP tool flow unless the file sink has been explicitly configured and reviewed. `b2_create_key` refuses key-management grants, unscoped write/delete grants, and over-long or non-expiring keys unless the corresponding policy override is set.
 - **Presigned URLs are different from durable secrets** — `s3_get_presigned_url` and `s3_presign_upload_part` return short-lived bearer capabilities with `expiresIn` / `expiresAt`. Treat the URL as sensitive until expiry, but it is not a long-lived B2 application key.
 - **Local use → stdio** (the Quick Start above). Credentials stay in your client config / environment.
@@ -657,18 +657,18 @@ committed lockfile and a sanitized temporary environment.
 ## Documentation
 
 - [API reference](https://backblaze-labs.github.io/b2-mcp/) — generated TypeDoc for the public `src` surface, published to GitHub Pages from `main`
-- [`docs/CLIENTS.md`](docs/CLIENTS.md) — per-client setup + compatibility matrix
+- [`docs/product-specs/clients.md`](docs/product-specs/clients.md) — per-client setup + compatibility matrix
 - [`docs/AUTHENTICATION.md`](docs/AUTHENTICATION.md) — OAuth, credential custody, and auth boundary
 - [`docs/DEPLOY.md`](docs/DEPLOY.md) — deployment matrix and supported-host links
-- [`docs/deployment/security-and-credentials.md`](docs/deployment/security-and-credentials.md) — shared hosted security contract
-- [`docs/deployment/vercel.md`](docs/deployment/vercel.md), [`docs/deployment/cloudflare-workers.md`](docs/deployment/cloudflare-workers.md), [`docs/deployment/cloudflare-containers.md`](docs/deployment/cloudflare-containers.md), [`docs/deployment/docker.md`](docs/deployment/docker.md), [`docs/deployment/google-cloud-run.md`](docs/deployment/google-cloud-run.md), [`docs/deployment/aws.md`](docs/deployment/aws.md), [`docs/deployment/azure-container-apps.md`](docs/deployment/azure-container-apps.md), [`docs/deployment/render.md`](docs/deployment/render.md), [`docs/deployment/railway.md`](docs/deployment/railway.md), [`docs/deployment/fly-io.md`](docs/deployment/fly-io.md) — provider deployment guides
-- [`docs/PUBLIC_CONTRACTS.md`](docs/PUBLIC_CONTRACTS.md) — public document ownership and contract status
-- [`docs/TOOL_CONTRACT.md`](docs/TOOL_CONTRACT.md) — Phase 1 tool-contract policy
+- [`docs/references/deployment/security-and-credentials.md`](docs/references/deployment/security-and-credentials.md) — shared hosted security contract
+- [`docs/references/deployment/vercel.md`](docs/references/deployment/vercel.md), [`docs/references/deployment/cloudflare-workers.md`](docs/references/deployment/cloudflare-workers.md), [`docs/references/deployment/cloudflare-containers.md`](docs/references/deployment/cloudflare-containers.md), [`docs/references/deployment/docker.md`](docs/references/deployment/docker.md), [`docs/references/deployment/google-cloud-run.md`](docs/references/deployment/google-cloud-run.md), [`docs/references/deployment/aws.md`](docs/references/deployment/aws.md), [`docs/references/deployment/azure-container-apps.md`](docs/references/deployment/azure-container-apps.md), [`docs/references/deployment/render.md`](docs/references/deployment/render.md), [`docs/references/deployment/railway.md`](docs/references/deployment/railway.md), [`docs/references/deployment/fly-io.md`](docs/references/deployment/fly-io.md) — provider deployment guides
+- [`docs/design-docs/index.md`](docs/design-docs/index.md) — public document ownership and contract status
+- [`docs/design-docs/tool-contract.md`](docs/design-docs/tool-contract.md) — Phase 1 tool-contract policy
 - [`docs/TOOL_PROFILES.md`](docs/TOOL_PROFILES.md) — generated tool-profile reference
 - [`docs/TESTING.md`](docs/TESTING.md) — deterministic and live-test gate skeleton
 - [`docs/EVALS.md`](docs/EVALS.md) — LLM eval local and CI runbook
-- [`docs/SECURITY_REVIEW.md`](docs/SECURITY_REVIEW.md) — pre-public security and provenance review checklist
-- [`docs/DISCOVERABILITY.md`](docs/DISCOVERABILITY.md) — registry/directory listings runbook (Glama, Smithery, LobeHub, mcp.so) and per-release steps
+- [`docs/design-docs/security-review.md`](docs/design-docs/security-review.md) — pre-public security and provenance review checklist
+- [`docs/references/discoverability.md`](docs/references/discoverability.md) — registry/directory listings runbook (Glama, Smithery, LobeHub, mcp.so) and per-release steps
 - [`RELEASE.md`](RELEASE.md) — release process and `[Unreleased]` discipline
 - [`CHANGELOG.md`](CHANGELOG.md) — release notes
 - [`SECURITY.md`](SECURITY.md) — reporting vulnerabilities

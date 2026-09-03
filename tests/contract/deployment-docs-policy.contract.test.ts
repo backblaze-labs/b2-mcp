@@ -37,7 +37,11 @@ const providerGuides = [
   "fly-io.md",
 ] as const;
 
-const allDeploymentDocs = ["DEPLOY.md", ...providerGuides.map((file) => `deployment/${file}`)];
+const deploymentGuideDir = "references/deployment";
+const allDeploymentDocs = [
+  "DEPLOY.md",
+  ...providerGuides.map((file) => `${deploymentGuideDir}/${file}`),
+];
 
 function doc(relativePath: string): string {
   return readFileSync(join(root, "docs", relativePath), "utf8");
@@ -62,9 +66,9 @@ describe("deployment documentation policy", () => {
     expect(readme).toContain("deploy/customer-hosted/README.md");
 
     for (const fileName of ["security-and-credentials.md", ...providerGuides]) {
-      const link = `docs/deployment/${fileName}`;
+      const link = `docs/references/deployment/${fileName}`;
       expect(readme).toContain(link);
-      expect(deployIndex).toContain(`deployment/${fileName}`);
+      expect(deployIndex).toContain(`${deploymentGuideDir}/${fileName}`);
     }
   });
 
@@ -93,8 +97,8 @@ describe("deployment documentation policy", () => {
     ];
 
     for (const fileName of providerGuides) {
-      const text = doc(`deployment/${fileName}`);
-      expect(text).toContain("docs/deployment/security-and-credentials.md");
+      const text = doc(`${deploymentGuideDir}/${fileName}`);
+      expect(text).toContain("docs/references/deployment/security-and-credentials.md");
       for (const section of requiredSections) {
         expect(text, `${fileName} is missing ${section}`).toContain(section);
       }
@@ -119,7 +123,7 @@ describe("deployment documentation policy", () => {
   });
 
   it("centralizes the shared production credential contract", () => {
-    const security = doc("deployment/security-and-credentials.md");
+    const security = doc(`${deploymentGuideDir}/security-and-credentials.md`);
     for (const required of [
       "The MCP client never sends B2 application keys through the LLM harness.",
       "B2_HTTP_CREDENTIAL_MODE=server",
@@ -189,7 +193,7 @@ describe("deployment documentation policy", () => {
   it("keeps the Cloudflare Worker adapter manifest and budget checks in policy", () => {
     const wrangler = readFileSync(join(root, "deploy/cloudflare-worker/wrangler.jsonc"), "utf8");
     const wranglerConfig = parseJsoncObject(wrangler);
-    const workerGuide = doc("deployment/cloudflare-workers.md");
+    const workerGuide = doc(`${deploymentGuideDir}/cloudflare-workers.md`);
     const workerReadme = readFileSync(join(root, "deploy/cloudflare-worker/README.md"), "utf8");
     const workerBundleCheck = readFileSync(
       join(root, "scripts/check-cloudflare-worker-bundle.mjs"),
@@ -211,7 +215,7 @@ describe("deployment documentation policy", () => {
     );
     expect(pkg.files).not.toContain("deploy/cloudflare-worker/adapter.ts");
     expect(pkg.files).not.toContain("deploy/cloudflare-worker/worker.ts");
-    expect(pkg.files).toContain("docs/deployment/*.md");
+    expect(pkg.files).toContain("docs/references/deployment/*.md");
     expect(existsSync(join(root, "deploy/cloudflare-worker/worker.ts"))).toBe(true);
     expect(WORKER_EMITTED_FILES_BUDGET).toBeGreaterThan(0);
     expect(WORKER_EMITTED_TOTAL_BYTES_BUDGET).toBeGreaterThan(0);

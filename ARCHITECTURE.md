@@ -7,7 +7,7 @@ enough to affect implementation, contract tests, packaging, and release review.
 
 The official Backblaze TypeScript SDK is the required integration boundary for
 B2 behavior. The reviewed adoption contract is
-[`SDK_ADOPTION_CONTRACT.md`](SDK_ADOPTION_CONTRACT.md), which is normative for
+[`docs/design-docs/sdk-adoption-contract.md`](docs/design-docs/sdk-adoption-contract.md), which is normative for
 issue [#71](https://github.com/backblaze-labs/b2-mcp/issues/71).
 
 Direct B2 HTTP calls are not allowed in runtime code. AWS SDK calls to B2's

@@ -7,7 +7,7 @@ Cloudflare's separate MCP agent handler or duplicate the tool registration
 logic.
 
 The full deployment guide is
-[`docs/deployment/cloudflare-workers.md`](../../docs/deployment/cloudflare-workers.md).
+[`docs/references/deployment/cloudflare-workers.md`](../../docs/references/deployment/cloudflare-workers.md).
 Treat the recipe as experimental until a protected live Worker smoke test is
 recorded for the release being deployed.
 

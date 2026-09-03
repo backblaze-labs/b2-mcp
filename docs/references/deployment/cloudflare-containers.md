@@ -1,6 +1,6 @@
 # Cloudflare Workers Plus Containers
 
-Shared guide: docs/deployment/security-and-credentials.md
+Shared guide: docs/references/deployment/security-and-credentials.md
 
 ## Status
 
@@ -114,7 +114,7 @@ limits, and alerting. Use presigned B2 URLs for large object bodies.
 ## Troubleshooting
 
 Use the shared security contract first:
-[docs/deployment/security-and-credentials.md](security-and-credentials.md).
+[docs/references/deployment/security-and-credentials.md](security-and-credentials.md).
 
 - Auth discovery: fetch `/.well-known/oauth-protected-resource/mcp` and confirm the resource URL, issuer, authorization endpoint, and supported scopes match the MCP client configuration.
 - Issuer/audience mismatch: compare `B2_OAUTH_ISSUER`, `B2_OAUTH_RESOURCE`, and `B2_OAUTH_AUDIENCE` with the token claims returned by the authorization server.

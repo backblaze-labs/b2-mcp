@@ -75,7 +75,7 @@ function withFixture(run: (fixtureRoot: string) => void): void {
           files: [
             "dist/**/*",
             "docs/AUTHENTICATION.md",
-            "docs/CLIENTS.md",
+            "docs/product-specs/clients.md",
             "docs/DEPLOY.md",
             "docs/tool-profile-contract.json",
             "docs/TOOL_PROFILES.md",

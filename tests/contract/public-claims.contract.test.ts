@@ -75,12 +75,12 @@ function runtimeEnvNamesFromSource(): string[] {
 
 describe("public support and authentication claims", () => {
   const readme = read("README.md");
-  const clients = read("docs/CLIENTS.md");
+  const clients = read("docs/product-specs/clients.md");
   const contributing = read("CONTRIBUTING.md");
   const authentication = read("docs/AUTHENTICATION.md");
   const release = read("RELEASE.md");
   const security = read("SECURITY.md");
-  const publicContracts = read("docs/PUBLIC_CONTRACTS.md");
+  const publicContracts = read("docs/design-docs/index.md");
   const publicMarkdown = markdownFiles().map(read).join("\n");
   const packageJson = readJson<{
     bin: Record<string, string>;
@@ -96,7 +96,7 @@ describe("public support and authentication claims", () => {
       "b2-mcp-server": "dist/index.js",
     });
     expect(packageJson.files).toContain("docs/AUTHENTICATION.md");
-    expect(publicContracts).toContain("[`AUTHENTICATION.md`](AUTHENTICATION.md)");
+    expect(publicContracts).toContain("[`../AUTHENTICATION.md`](../AUTHENTICATION.md)");
 
     expect(publicMarkdown).not.toContain("@backblaze/b2-mcp-server");
     expect(readme).toContain("The canonical package name is `@backblaze-labs/b2-mcp`");
@@ -140,7 +140,7 @@ describe("public support and authentication claims", () => {
       readme,
       authentication,
       read("docs/DEPLOY.md"),
-      read("docs/deployment/security-and-credentials.md"),
+      read("docs/references/deployment/security-and-credentials.md"),
     ].join("\n");
     const missing = envNames(localEnv).filter((name) => {
       if (name.startsWith("B2_CREDENTIAL_")) return !referenceDocs.includes("B2_CREDENTIAL_<REF>");
@@ -155,7 +155,7 @@ describe("public support and authentication claims", () => {
       readme,
       authentication,
       read("docs/DEPLOY.md"),
-      read("docs/deployment/security-and-credentials.md"),
+      read("docs/references/deployment/security-and-credentials.md"),
     ].join("\n");
     const missing = runtimeEnvNamesFromSource().filter((name) => {
       if (name.startsWith("B2_CREDENTIAL_")) return !referenceDocs.includes("B2_CREDENTIAL_<REF>");

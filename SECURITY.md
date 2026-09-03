@@ -110,4 +110,4 @@ If a denied package or IOC is found, treat the host as compromised, rebuild it
 from a clean image, revoke reachable GitHub/npm/cloud/CI credentials, revoke any
 reachable B2 application keys, and audit source control plus npm publishing
 history before restoring automation. The full runbook is
-[`docs/SUPPLY_CHAIN_SECURITY.md`](docs/SUPPLY_CHAIN_SECURITY.md).
+[`docs/design-docs/supply-chain-security.md`](docs/design-docs/supply-chain-security.md).

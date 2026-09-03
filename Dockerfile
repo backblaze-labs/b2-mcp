@@ -39,7 +39,8 @@ COPY --from=build --chown=node:node /app/dist ./dist
 COPY --chown=node:node package.json README.md CHANGELOG.md SECURITY.md LICENSE ./
 # The image keeps operator-facing docs for in-container help/debugging. It does
 # not mirror the npm packlist fixtures because they are not read at runtime.
-COPY --chown=node:node docs/CLIENTS.md docs/DEPLOY.md docs/TOOL_PROFILES.md docs/tool-profile-contract.json ./docs/
+COPY --chown=node:node docs/DEPLOY.md docs/TOOL_PROFILES.md docs/tool-profile-contract.json ./docs/
+COPY --chown=node:node docs/product-specs ./docs/product-specs
 
 USER node
 EXPOSE 3000

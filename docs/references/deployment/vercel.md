@@ -1,6 +1,6 @@
 # Vercel Node.js Functions
 
-Shared guide: docs/deployment/security-and-credentials.md
+Shared guide: docs/references/deployment/security-and-credentials.md
 
 ## Status
 
@@ -47,7 +47,7 @@ Function runtime changes before the pin and allowed runtime set are reviewed.
 Import the repository into Vercel and keep the project framework setting
 disabled.
 
-Use [`../../deploy/vercel/README.md`](../../deploy/vercel/README.md) as the
+Use [`../../../deploy/vercel/README.md`](../../../deploy/vercel/README.md) as the
 operator runbook for exact route and environment behavior.
 
 ## Secrets
@@ -106,7 +106,7 @@ calling B2. It returns 503 until OAuth and B2 credential settings are complete.
 
 ## Smoke Testing
 
-Run the shared smoke from docs/deployment/security-and-credentials.md:
+Run the shared smoke from docs/references/deployment/security-and-credentials.md:
 
 ```bash
 MCP_URL=https://mcp.example.com/mcp \
@@ -164,7 +164,7 @@ function runtime.
 ## Troubleshooting
 
 Use the shared security contract first:
-[docs/deployment/security-and-credentials.md](security-and-credentials.md).
+[docs/references/deployment/security-and-credentials.md](security-and-credentials.md).
 
 - Auth discovery: fetch `/.well-known/oauth-protected-resource/mcp` and confirm the resource URL, issuer, authorization endpoint, and supported scopes match the MCP client configuration.
 - Issuer/audience mismatch: compare `B2_OAUTH_ISSUER`, `B2_OAUTH_RESOURCE`, and `B2_OAUTH_AUDIENCE` with the token claims returned by the authorization server.

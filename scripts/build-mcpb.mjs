@@ -6,7 +6,7 @@
  * `package.json` (kept in lockstep by `scripts/update-server-json-version.mjs`).
  * The output `.mcpb` is not committed and is not produced by `publish.yml`; a
  * maintainer runs this on release and uploads the bundle by hand through
- * Smithery's Local (MCPB Bundle) publish tab. See docs/DISCOVERABILITY.md.
+ * Smithery's Local (MCPB Bundle) publish tab. See docs/references/discoverability.md.
  */
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync } from "node:fs";

@@ -33,7 +33,7 @@ beforeAll(() => {
   packageMetadata = readJson("package.json");
   toolNames = contract.profiles.full.names;
   readme = readFileSync(join(__dirname, "../../README.md"), "utf8");
-  v1Scope = readFileSync(join(__dirname, "../../docs/V1_SCOPE.md"), "utf8");
+  v1Scope = readFileSync(join(__dirname, "../../docs/product-specs/v1-scope.md"), "utf8");
 });
 
 describe("README tool-surface drift", () => {

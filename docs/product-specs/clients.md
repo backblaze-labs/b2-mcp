@@ -3,7 +3,7 @@
 This server speaks the Model Context Protocol over **two transports**:
 
 - **stdio** — the server runs as a local subprocess of the client. Used by desktop apps and IDE extensions (Claude Desktop, Cursor, VS Code, Cline, Windsurf, Zed, Continue, Goose…).
-- **HTTP** — the server runs as a hosted MCP 2026-07-28 endpoint behind a URL (single `/mcp` endpoint). Used by web clients (Claude.ai Custom Connectors) and any client pointed at a remote server. See [`DEPLOY.md`](DEPLOY.md) to stand one up.
+- **HTTP** — the server runs as a hosted MCP 2026-07-28 endpoint behind a URL (single `/mcp` endpoint). Used by web clients (Claude.ai Custom Connectors) and any client pointed at a remote server. See [`../DEPLOY.md`](../DEPLOY.md) to stand one up.
 
 > **The one thing that matters:** every stdio client runs the same command,
 > `npx -y @backblaze-labs/b2-mcp`, which downloads and runs the published
@@ -184,7 +184,7 @@ For a source checkout, swap the command for `node /ABSOLUTE/PATH/TO/b2-mcp/dist/
 
 ## B. Hosted HTTP
 
-For a server deployed per [`DEPLOY.md`](DEPLOY.md). The hosted endpoint is `https://<host>/mcp`. Unset `B2_HTTP_CREDENTIAL_MODE` defaults to `headers` for compatibility with existing hosted clients; set `server` or `principal` explicitly when the client should send no B2 key.
+For a server deployed per [`../DEPLOY.md`](../DEPLOY.md). The hosted endpoint is `https://<host>/mcp`. Unset `B2_HTTP_CREDENTIAL_MODE` defaults to `headers` for compatibility with existing hosted clients; set `server` or `principal` explicitly when the client should send no B2 key.
 
 ### Claude Desktop → hosted server (`mcp-remote` bridge)
 
@@ -247,4 +247,4 @@ If Partner API tools require a distinct master key, also send `X-B2-MCP-Master-K
   durable secrets in the proxy, logs, APM, and test fixtures.
 - **Master-key caveat:** only the Partner API needs a master key in Phase 1. S3 tools use the same authorized application key that controls tool registration, so use a non-master `B2_APPLICATION_KEY_*` credential for object and presign tools.
 
-See the [README](../README.md) for the full environment-variable list and the tool catalog.
+See the [README](../../README.md) for the full environment-variable list and the tool catalog.

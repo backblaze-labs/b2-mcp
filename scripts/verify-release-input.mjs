@@ -16,7 +16,7 @@ import {
 const forbiddenDependencies = new Set(["axios", "@modelcontextprotocol/sdk"]);
 const requiredFiles = new Set([
   "dist/**/*",
-  "docs/CLIENTS.md",
+  "docs/product-specs/clients.md",
   "docs/DEPLOY.md",
   "docs/tool-profile-contract.json",
   "docs/TOOL_PROFILES.md",

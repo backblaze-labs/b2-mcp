@@ -27,15 +27,15 @@ configuration reader version explicit, even though `eslint-plugin-tsdoc`
 already depends on the same version transitively. The lockfile snapshot above
 remains unchanged after reintroducing that narrow ESLint path.
 Reviewer-owned dependency overrides live only in
-[`../pnpm-workspace.yaml`](../pnpm-workspace.yaml), where the current entries
+[`../../pnpm-workspace.yaml`](../../pnpm-workspace.yaml), where the current entries
 pin reviewed transitive fixes for packages including `@hono/node-server`,
 `brace-expansion`, `eslint-visitor-keys`, and `js-yaml` (alongside the reviewed
 Vercel build-toolchain pins) without duplicating override policy in
 `package.json`.
 
 Those are not the denied malicious versions recorded in the checked-in Wiz IOC
-snapshot at [`../security/iocs/keyv-packages.csv`](../security/iocs/keyv-packages.csv)
-and loaded through [`../supply-chain-denylist.json`](../supply-chain-denylist.json).
+snapshot at [`../../security/iocs/keyv-packages.csv`](../../security/iocs/keyv-packages.csv)
+and loaded through [`../../supply-chain-denylist.json`](../../supply-chain-denylist.json).
 The current lockfile and publish packlist are checked by:
 
 ```bash
@@ -43,7 +43,7 @@ pnpm run audit:supply-chain:denylist --packlist
 ```
 
 `pnpm run lint:docs` and `pnpm run lint:tsdoc` use the repository-owned
-[`../scripts/run-doc-lint.mjs`](../scripts/run-doc-lint.mjs) wrapper rather than
+[`../../scripts/run-doc-lint.mjs`](../../scripts/run-doc-lint.mjs) wrapper rather than
 executing the ESLint binary directly. The wrapper strips secret-like environment
 variables, refuses local checkout credentials such as persisted GitHub
 `extraheader` values, and preloads a best-effort lockdown module that denies the
@@ -55,7 +55,7 @@ out with `persist-credentials: false`.
 
 ## Normal Install Policy
 
-Lifecycle scripts are disabled by default in [`.npmrc`](../.npmrc). Normal
+Lifecycle scripts are disabled by default in [`.npmrc`](../../.npmrc). Normal
 developer, CI, and packed-consumer installs must keep `ignore-scripts=true`.
 The scanner rejects new `pnpm-lock.yaml` entries with `hasInstallScript`
 unless the exact package path/name/version is added to the reviewed
@@ -170,7 +170,7 @@ key IDs in the incident record.
 
 ## Updating The Denylist
 
-Updates to [`../supply-chain-denylist.json`](../supply-chain-denylist.json)
+Updates to [`../../supply-chain-denylist.json`](../../supply-chain-denylist.json)
 must include:
 
 - a checked-in package-source snapshot, package name/version entry, quarantine
@@ -188,7 +188,7 @@ newer release.
 ## Release Publishing Isolation
 
 The only repository workflow allowed to publish npm packages is
-[`.github/workflows/publish.yml`](../.github/workflows/publish.yml). It:
+[`.github/workflows/publish.yml`](../../.github/workflows/publish.yml). It:
 
 - runs only in the canonical `backblaze-labs/b2-mcp` repository;
 - pins every marketplace action to a reviewed commit SHA;
