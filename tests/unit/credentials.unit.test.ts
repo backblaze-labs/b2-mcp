@@ -540,6 +540,20 @@ describe("removed credential env alias warning", () => {
     warn.mockRestore();
   });
 
+  it("warns when a removed principal-mode B2_CREDENTIAL_<REF>_APP_KEY alias is still set", () => {
+    process.env.B2_CREDENTIAL_TENANT_A_APP_KEY = "still-exported-principal-secret";
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+
+    warnRemovedCredentialEnvAliases();
+
+    expect(
+      warn.mock.calls.some((call) =>
+        String(call[0]).includes("B2_CREDENTIAL_<REF>_APP_KEY"),
+      ),
+    ).toBe(true);
+    warn.mockRestore();
+  });
+
   it("does not warn when no removed alias env var is present", () => {
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
 

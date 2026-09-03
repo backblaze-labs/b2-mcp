@@ -298,26 +298,34 @@ let warnedRemovedCredentialEnvAliases = false;
 
 // Retired credential env names, checked only to warn that they are ignored — not
 // read as configuration. Kept as string data (not `process.env.NAME` reads) so
-// they are not classified as documented runtime configuration.
+// they are not classified as documented runtime configuration. The pattern also
+// covers principal-mode `B2_CREDENTIAL_<REF>_APP_KEY(_ID)`, which `envMaterial`
+// previously accepted via its prefix.
 const REMOVED_CREDENTIAL_ENV_ALIASES = ["B2_APP_KEY_ID", "B2_APP_KEY"] as const;
+const REMOVED_CREDENTIAL_ENV_ALIAS_PATTERN = /^B2_CREDENTIAL_[A-Z0-9_]+_APP_KEY(?:_ID)?$/;
 
 /**
  * Warn once at startup when a removed credential alias env var is still set.
  *
  * @remarks
- * `B2_APP_KEY_ID` / `B2_APP_KEY` are no longer read (issue #386). Without this
- * signal an operator whose deploy manifest still exports them gets a silent
- * behavior change: the legacy separate-S3-key override is dropped and the
- * application key signs S3 directly. The guard fires once so HTTP request paths
- * do not spam logs.
+ * `B2_APP_KEY_ID` / `B2_APP_KEY` and their principal-mode
+ * `B2_CREDENTIAL_<REF>_APP_KEY(_ID)` form are no longer read (issue #386).
+ * Without this signal an operator whose deploy manifest still exports them gets
+ * a silent behavior change: the legacy separate-S3-key override is dropped and
+ * the application key signs S3 directly. The guard fires once so HTTP request
+ * paths do not spam logs.
  */
 export function warnRemovedCredentialEnvAliases(): void {
   if (warnedRemovedCredentialEnvAliases) return;
   warnedRemovedCredentialEnvAliases = true;
-  const stillSet = REMOVED_CREDENTIAL_ENV_ALIASES.some((name) => process.env[name] !== undefined);
+  const stillSet = Object.keys(process.env).some(
+    (name) =>
+      REMOVED_CREDENTIAL_ENV_ALIASES.some((alias) => alias === name) ||
+      REMOVED_CREDENTIAL_ENV_ALIAS_PATTERN.test(name),
+  );
   if (stillSet) {
     logger.warn(
-      "config.removed_alias: B2_APP_KEY_ID/B2_APP_KEY are no longer read and are ignored. Use a non-master B2_APPLICATION_KEY_ID/B2_APPLICATION_KEY; the separate-S3-key override has been removed.",
+      "config.removed_alias: B2_APP_KEY_ID/B2_APP_KEY and B2_CREDENTIAL_<REF>_APP_KEY(_ID) are no longer read and are ignored. Use a non-master B2_APPLICATION_KEY_ID/B2_APPLICATION_KEY (or B2_CREDENTIAL_<REF>_APPLICATION_KEY(_ID) for principal mode); the separate-S3-key override has been removed.",
     );
   }
 }
