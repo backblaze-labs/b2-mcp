@@ -1355,7 +1355,7 @@
     },
     {
       "name": "s3_create_multipart_upload",
-      "descriptionSha256": "6d30e352b8d96771037bcd24880d62e71535b074729392b16c5302566387147e",
+      "descriptionSha256": "b21e63e3187c8f8b7d42533be1f37f6e45fadce6985f37972fca541fddc4746f",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -1819,7 +1819,7 @@
     },
     {
       "name": "s3_presign_upload_part",
-      "descriptionSha256": "1c71eda3d7bf682285e9ee338ae26c74230b6502803802b242bd2bd23829871a",
+      "descriptionSha256": "eabe3413f39a42c5a27aa7a425345fffdae2c1ab7b2d6e82e70af60ac743f601",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -2017,7 +2017,7 @@
     },
     {
       "name": "s3_upload_part_copy",
-      "descriptionSha256": "0e3290aa583d8d38ae4fe44437c8799b2e4f3df1ff9a2288c89cfa5bea1fc194",
+      "descriptionSha256": "d5f89a1a11b697169791d815e934b77369cce036c4d3532d1da4a1143a74d3cc",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -2030,7 +2030,7 @@
             "type": "string"
           },
           "copySourceRange": {
-            "description": "Byte range to copy from the source, e.g. 'bytes=0-104857599' for the first 100 MiB; omit to copy the entire source object. The copied range must be ≥5 MiB unless this is the last part.",
+            "description": "Byte range to copy from the source, e.g. 'bytes=0-104857599' for the first 100 MiB; omit to copy the entire source object. The copied range must be ≥5 MiB unless this is the last part, and at most 5 GiB.",
             "type": "string"
           },
           "copySourceVersionId": {
@@ -2086,5 +2086,5 @@
       "resultType": "complete"
     }
   },
-  "hash": "17e82336b33b8a2686695bae1a9d2bc83db2c886222363fc466d73c066920773"
+  "hash": "60a462457f3b70a9c295f541e9631f820d28acd9bc4b5ec512dd4066b157fccf"
 }
