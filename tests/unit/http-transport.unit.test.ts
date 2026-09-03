@@ -995,8 +995,12 @@ describe("HTTP transport handler", () => {
         // Removed legacy aliases must still never cross into the SDK boundary.
         "x-b2-key-id": "key",
         "x-b2-key": "secret",
+        "x-b2-master-key-id": "master-key",
+        "x-b2-master-key": "master-secret",
         "x-b2-app-key-id": "app-key",
         "x-b2-app-key": "app-secret",
+        "x-b2-mcp-app-key-id": "app-key",
+        "x-b2-mcp-app-key": "app-secret",
         authorization: "Bearer caller-token",
         ...modernHeaders("tools/list"),
       },
@@ -1015,8 +1019,12 @@ describe("HTTP transport handler", () => {
       "x-b2-mcp-master-key",
       "x-b2-key-id",
       "x-b2-key",
+      "x-b2-master-key-id",
+      "x-b2-master-key",
       "x-b2-app-key-id",
       "x-b2-app-key",
+      "x-b2-mcp-app-key-id",
+      "x-b2-mcp-app-key",
       "authorization",
     ]) {
       expect(sdkHeaders.has(name)).toBe(false);
