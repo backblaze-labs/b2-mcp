@@ -175,7 +175,7 @@ Object data movement runs through the **`s3_*` data-plane tools**. Inline object
 ### Tool naming conventions
 
 - **Prefix:** `b2_*` — B2-native names. Most are Native B2 SDK control-plane tools; the four analytics names are the custom MCP category. `s3_*` — compatibility data-plane names; object aliases, presigned URLs, multipart, reachability, and lifecycle paths use the AWS SDK peer client through the SDK `/s3` boundary.
-- **Shape:** `<prefix>_<verb>_<noun>`, snake_case, lowercase, **verb-first**. Use a standard verb (`list`, `get`, `create`, `update`, `delete`, `put`, `rank`, `report`, `presign`, …), matching the upstream B2/S3 operation where one exists. No noun-only names (e.g. `b2_largest_files` was renamed to `b2_list_largest_files`). Presign tools use the `s3_get_presigned_*_url` form.
+- **Shape:** `<prefix>_<verb>_<noun>`, snake_case, lowercase, **verb-first**. Use a standard verb (`list`, `get`, `create`, `update`, `delete`, `put`, `rank`, `report`, …), matching the upstream B2/S3 operation where one exists. No noun-only names (e.g. `b2_largest_files` was renamed to `b2_list_largest_files`). Presign tools use the `s3_get_presigned_*_url` form (verb = `get`), never a bare `s3_presign_*` form. `b2_unfinished_uploads` is a known grandfathered noun-only exception (see the contract doc); don't copy it.
 - The authoritative rule, the verb list, and the required lockstep-update checklist live in [`docs/design-docs/tool-contract.md`](docs/design-docs/tool-contract.md#tool-naming-conventions) — consult it before adding or renaming a tool.
 
 ### Retry logic (`src/utils/retry.ts`)

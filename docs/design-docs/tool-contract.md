@@ -57,10 +57,15 @@ renaming a tool.
   category; `s3_*` for the S3-compatible data plane.
 - **Shape.** `<prefix>_<verb>_<noun>`, snake_case, lowercase, **verb-first**.
   Use a standard verb — `list`, `get`, `create`, `update`, `delete`, `put`,
-  `rank`, `report`, `presign`, … — and never a noun-only name. (The deviation
-  this convention fixed: `b2_largest_files` → `b2_list_largest_files`,
+  `rank`, `report`, … — and never a noun-only name. (The deviation this
+  convention fixed: `b2_largest_files` → `b2_list_largest_files`,
   `b2_egress_leaders` → `b2_rank_egress_leaders`,
   `b2_usage_growth` → `b2_report_usage_growth`.)
+- **Known grandfathered exception.** `b2_unfinished_uploads` is a shipped
+  noun-only name in the custom-analytics category that predates this convention.
+  It is intentionally left unchanged for now because renaming it is another
+  no-alias breaking change; a future release may rename it (e.g.
+  `b2_list_unfinished_uploads`). Do not copy it as a pattern for new tools.
 - **Match the upstream operation.** Where a B2 native or S3 API verb exists, use
   it; otherwise pick the closest standard verb.
 - **Presign.** Use the consistent `s3_get_presigned_*_url` form
