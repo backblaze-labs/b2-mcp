@@ -51,16 +51,24 @@ export function registerS3MultipartTools(
     "s3_create_multipart_upload",
     {
       description:
-        "Initiate an S3-compatible multipart upload for a large file in B2. Returns an UploadId to use with s3_presign_upload_part, which mints per-part URLs the client uploads directly to B2.",
+        "Initiate an S3-compatible multipart upload for a large object in B2 and return an UploadId. Requires the writeFiles capability. This starts an unfinished large-file upload that accrues storage for each uploaded part until you finalize with s3_complete_multipart_upload or discard it with s3_abort_multipart_upload; use s3_list_multipart_uploads to enumerate abandoned uploads, or b2_unfinished_uploads for storage-cost analysis of a selected bucket. Initiating the upload does not reserve or lock the destination key, so concurrent writes may still target it. Use s3_put_object only for tiny (≤1 MiB) inline payloads; prefer a single-object presigned PUT (s3_get_presigned_url) for most single-object transfers, including large ones; use multipart when an object is uploaded or copied as parallel parts. Flow: s3_create_multipart_upload → s3_presign_upload_part → PUT each part directly to B2 (capture each ETag) → s3_complete_multipart_upload with those ETags. Parts are numbered 1–10000 and every part except the last must be ≥5 MiB, and no part may exceed 5 GiB.",
       inputSchema: {
         bucket: z.string().describe("The destination bucket name."),
         key: z.string().describe("The object key for the final assembled file."),
-        contentType: z.string().optional().describe("MIME type of the object."),
+        contentType: z
+          .string()
+          .optional()
+          .describe("MIME type recorded on the final assembled object."),
         metadata: z
           .record(z.string(), z.string())
           .optional()
-          .describe("Custom metadata for the object."),
-        acl: z.enum(["private", "public-read"]).optional(),
+          .describe("Custom metadata stored on the final object."),
+        acl: z
+          .enum(["private", "public-read"])
+          .optional()
+          .describe(
+            "Accepted as a no-op S3 compatibility hint; B2 access follows the destination bucket policy.",
+          ),
         serverSideEncryption: z
           .enum(["AES256"])
           .optional()
@@ -88,7 +96,7 @@ export function registerS3MultipartTools(
     "s3_presign_upload_part",
     {
       description:
-        "Generate short-lived presigned PUT URL bearer capabilities for parts of an S3-compatible multipart upload, so the client/worker uploads each part DIRECTLY to B2. Prefer this over s3_get_presigned_url for multipart uploads; use s3_get_presigned_url for single-object PUT/GET transfers. The response includes expiresIn/expiresAt; treat each URL as sensitive until it expires. Flow: s3_create_multipart_upload → s3_presign_upload_part → PUT each part to its URL (capture the ETag from each response header) → s3_complete_multipart_upload with those ETags. Parts except the last must be ≥5 MiB.",
+        "Generate short-lived presigned PUT URL bearer capabilities for parts of an S3-compatible multipart upload, so the client/worker uploads each part DIRECTLY to B2. Prefer this over s3_get_presigned_url for multipart uploads; use s3_get_presigned_url for single-object PUT/GET transfers. The response includes expiresIn/expiresAt; treat each URL as sensitive until it expires. Flow: s3_create_multipart_upload → s3_presign_upload_part → PUT each part to its URL (capture the ETag from each response header) → s3_complete_multipart_upload with those ETags. Parts except the last must be ≥5 MiB, and no part may exceed 5 GiB.",
       inputSchema: {
         bucket: z.string().describe("The bucket name."),
         key: z.string().describe("The object key."),
@@ -318,7 +326,7 @@ export function registerS3MultipartTools(
     "s3_upload_part_copy",
     {
       description:
-        "Copy a part from an existing B2 object into an in-progress S3-compatible multipart upload. Use this to efficiently assemble large objects from existing parts without re-uploading data.",
+        "Copy a byte range from an existing B2 object into a part of an in-progress S3-compatible multipart upload, without downloading or re-uploading the data. Requires the writeFiles capability on the destination and read access to the source object. The source must be a bucket reachable within the same B2 account and region as the destination; cross-account sources cannot be copied this way. Use this to assemble large objects from data already in B2; use s3_presign_upload_part instead when the client must upload new bytes. The copied part belongs to the upload created by s3_create_multipart_upload, so it obeys the 1–10000 part numbering, the ≥5 MiB minimum for every part except the last, and the 5 GiB per-part maximum. A missing or inaccessible source, or a range outside the source object, fails the part copy. Returns the part ETag to pass to s3_complete_multipart_upload.",
       inputSchema: {
         bucket: z.string().describe("The destination bucket name."),
         key: z.string().describe("The destination object key."),
@@ -333,12 +341,14 @@ export function registerS3MultipartTools(
           .string()
           .optional()
           .describe(
-            "Byte range to copy from the source, e.g. 'bytes=0-104857599' for the first 100MB.",
+            "Byte range to copy from the source, e.g. 'bytes=0-104857599' for the first 100 MiB; omit to copy the entire source object. The copied range must be ≥5 MiB unless this is the last part, and at most 5 GiB.",
           ),
         copySourceVersionId: z
           .string()
           .optional()
-          .describe("Version ID of the source object to copy from."),
+          .describe(
+            "Version ID of the source object to copy; set to copy that exact version, or omit to copy the current version.",
+          ),
       },
     },
     async (args) => {

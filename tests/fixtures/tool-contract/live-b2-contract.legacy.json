@@ -154,7 +154,7 @@
     },
     {
       "name": "b2_create_bucket",
-      "descriptionSha256": "dc3137d3190670a36187ff96ed34f03e7c3e84048927e595bf1aba68ee88fb0a",
+      "descriptionSha256": "0790047c3b422656820f636079092384e778c869e2c7acd4678899ff71de179d",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -1347,11 +1347,12 @@
     },
     {
       "name": "s3_create_multipart_upload",
-      "descriptionSha256": "6a2c69b510eab88f817fe26f68ea02c62bd1836cfb754dc007e9c6a2248ac735",
+      "descriptionSha256": "052a5d399969a8fca6d139fecba51255e743fb8d174c01c7595337e77cca72a6",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
           "acl": {
+            "description": "Accepted as a no-op S3 compatibility hint; B2 access follows the destination bucket policy.",
             "enum": ["private", "public-read"],
             "type": "string"
           },
@@ -1360,7 +1361,7 @@
             "type": "string"
           },
           "contentType": {
-            "description": "MIME type of the object.",
+            "description": "MIME type recorded on the final assembled object.",
             "type": "string"
           },
           "key": {
@@ -1371,7 +1372,7 @@
             "additionalProperties": {
               "type": "string"
             },
-            "description": "Custom metadata for the object.",
+            "description": "Custom metadata stored on the final object.",
             "propertyNames": {
               "type": "string"
             },
@@ -1810,7 +1811,7 @@
     },
     {
       "name": "s3_presign_upload_part",
-      "descriptionSha256": "1c71eda3d7bf682285e9ee338ae26c74230b6502803802b242bd2bd23829871a",
+      "descriptionSha256": "eabe3413f39a42c5a27aa7a425345fffdae2c1ab7b2d6e82e70af60ac743f601",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -2008,7 +2009,7 @@
     },
     {
       "name": "s3_upload_part_copy",
-      "descriptionSha256": "86b2bd390e25226f42a275c46f92842ec91bba00e968d89ccd4a20caf8b41f67",
+      "descriptionSha256": "d5f89a1a11b697169791d815e934b77369cce036c4d3532d1da4a1143a74d3cc",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -2021,11 +2022,11 @@
             "type": "string"
           },
           "copySourceRange": {
-            "description": "Byte range to copy from the source, e.g. 'bytes=0-104857599' for the first 100MB.",
+            "description": "Byte range to copy from the source, e.g. 'bytes=0-104857599' for the first 100 MiB; omit to copy the entire source object. The copied range must be ≥5 MiB unless this is the last part, and at most 5 GiB.",
             "type": "string"
           },
           "copySourceVersionId": {
-            "description": "Version ID of the source object to copy from.",
+            "description": "Version ID of the source object to copy; set to copy that exact version, or omit to copy the current version.",
             "type": "string"
           },
           "key": {
@@ -2058,5 +2059,5 @@
     "toolsListCacheHint": null,
     "discover": null
   },
-  "hash": "05def86bfd9c3c49dc3c8d994ec1f37a1570761b46d75ef9bff5bea46509fbdc"
+  "hash": "8fb1ad2c686e8ee02090b10d2fb4cf31f1b8537c26e3aa72621a41d88e77f89d"
 }

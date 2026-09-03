@@ -725,7 +725,7 @@ export function registerBucketTools(
     "b2_create_bucket",
     {
       description:
-        "Create a persistent B2 bucket with optional metadata, CORS, lifecycle, default encryption, and Object Lock enablement. Use for initial provisioning with a key that has writeBuckets; use b2_update_bucket for later settings changes and s3_head_bucket to check S3 reachability. Bucket names are globally unique, case-insensitive, 6-63 characters, letters/digits/hyphens/periods, and cannot start with 'b2-', begin/end with a period, contain '..', or look like an IPv4 address.",
+        "Create a persistent B2 bucket with optional metadata, CORS, lifecycle, default encryption, and Object Lock enablement. Use for initial provisioning with a key that has writeBuckets; use b2_update_bucket for later settings changes and s3_head_bucket to check S3 reachability. Bucket names are globally unique, case-insensitive, 6-63 characters, letters/digits/hyphens/periods, and cannot start with 'b2-', begin/end with a period, contain '..', or look like an IPv4 address. Because names are unique across all of B2, requesting a name already in use (by this or any other account) fails with a duplicate-name error instead of returning the existing bucket; reuse the existing bucket only if it belongs to your own account, otherwise choose a different globally unique name.",
       inputSchema: {
         bucketName: z
           .string()

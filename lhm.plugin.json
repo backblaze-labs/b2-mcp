@@ -25,7 +25,7 @@
     },
     {
       "name": "b2_create_bucket",
-      "description": "Create a persistent B2 bucket with optional metadata, CORS, lifecycle, default encryption, and Object Lock enablement. Use for initial provisioning with a key that has writeBuckets; use b2_update_bucket for later settings changes and s3_head_bucket to check S3 reachability. Bucket names are globally unique, case-insensitive, 6-63 characters, letters/digits/hyphens/periods, and cannot start with 'b2-', begin/end with a period, contain '..', or look like an IPv4 address.",
+      "description": "Create a persistent B2 bucket with optional metadata, CORS, lifecycle, default encryption, and Object Lock enablement. Use for initial provisioning with a key that has writeBuckets; use b2_update_bucket for later settings changes and s3_head_bucket to check S3 reachability. Bucket names are globally unique, case-insensitive, 6-63 characters, letters/digits/hyphens/periods, and cannot start with 'b2-', begin/end with a period, contain '..', or look like an IPv4 address. Because names are unique across all of B2, requesting a name already in use (by this or any other account) fails with a duplicate-name error instead of returning the existing bucket; reuse the existing bucket only if it belongs to your own account, otherwise choose a different globally unique name.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -638,7 +638,7 @@
     },
     {
       "name": "b2_reserve_trial_create_account",
-      "description": "Reserve a B2 trial account through the Partner API. Available only in explicit inline mode because Reserve Trial has no provider-side recovery path if a file sink write fails after account creation.",
+      "description": "Reserve and create a B2 Reserve trial account through the Partner API, returning a durable application key for the new account. Requires a Partner-entitled master key, and is a billable, irreversible account creation governed by the destructive-operation gate. Available only in explicit inline secret-sink mode because Reserve Trial has no provider-side recovery path if a file-sink write fails after account creation; the minted key is shown once, so capture it. Retries are not deduplicated server-side, so repeating the call can create another account regardless of idempotencyKey; verify whether the account already exists and reconcile before retrying. Use b2_create_group_member to add an account to an existing Partner group instead of provisioning a standalone trial.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -650,7 +650,7 @@
             "description": "Email address for the new B2 Reserve trial account."
           },
           "region": {
-            "description": "Optional data region for the new account.",
+            "description": "Optional data region for the new account; omit to use the Partner default.",
             "anyOf": [
               {
                 "type": "string",
@@ -676,7 +676,7 @@
           "idempotencyKey": {
             "type": "string",
             "minLength": 1,
-            "description": "Caller-generated idempotency key. Reuse the same value only when retrying the identical reserve-trial account creation request."
+            "description": "Caller-generated idempotency key recorded with the request. Note: in inline mode retries are not deduplicated server-side, so reconcile before retrying rather than relying on this key to prevent a duplicate account."
           },
           "confirm": {
             "description": "Fallback confirmation for this destructive/irreversible operation when the effective server destructive policy is 'confirm' and MCP elicitation cannot run.",
@@ -1376,7 +1376,7 @@
     },
     {
       "name": "s3_create_multipart_upload",
-      "description": "Initiate an S3-compatible multipart upload for a large file in B2. Returns an UploadId to use with s3_presign_upload_part, which mints per-part URLs the client uploads directly to B2.",
+      "description": "Initiate an S3-compatible multipart upload for a large object in B2 and return an UploadId. Requires the writeFiles capability. This starts an unfinished large-file upload that accrues storage for each uploaded part until you finalize with s3_complete_multipart_upload or discard it with s3_abort_multipart_upload; use s3_list_multipart_uploads to enumerate abandoned uploads, or b2_unfinished_uploads for storage-cost analysis of a selected bucket. Initiating the upload does not reserve or lock the destination key, so concurrent writes may still target it. Use s3_put_object only for tiny (≤1 MiB) inline payloads; prefer a single-object presigned PUT (s3_get_presigned_url) for most single-object transfers, including large ones; use multipart when an object is uploaded or copied as parallel parts. Flow: s3_create_multipart_upload → s3_presign_upload_part → PUT each part directly to B2 (capture each ETag) → s3_complete_multipart_upload with those ETags. Parts are numbered 1–10000 and every part except the last must be ≥5 MiB, and no part may exceed 5 GiB.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -1390,11 +1390,11 @@
             "description": "The object key for the final assembled file."
           },
           "contentType": {
-            "description": "MIME type of the object.",
+            "description": "MIME type recorded on the final assembled object.",
             "type": "string"
           },
           "metadata": {
-            "description": "Custom metadata for the object.",
+            "description": "Custom metadata stored on the final object.",
             "type": "object",
             "propertyNames": {
               "type": "string"
@@ -1405,7 +1405,8 @@
           },
           "acl": {
             "type": "string",
-            "enum": ["private", "public-read"]
+            "enum": ["private", "public-read"],
+            "description": "Accepted as a no-op S3 compatibility hint; B2 access follows the destination bucket policy."
           },
           "serverSideEncryption": {
             "description": "Server-side encryption. B2 supports SSE-B2 (AES256) only — not SSE-KMS.",
@@ -1839,7 +1840,7 @@
     },
     {
       "name": "s3_presign_upload_part",
-      "description": "Generate short-lived presigned PUT URL bearer capabilities for parts of an S3-compatible multipart upload, so the client/worker uploads each part DIRECTLY to B2. Prefer this over s3_get_presigned_url for multipart uploads; use s3_get_presigned_url for single-object PUT/GET transfers. The response includes expiresIn/expiresAt; treat each URL as sensitive until it expires. Flow: s3_create_multipart_upload → s3_presign_upload_part → PUT each part to its URL (capture the ETag from each response header) → s3_complete_multipart_upload with those ETags. Parts except the last must be ≥5 MiB.",
+      "description": "Generate short-lived presigned PUT URL bearer capabilities for parts of an S3-compatible multipart upload, so the client/worker uploads each part DIRECTLY to B2. Prefer this over s3_get_presigned_url for multipart uploads; use s3_get_presigned_url for single-object PUT/GET transfers. The response includes expiresIn/expiresAt; treat each URL as sensitive until it expires. Flow: s3_create_multipart_upload → s3_presign_upload_part → PUT each part to its URL (capture the ETag from each response header) → s3_complete_multipart_upload with those ETags. Parts except the last must be ≥5 MiB, and no part may exceed 5 GiB.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -2037,7 +2038,7 @@
     },
     {
       "name": "s3_upload_part_copy",
-      "description": "Copy a part from an existing B2 object into an in-progress S3-compatible multipart upload. Use this to efficiently assemble large objects from existing parts without re-uploading data.",
+      "description": "Copy a byte range from an existing B2 object into a part of an in-progress S3-compatible multipart upload, without downloading or re-uploading the data. Requires the writeFiles capability on the destination and read access to the source object. The source must be a bucket reachable within the same B2 account and region as the destination; cross-account sources cannot be copied this way. Use this to assemble large objects from data already in B2; use s3_presign_upload_part instead when the client must upload new bytes. The copied part belongs to the upload created by s3_create_multipart_upload, so it obeys the 1–10000 part numbering, the ≥5 MiB minimum for every part except the last, and the 5 GiB per-part maximum. A missing or inaccessible source, or a range outside the source object, fails the part copy. Returns the part ETag to pass to s3_complete_multipart_upload.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -2065,11 +2066,11 @@
             "description": "The source object in 'bucket/key' format, e.g. 'my-bucket/path/to/file.dat'. URL-encode special characters in the key."
           },
           "copySourceRange": {
-            "description": "Byte range to copy from the source, e.g. 'bytes=0-104857599' for the first 100MB.",
+            "description": "Byte range to copy from the source, e.g. 'bytes=0-104857599' for the first 100 MiB; omit to copy the entire source object. The copied range must be ≥5 MiB unless this is the last part, and at most 5 GiB.",
             "type": "string"
           },
           "copySourceVersionId": {
-            "description": "Version ID of the source object to copy from.",
+            "description": "Version ID of the source object to copy; set to copy that exact version, or omit to copy the current version.",
             "type": "string"
           }
         },
