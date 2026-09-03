@@ -757,7 +757,18 @@ function validateMutablePackageLaunchers(file, text, startLine) {
   for (const { line, text: logicalLine } of foldShellContinuations(text)) {
     const lineNumber = startLine + line - 1;
     if (isGlobalNpmInstallLine(logicalLine)) {
-      for (const spec of globalNpmInstallPackageSpecs(logicalLine)) {
+      const globalSpecs = globalNpmInstallPackageSpecs(logicalLine);
+      // Fail closed when no package operand parses (bare `npm install -g`, or a
+      // URL/file operand `parsePackageSpec` rejects). Without this the loop is a
+      // no-op and the off-policy install passes unchecked.
+      if (globalSpecs.length === 0) {
+        addFinding(
+          file,
+          lineNumber,
+          `global npm install examples must install a pinned ${pkg.name} package spec`,
+        );
+      }
+      for (const spec of globalSpecs) {
         if (spec.name !== pkg.name) {
           addFinding(
             file,

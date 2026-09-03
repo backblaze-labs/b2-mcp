@@ -162,6 +162,19 @@ describe("documentation example validator policy", () => {
     expect(result.stderr).toContain("global npm install examples");
   });
 
+  it("rejects a global npm install with no parseable package operand", () => {
+    const readme = read("README.md").replace(
+      "npm install -g @backblaze-labs/b2-mcp@0.2.0",
+      "npm install -g",
+    );
+    const expectedLine = lineOf(readme, "npm install -g");
+    const result = runDocExamplesWithOverrides({ "README.md": readme });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(`README.md:${expectedLine}`);
+    expect(result.stderr).toContain("must install a pinned");
+  });
+
   it("rejects unscoped global npm install package operands", () => {
     const readme = read("README.md").replace(
       "npm install -g @backblaze-labs/b2-mcp@0.2.0",
