@@ -27,21 +27,51 @@ const outFile = path.join(outDir, "b2-mcp.mcpb");
 const FIXED_DOS_TIME = 0x0000;
 const FIXED_DOS_DATE = 0x0021;
 
+// Named byte offsets into the ZIP records we touch, per the PKWARE APPNOTE
+// (.ZIP File Format Specification). Naming each field keeps the offset→field
+// mapping readable without holding the spec open, and makes a mistranscribed
+// addend obvious at the read site instead of silently corrupting the archive.
+const ZIP = {
+  EOCD_SIGNATURE: 0x06054b50,
+  CENTRAL_SIGNATURE: 0x02014b50,
+  LOCAL_SIGNATURE: 0x04034b50,
+  ZIP64_SENTINEL: 0xffffffff,
+  // End Of Central Directory record.
+  EOCD_MIN_SIZE: 22,
+  EOCD_ENTRY_COUNT: 10, // total central-directory records (2 bytes)
+  EOCD_CENTRAL_OFFSET: 16, // offset of first central-directory header (4 bytes)
+  EOCD_COMMENT_LENGTH: 20, // archive comment length (2 bytes)
+  // Central-directory file header.
+  CENTRAL_HEADER_SIZE: 46, // fixed-size prefix before name/extra/comment
+  CENTRAL_MODTIME: 12, // last-mod file time (2 bytes)
+  CENTRAL_MODDATE: 14, // last-mod file date (2 bytes)
+  CENTRAL_NAME_LENGTH: 28, // file-name length (2 bytes)
+  CENTRAL_EXTRA_LENGTH: 30, // extra-field length (2 bytes)
+  CENTRAL_COMMENT_LENGTH: 32, // file-comment length (2 bytes)
+  CENTRAL_LOCAL_OFFSET: 42, // offset of matching local header (4 bytes)
+  // Local file header.
+  LOCAL_MODTIME: 10, // last-mod file time (2 bytes)
+  LOCAL_MODDATE: 12, // last-mod file date (2 bytes)
+};
+
 /**
  * Rewrite every local-file-header and central-directory-header timestamp in a
  * zip buffer to a fixed value, so packing identical inputs yields identical
  * bytes. Parses the archive from its End Of Central Directory record rather than
  * scanning for signatures, so byte sequences inside compressed data are never
  * mistaken for headers.
+ *
+ * The mcpb packer emits a plain, single-disk, comment-less zip well under the
+ * 4 GiB ZIP64 threshold, so this normalizer assumes that shape and fails loud if
+ * an input ever violates it — a non-zero archive comment (which could contain a
+ * spurious EOCD signature and defeat the backward scan) or a ZIP64 sentinel
+ * central-directory offset (which would make the offset field unreadable as a
+ * plain 32-bit value). It never silently corrupts bytes.
  */
 function normalizeZipTimestamps(buffer) {
-  const EOCD_SIGNATURE = 0x06054b50;
-  const CENTRAL_SIGNATURE = 0x02014b50;
-  const LOCAL_SIGNATURE = 0x04034b50;
-
   let eocd = -1;
-  for (let offset = buffer.length - 22; offset >= 0; offset -= 1) {
-    if (buffer.readUInt32LE(offset) === EOCD_SIGNATURE) {
+  for (let offset = buffer.length - ZIP.EOCD_MIN_SIZE; offset >= 0; offset -= 1) {
+    if (buffer.readUInt32LE(offset) === ZIP.EOCD_SIGNATURE) {
       eocd = offset;
       break;
     }
@@ -49,27 +79,35 @@ function normalizeZipTimestamps(buffer) {
   if (eocd < 0) {
     throw new Error("build-mcpb: could not locate zip End Of Central Directory record");
   }
+  if (buffer.readUInt16LE(eocd + ZIP.EOCD_COMMENT_LENGTH) !== 0) {
+    throw new Error(
+      "build-mcpb: refusing to normalize a zip with an archive comment (EOCD scan is ambiguous)",
+    );
+  }
 
-  const entryCount = buffer.readUInt16LE(eocd + 10);
-  let central = buffer.readUInt32LE(eocd + 16);
+  const entryCount = buffer.readUInt16LE(eocd + ZIP.EOCD_ENTRY_COUNT);
+  let central = buffer.readUInt32LE(eocd + ZIP.EOCD_CENTRAL_OFFSET);
+  if (central === ZIP.ZIP64_SENTINEL) {
+    throw new Error("build-mcpb: ZIP64 archives are not supported by the timestamp normalizer");
+  }
   for (let index = 0; index < entryCount; index += 1) {
-    if (buffer.readUInt32LE(central) !== CENTRAL_SIGNATURE) {
+    if (buffer.readUInt32LE(central) !== ZIP.CENTRAL_SIGNATURE) {
       throw new Error(`build-mcpb: malformed central directory header at offset ${central}`);
     }
-    buffer.writeUInt16LE(FIXED_DOS_TIME, central + 12);
-    buffer.writeUInt16LE(FIXED_DOS_DATE, central + 14);
+    buffer.writeUInt16LE(FIXED_DOS_TIME, central + ZIP.CENTRAL_MODTIME);
+    buffer.writeUInt16LE(FIXED_DOS_DATE, central + ZIP.CENTRAL_MODDATE);
 
-    const localOffset = buffer.readUInt32LE(central + 42);
-    if (buffer.readUInt32LE(localOffset) !== LOCAL_SIGNATURE) {
+    const localOffset = buffer.readUInt32LE(central + ZIP.CENTRAL_LOCAL_OFFSET);
+    if (buffer.readUInt32LE(localOffset) !== ZIP.LOCAL_SIGNATURE) {
       throw new Error(`build-mcpb: malformed local file header at offset ${localOffset}`);
     }
-    buffer.writeUInt16LE(FIXED_DOS_TIME, localOffset + 10);
-    buffer.writeUInt16LE(FIXED_DOS_DATE, localOffset + 12);
+    buffer.writeUInt16LE(FIXED_DOS_TIME, localOffset + ZIP.LOCAL_MODTIME);
+    buffer.writeUInt16LE(FIXED_DOS_DATE, localOffset + ZIP.LOCAL_MODDATE);
 
-    const fileNameLength = buffer.readUInt16LE(central + 28);
-    const extraLength = buffer.readUInt16LE(central + 30);
-    const commentLength = buffer.readUInt16LE(central + 32);
-    central += 46 + fileNameLength + extraLength + commentLength;
+    const fileNameLength = buffer.readUInt16LE(central + ZIP.CENTRAL_NAME_LENGTH);
+    const extraLength = buffer.readUInt16LE(central + ZIP.CENTRAL_EXTRA_LENGTH);
+    const commentLength = buffer.readUInt16LE(central + ZIP.CENTRAL_COMMENT_LENGTH);
+    central += ZIP.CENTRAL_HEADER_SIZE + fileNameLength + extraLength + commentLength;
   }
 
   return buffer;

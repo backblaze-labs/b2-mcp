@@ -71,6 +71,7 @@ MCPB
 mcpmarket
 noout
 paginators
+PKWARE
 punkpeye
 sessionful
 Smithery
