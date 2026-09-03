@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
 const { parseJsoncObject } = require("./lib/local-import-graph.cjs");
+const semver = require("semver");
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const textOverrides = loadTextOverrides();
@@ -735,22 +736,32 @@ function validateMutablePackageLaunchers(file, text, startLine) {
   const lines = text.split(/\r?\n/);
   lines.forEach((line, index) => {
     const lineNumber = startLine + index;
+    if (isGlobalNpmInstallLine(line)) {
+      for (const spec of globalNpmInstallPackageSpecs(line)) {
+        if (spec.name !== pkg.name) {
+          addFinding(
+            file,
+            lineNumber,
+            `global npm install examples must install ${pkg.name}, got ${spec.name}`,
+          );
+          continue;
+        }
+        if (!isExactPackageVersion(spec.version)) {
+          addFinding(
+            file,
+            lineNumber,
+            "global npm install examples in release docs must pin an exact version",
+          );
+        }
+      }
+      return;
+    }
+
     const specs = packageSpecsInText(line).filter((spec) => spec.name === pkg.name);
     if (specs.length === 0) return;
 
     if (isExecutablePackageLine(line) && specs.some((spec) => spec.version === "latest")) {
       addFinding(file, lineNumber, "must not execute @latest package examples in release docs");
-    }
-
-    if (isGlobalNpmInstallLine(line)) {
-      const mutableSpec = specs.find((spec) => !spec.version || spec.version === "latest");
-      if (mutableSpec) {
-        addFinding(
-          file,
-          lineNumber,
-          "global npm install examples in release docs must pin an explicit version",
-        );
-      }
     }
   });
 }
@@ -791,6 +802,19 @@ function packageSpecsInText(text) {
   return [...text.matchAll(packagePattern)]
     .map((match) => parsePackageSpec(match[0]))
     .filter(Boolean);
+}
+
+function globalNpmInstallPackageSpecs(line) {
+  const match = line.match(/\bnpm\s+(?:install|i)\b(?<args>[^`\n]*)/);
+  const args = match?.groups?.args;
+  if (!args) return [];
+  return [...args.matchAll(/@[a-z0-9._-]+\/[a-z0-9._-]+(?:@[^\s`"',\]]+)?/g)]
+    .map((match) => parsePackageSpec(match[0]))
+    .filter(Boolean);
+}
+
+function isExactPackageVersion(version) {
+  return typeof version === "string" && semver.valid(version) !== null;
 }
 
 function validateCliBinaryReferences(file, text, startLine) {

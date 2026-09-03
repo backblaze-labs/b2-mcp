@@ -182,14 +182,14 @@ Fully quit the affected MCP client first. If the npm error includes a path like
 macOS/Linux:
 
 ```bash
-rm -rf ~/.npm/_npx/<hash-from-error>
+rm -rf ~/.npm/_npx/HASH_FROM_ERROR
 ```
 
 Windows PowerShell:
 
 ```text
 $npxCache = Join-Path ((npm config get cache).Trim()) "_npx"
-Remove-Item -Recurse -Force (Join-Path $npxCache "<hash-from-error>") -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force (Join-Path $npxCache "HASH_FROM_ERROR") -ErrorAction SilentlyContinue
 ```
 
 Then reopen the client. If the error does not show a hash, or if the targeted
@@ -294,8 +294,9 @@ Windows PowerShell:
 Get-Content -Path "$env:APPDATA\Claude\logs\mcp-server-backblaze-b2.log" -Tail 20 -Wait
 ```
 
-For clients that hide child-process stderr, configure `B2_LOG_FILE` as described
-in [Logging](#logging). The MCP project's
+On POSIX systems, configure `B2_LOG_FILE` as described in [Logging](#logging)
+when a client hides child-process stderr. On Windows, use the Claude Desktop log
+file above because `B2_LOG_FILE` is currently POSIX-only. The MCP project's
 [debugging guide](https://modelcontextprotocol.io/docs/2026-07-28/tools/debugging)
 has broader client-side troubleshooting notes.
 

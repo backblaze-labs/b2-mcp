@@ -91,6 +91,36 @@ describe("documentation example validator policy", () => {
     expect(result.stderr).toContain("global npm install examples");
   });
 
+  it("rejects global npm installs that drift to another package", () => {
+    const readme = read("README.md").replace(
+      "npm install -g @backblaze-labs/b2-mcp@0.2.0",
+      "npm install -g @attacker/b2-mcp@0.2.0",
+    );
+    const expectedLine = lineOf(readme, "npm install -g @attacker/b2-mcp@0.2.0");
+    const result = runDocExamplesWithOverrides({ "README.md": readme });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(`README.md:${expectedLine}`);
+    expect(result.stderr).toContain("global npm install examples must install");
+  });
+
+  it.each(["next", "^0.2.0", "0.x"])(
+    "rejects mutable global npm install spec @%s in release docs",
+    (version) => {
+      const command = `npm install -g @backblaze-labs/b2-mcp@${version}`;
+      const readme = read("README.md").replace(
+        "npm install -g @backblaze-labs/b2-mcp@0.2.0",
+        command,
+      );
+      const expectedLine = lineOf(readme, command);
+      const result = runDocExamplesWithOverrides({ "README.md": readme });
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(`README.md:${expectedLine}`);
+      expect(result.stderr).toContain("must pin an exact version");
+    },
+  );
+
   it("rejects broad MCP log wildcards without adjacent redaction guidance", () => {
     const redactionText =
       "Before sharing any log excerpt, redact B2 key IDs and secrets, Authorization\n" +
