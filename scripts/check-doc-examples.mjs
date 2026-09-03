@@ -748,11 +748,16 @@ function validatePackageNameReferences(file, text, startLine) {
 }
 
 function validateMutablePackageLaunchers(file, text, startLine) {
-  const lines = text.split(/\r?\n/);
-  lines.forEach((line, index) => {
-    const lineNumber = startLine + index;
-    if (isGlobalNpmInstallLine(line)) {
-      for (const spec of globalNpmInstallPackageSpecs(line)) {
+  // Fold backslash-continued shell commands into one logical command before
+  // applying the policy. Splitting on physical lines let a continuation such as
+  // `npx -y \` + `@backblaze-labs/b2-mcp@latest --version` (or a continued
+  // `npm install -g \` + package operand) place the launcher and the package
+  // spec on different lines, so neither line tripped the check. The reported
+  // line stays the first physical line for diagnostics.
+  for (const { line, text: logicalLine } of foldShellContinuations(text)) {
+    const lineNumber = startLine + line - 1;
+    if (isGlobalNpmInstallLine(logicalLine)) {
+      for (const spec of globalNpmInstallPackageSpecs(logicalLine)) {
         if (spec.name !== pkg.name) {
           addFinding(
             file,
@@ -771,11 +776,11 @@ function validateMutablePackageLaunchers(file, text, startLine) {
       }
     }
 
-    const specs = packageSpecsInText(line).filter((spec) => spec.name === pkg.name);
-    if (specs.length === 0) return;
+    const specs = packageSpecsInText(logicalLine).filter((spec) => spec.name === pkg.name);
+    if (specs.length === 0) continue;
 
     if (
-      isExecutablePackageLine(line) &&
+      isExecutablePackageLine(logicalLine) &&
       specs.some((spec) => spec.version !== null && !isExactPackageVersion(spec.version))
     ) {
       addFinding(
@@ -784,7 +789,28 @@ function validateMutablePackageLaunchers(file, text, startLine) {
         "must not execute mutable-versioned package examples in release docs",
       );
     }
+  }
+}
+
+function foldShellContinuations(text) {
+  const physical = text.split(/\r?\n/);
+  const logical = [];
+  let current = null;
+  physical.forEach((raw, index) => {
+    const continued = /\\\s*$/.test(raw);
+    const stripped = continued ? raw.replace(/\\\s*$/, "") : raw;
+    if (current) {
+      current.text += ` ${stripped}`;
+    } else {
+      current = { line: index + 1, text: stripped };
+    }
+    if (!continued) {
+      logical.push(current);
+      current = null;
+    }
   });
+  if (current) logical.push(current);
+  return logical;
 }
 
 function validateMcpLogWildcardRedaction(file, text, startLine) {

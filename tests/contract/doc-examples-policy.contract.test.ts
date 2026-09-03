@@ -108,6 +108,32 @@ describe("documentation example validator policy", () => {
     },
   );
 
+  it("rejects a backslash-continued executable mutable spec across lines", () => {
+    const readme = read("README.md").replace(
+      "npx -y @backblaze-labs/b2-mcp@0.2.0 --version",
+      "npx -y \\\n@backblaze-labs/b2-mcp@latest --version",
+    );
+    const expectedLine = lineOf(readme, "npx -y \\");
+    const result = runDocExamplesWithOverrides({ "README.md": readme });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(`README.md:${expectedLine}`);
+    expect(result.stderr).toContain("must not execute mutable-versioned package examples");
+  });
+
+  it("rejects a backslash-continued global npm install that drifts to another package", () => {
+    const readme = read("README.md").replace(
+      "npm install -g @backblaze-labs/b2-mcp@0.2.0",
+      "npm install -g \\\n@attacker/b2-mcp@0.2.0",
+    );
+    const expectedLine = lineOf(readme, "npm install -g \\");
+    const result = runDocExamplesWithOverrides({ "README.md": readme });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(`README.md:${expectedLine}`);
+    expect(result.stderr).toContain("global npm install examples must install");
+  });
+
   it("rejects executable @latest after global npm install on the same line", () => {
     const command =
       "npm install -g @backblaze-labs/b2-mcp@0.2.0 && npx -y @backblaze-labs/b2-mcp@latest --version";
