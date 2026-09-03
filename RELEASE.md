@@ -241,11 +241,12 @@ exists. For the first public package only:
    ```
 7. After npm/GHCR/GitHub Release succeed, run the per-release directory actions
    in [`docs/references/discoverability.md`](docs/references/discoverability.md) ("On every release"):
-   submit the `.mcpb` bundle — already built and attached to the GitHub Release
-   by `Publish Package` — through Smithery's Local publish tab, refresh the
-   LobeHub listing (`lhm plugin update`), and cut a new Glama release. These are
-   manual and are not part of `Publish Package`, so skipping them leaves the
-   directory listings advertising the prior version.
+   the `.mcpb` bundle is already built and attached to the GitHub Release by
+   `Publish Package` (the Claude Connectors Directory submission consumes it),
+   refresh the LobeHub listing (`lhm plugin update`), and cut a new Glama release.
+   These are manual and are not part of `Publish Package`, so skipping them leaves
+   the directory listings advertising the prior version. (Smithery is deferred —
+   see [Smithery (deferred)](docs/references/discoverability.md#smithery-deferred).)
 
 ## Build Version and Release Channel
 

@@ -27,10 +27,10 @@ directories de-duplicate community forks under the official entry.
 | File | Directory | Notes |
 | --- | --- | --- |
 | `server.json` | Official MCP Registry | Version synced by `scripts/update-server-json-version.mjs` at release cut. Schema `2025-12-11` has no privacy-policy field, so the registry entry relies on `websiteUrl`, README, and the hosted privacy page. |
-| `smithery.yaml` | Smithery | stdio one-click config; credential fields masked as `password`. |
+| `smithery.yaml` | Smithery (deferred) | stdio one-click config; credential fields masked as `password`. Retained but not on the roadmap — see [Smithery (deferred)](#smithery-deferred). |
 | `glama.json` | Glama | `maintainers` list gates the org claim. Read from the default branch. |
 | `lhm.plugin.json` | LobeHub | Owner declaration used by `lhm plugin update`; regenerate on release. |
-| `mcpb/manifest.json` | Smithery (Local/MCPB) | MCPB 0.3 manifest with `privacy_policies`; packed to a reproducible `.mcpb` bundle (`pnpm run build:mcpb`), attached to every GitHub Release (checksummed in `SHA256SUMS`), and uploaded via Smithery's Local publish tab. |
+| `mcpb/manifest.json` | Claude Connectors Directory / GitHub Release | MCPB 0.3 manifest with `privacy_policies`; packed to a reproducible `.mcpb` bundle (`pnpm run build:mcpb`), attached to every GitHub Release (checksummed in `SHA256SUMS`). Consumed by the Claude Connectors Directory submission ([#385](https://github.com/backblaze-labs/b2-mcp/issues/385)). |
 
 The canonical registry description lives in
 `scripts/lib/mcp-registry-manifest.mjs` (`mcpRegistryDescription`) and is
@@ -151,7 +151,7 @@ automatically; the rest need a submission or claim. Full status lives in
 - mcp.so — submitted (`mcp.so/servers/backblaze-b2-mcp-server`).
 - MCP Market — live, auto-crawled from the registry (`mcpmarket.com/server/backblaze-b2`).
 - Glama — claim + release (above).
-- Smithery — submit repo (`smithery.yaml` / MCPB bundle).
+- Smithery — deferred, not on the roadmap. See [Smithery (deferred)](#smithery-deferred).
 - LobeHub — claim + `lhm plugin update` (above).
 - PulseMCP — crawls the registry; verify, submit if absent.
 - Cline MCP Marketplace, Docker MCP Catalog, OpenTools, Fleur — submit.
@@ -170,43 +170,59 @@ automatically; the rest need a submission or claim. Full status lives in
   `Backblaze B2 MCP server`.
 - A featured card on backblazelabs.com with the display name and description.
 
-## Smithery (MCPB bundle)
+## MCPB desktop-extension bundle
 
-Smithery's publish flow at [smithery.ai/new](https://smithery.ai/new) has two
-tabs. The **URL** tab is for a remote server you host at a public HTTPS endpoint
-(Streamable HTTP + OAuth) — not us, since b2-mcp runs locally per user with the
-user's own B2 keys. Use the **Local (MCPB Bundle)** tab instead.
+The `.mcpb` desktop-extension bundle is the local-stdio artifact directories
+consume — primarily the Claude Connectors Directory submission
+([#385](https://github.com/backblaze-labs/b2-mcp/issues/385)). It is built and
+attached to every GitHub Release automatically.
 
-1. Grab the bundle from the GitHub Release. `Publish Package` builds
-   `dist-mcpb/b2-mcp.mcpb` (`pnpm run build:mcpb`), records its SHA-256 in the
-   release `SHA256SUMS`, and attaches it to the release assets on every release,
-   so no manual build is needed — download `b2-mcp.mcpb` from the release. (To
-   rebuild locally for inspection, run `pnpm run build:mcpb`.) The bundle packs
-   `mcpb/manifest.json`, which runs `npx -y @backblaze-labs/b2-mcp@<version>` and
-   prompts for the B2 credentials. Both the manifest version and the pinned npx
-   launcher version are kept in lockstep with `package.json` by
-   `scripts/update-server-json-version.mjs`, and `scripts/build-mcpb.mjs`
-   normalizes the archive timestamps, so the advertised bundle is byte-for-byte
-   reproducible.
+`Publish Package` builds `dist-mcpb/b2-mcp.mcpb` (`pnpm run build:mcpb`), records
+its SHA-256 in the release `SHA256SUMS`, and attaches it to the release assets on
+every release, so no manual build is needed — download `b2-mcp.mcpb` from the
+release. (To rebuild locally for inspection, run `pnpm run build:mcpb`.) The
+bundle packs `mcpb/manifest.json`, which runs `npx -y @backblaze-labs/b2-mcp@<version>`
+and prompts for the B2 credentials. Both the manifest version and the pinned npx
+launcher version are kept in lockstep with `package.json` by
+`scripts/update-server-json-version.mjs`, and `scripts/build-mcpb.mjs` normalizes
+the archive timestamps, so the advertised bundle is byte-for-byte reproducible.
 
-   > **Scope of the `.mcpb` checksum.** The bundle contains only
-   > `mcpb/manifest.json` — a launcher that runs `npx -y @backblaze-labs/b2-mcp@<version>`.
-   > The reproducible SHA-256 therefore attests to the *launcher manifest*, not
-   > to the server code, which npx resolves from npm at runtime by version tag
-   > (no integrity/provenance pin). It is not an end-to-end supply-chain
-   > guarantee over the executed code; assurance for the npm package itself comes
-   > from the npm publish pipeline (`publish.yml`), not from this digest.
-2. On [smithery.ai/new](https://smithery.ai/new), pick the **Local (MCPB
-   Bundle)** tab, namespace `backblaze-labs`, server id `b2-mcp`, and upload the
-   `.mcpb`. (The legacy `smithery.yaml` is retained for older tooling.)
+> **Scope of the `.mcpb` checksum.** The bundle contains only
+> `mcpb/manifest.json` — a launcher that runs `npx -y @backblaze-labs/b2-mcp@<version>`.
+> The reproducible SHA-256 therefore attests to the *launcher manifest*, not
+> to the server code, which npx resolves from npm at runtime by version tag
+> (no integrity/provenance pin). It is not an end-to-end supply-chain
+> guarantee over the executed code; assurance for the npm package itself comes
+> from the npm publish pipeline (`publish.yml`), not from this digest.
+
+## Smithery (deferred)
+
+Smithery is **not on the current roadmap.** Its publish flow at
+[smithery.ai/new](https://smithery.ai/new) has two tabs, and neither is a good
+fit today:
+
+- The **URL** tab expects a remote server hosted at a public HTTPS endpoint
+  (Streamable HTTP + OAuth). b2-mcp intentionally has no hosted, multi-tenant
+  endpoint — it runs locally per user with the user's own B2 keys — so this tab
+  does not apply (same reason [#359](https://github.com/backblaze-labs/b2-mcp/issues/359)
+  was closed).
+- The **Local (MCPB Bundle)** tab could accept `dist-mcpb/b2-mcp.mcpb`, but that
+  overlaps the Claude Connectors Directory path we already prioritize, so it is
+  not maintained as a parallel channel.
+
+Revisit if Backblaze ever operates a self-hosted, OAuth-authenticated MCP
+endpoint — at that point the Smithery **URL** listing becomes the natural, richer
+integration. `smithery.yaml` is retained in the repo (and kept in sync by the
+release-scripts contract) so a future submission needs no rebuild.
 
 ## On every release
 
 1. Bump + `scripts/update-server-json-version.mjs` (syncs `server.json`,
    `lhm.plugin.json`, and `mcpb/manifest.json` versions).
 2. `Publish Package` builds `b2-mcp.mcpb`, checksums it into `SHA256SUMS`, and
-   attaches it to the GitHub Release automatically. Download that asset and
-   upload/publish it to Smithery (no local `pnpm run build:mcpb` required).
+   attaches it to the GitHub Release automatically (no local `pnpm run build:mcpb`
+   required). That release asset is what the Claude Connectors Directory
+   submission ([#385](https://github.com/backblaze-labs/b2-mcp/issues/385)) consumes.
 3. Regenerate `lhm.plugin.json` and `lhm plugin update`.
 4. Cut a new Glama release (rerun the Dockerfile deploy → Make Release).
 5. Confirm the registry badge shows the new version.

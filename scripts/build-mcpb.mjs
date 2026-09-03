@@ -5,9 +5,9 @@
  * The bundle is a versioned release artifact — its `version` must match
  * `package.json` (kept in lockstep by `scripts/update-server-json-version.mjs`).
  * The output `.mcpb` is produced on every release by `publish.yml`, attached to
- * the GitHub Release, and recorded in the release `SHA256SUMS`. It is also the
- * artifact a maintainer uploads through Smithery's Local (MCPB Bundle) publish
- * tab. See docs/references/discoverability.md.
+ * the GitHub Release, and recorded in the release `SHA256SUMS`. It is the
+ * local-stdio artifact the Claude Connectors Directory submission consumes.
+ * See docs/references/discoverability.md.
  *
  * The packer stamps each zip entry with the current wall-clock time and the
  * build host's system/permission metadata, which would make the `.mcpb` bytes

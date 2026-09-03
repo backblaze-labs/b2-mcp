@@ -117,7 +117,6 @@ describe("README project badges", () => {
     // server path (which both the image and the link URL share). Guard the exact
     // score-image target so reverting it away from /badges/score.svg fails CI.
     expect(readme).toContain("glama.ai/mcp/servers/@backblaze-labs/b2-mcp/badges/score.svg");
-    expect(readme).toContain("smithery.ai/server/@backblaze-labs/b2-mcp");
     // The LobeHub badge must keep both its shields image and its deterministic
     // per-server listing URL, so dropping either fails CI rather than silently
     // shipping a broken/absent badge.
