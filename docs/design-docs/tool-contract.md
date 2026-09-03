@@ -9,14 +9,14 @@ extends the same generated artifact with opt-in MCP prompt profile fixtures.
 
 ## Phase 1 Source Of Truth
 
-The normative Phase 1 tool-profile decisions live in [`V1_SCOPE.md`](V1_SCOPE.md).
+The normative Phase 1 tool-profile decisions live in [`../product-specs/v1-scope.md`](../product-specs/v1-scope.md).
 The frozen machine-readable contract is
-[`tool-profile-contract.json`](tool-profile-contract.json), and the generated
-human-readable reference is [`TOOL_PROFILES.md`](TOOL_PROFILES.md). The
+[`../tool-profile-contract.json`](../tool-profile-contract.json), and the generated
+human-readable reference is [`../TOOL_PROFILES.md`](../TOOL_PROFILES.md). The
 deterministic `tools/list` fixtures are checked in under
-[`../tests/fixtures/tool-contract`](../tests/fixtures/tool-contract).
+[`../../tests/fixtures/tool-contract`](../../tests/fixtures/tool-contract).
 The prompt fixtures (prompts are off by default; set `B2_ENABLE_MCP_PROMPTS=true` to enable) are checked in under
-[`../tests/fixtures/prompt-contract`](../tests/fixtures/prompt-contract).
+[`../../tests/fixtures/prompt-contract`](../../tests/fixtures/prompt-contract).
 Each profile entry records the capability input that generated it; each fixture
 hash covers the sorted tool names and normalized tool definitions, including
 model-visible schema and parameter descriptions.

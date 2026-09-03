@@ -24,7 +24,7 @@
     "B2_MCP_OUTPUT_FORMAT": "json",
     "B2_ENABLE_MCP_PROMPTS": "false",
     "B2_MCP_PUBLIC_URL": "https://b2-mcp.example.com/mcp",
-    "B2_MCP_SERVICE_DOCUMENTATION_URL": "https://github.com/backblaze-labs/b2-mcp/blob/main/docs/deployment/cloudflare-workers.md",
+    "B2_MCP_SERVICE_DOCUMENTATION_URL": "https://github.com/backblaze-labs/b2-mcp/blob/main/docs/references/deployment/cloudflare-workers.md",
     "B2_OAUTH_ISSUER": "https://issuer.example.com/",
     "B2_OAUTH_AUTHORIZATION_ENDPOINT": "https://issuer.example.com/oauth2/authorize",
     "B2_OAUTH_TOKEN_ENDPOINT": "https://issuer.example.com/oauth2/token",

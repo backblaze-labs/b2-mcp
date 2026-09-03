@@ -2,7 +2,10 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import { readJson, root } from "./support";
 
-const migrationRecord = readFileSync(join(root, "docs/TYPESCRIPT_7_MIGRATION.md"), "utf8");
+const migrationRecord = readFileSync(
+  join(root, "docs/exec-plans/active/typescript-7-migration.md"),
+  "utf8",
+);
 const testingDoc = readFileSync(join(root, "docs/TESTING.md"), "utf8");
 
 const pkg = readJson<{
@@ -19,7 +22,7 @@ describe("TypeScript 7 migration record", () => {
     expect(migrationRecord).toContain("typescript-eslint");
     expect(migrationRecord).toContain("stable programmatic compiler API");
     expect(migrationRecord).toContain("do not merge a blanket `typescript@7` upgrade");
-    expect(testingDoc).toContain("TYPESCRIPT_7_MIGRATION.md");
+    expect(testingDoc).toContain("exec-plans/active/typescript-7-migration.md");
   });
 
   it("keeps the current toolchain on TypeScript 6 while doc lint is blocked", () => {

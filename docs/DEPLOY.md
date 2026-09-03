@@ -7,7 +7,7 @@ store, or customer secret broker; the MCP client and LLM harness must not hold
 or forward B2 application keys.
 
 Shared production rules are in
-[`deployment/security-and-credentials.md`](deployment/security-and-credentials.md).
+[`references/deployment/security-and-credentials.md`](references/deployment/security-and-credentials.md).
 Provider guides link back to that file instead of repeating credential,
 rotation, CI secret, teardown, health-check, and smoke-test policy.
 
@@ -31,17 +31,17 @@ release/build examples use
 
 ## Stable Guide Links
 
-- [Shared security and credentials](deployment/security-and-credentials.md)
-- [Vercel Node.js Functions](deployment/vercel.md)
-- [Native Cloudflare Workers](deployment/cloudflare-workers.md)
-- [Cloudflare Workers plus Containers](deployment/cloudflare-containers.md)
-- [Portable Docker and OCI](deployment/docker.md)
-- [Google Cloud Run](deployment/google-cloud-run.md)
-- [AWS ECS Fargate](deployment/aws.md)
-- [Azure Container Apps](deployment/azure-container-apps.md)
-- [Render](deployment/render.md)
-- [Railway](deployment/railway.md)
-- [Fly.io](deployment/fly-io.md)
+- [Shared security and credentials](references/deployment/security-and-credentials.md)
+- [Vercel Node.js Functions](references/deployment/vercel.md)
+- [Native Cloudflare Workers](references/deployment/cloudflare-workers.md)
+- [Cloudflare Workers plus Containers](references/deployment/cloudflare-containers.md)
+- [Portable Docker and OCI](references/deployment/docker.md)
+- [Google Cloud Run](references/deployment/google-cloud-run.md)
+- [AWS ECS Fargate](references/deployment/aws.md)
+- [Azure Container Apps](references/deployment/azure-container-apps.md)
+- [Render](references/deployment/render.md)
+- [Railway](references/deployment/railway.md)
+- [Fly.io](references/deployment/fly-io.md)
 
 ## Deployment Matrix
 

@@ -4,11 +4,14 @@
 
 # Public contracts and quality/security gates need implementation and
 # Quality Keeper (QK) review.
-docs/V1_SCOPE.md @goanpeca @sophiecarreras
-docs/PUBLIC_CONTRACTS.md @goanpeca @sophiecarreras
-docs/TOOL_CONTRACT.md @goanpeca @sophiecarreras
+docs/product-specs/v1-scope.md @goanpeca @sophiecarreras
+docs/design-docs/index.md @goanpeca @sophiecarreras
+docs/design-docs/tool-contract.md @goanpeca @sophiecarreras
 docs/TESTING.md @goanpeca @sophiecarreras
-docs/SECURITY_REVIEW.md @goanpeca @sophiecarreras
+docs/EVALS.md @goanpeca @sophiecarreras
+docs/SECURITY.md @goanpeca @sophiecarreras
+docs/design-docs/security-review.md @goanpeca @sophiecarreras
+docs/design-docs/supply-chain-security.md @goanpeca @sophiecarreras
 SECURITY.md @goanpeca @sophiecarreras
 RELEASE.md @goanpeca @sophiecarreras
 CHANGELOG.md @goanpeca

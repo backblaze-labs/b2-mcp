@@ -986,12 +986,12 @@ for (const workflow of [".github/workflows/contract.yml", ".github/workflows/smo
   requireWorkflowScalar(workflow, "max-parallel", "1", "live matrix serialization");
 }
 
-requireContains("docs/V1_SCOPE.md", policy.engineRange, "package engine range");
-requireContains("docs/V1_SCOPE.md", policy.engineFloor, "runtime floor");
+requireContains("docs/product-specs/v1-scope.md", policy.engineRange, "package engine range");
+requireContains("docs/product-specs/v1-scope.md", policy.engineFloor, "runtime floor");
 requireContains("README.md", policy.engineRange, "package engine range");
 requireContains("CONTRIBUTING.md", policy.engineRange, "package engine range");
 requireContains("docs/DEPLOY.md", policy.engineRange, "package engine range");
-requireContains("docs/deployment/vercel.md", policy.engineRange, "package engine range");
+requireContains("docs/references/deployment/vercel.md", policy.engineRange, "package engine range");
 requireContains("deploy/vercel/README.md", policy.engineRange, "package engine range");
 requireContains("docs/DEPLOY.md", policy.crossPlatformNode, "patched Node 22 pin");
 requireContains("README.md", policy.crossPlatformNode, "patched Node 22 pin");

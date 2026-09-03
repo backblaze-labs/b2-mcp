@@ -168,13 +168,21 @@ function withRuntimePolicyFixture(run: (fixtureRoot: string) => void): void {
       "CONTRIBUTING.md",
       `^22.22.2 || ^24 || ^26\n22.23.1\n${packageManager}\n`,
     );
-    writeFixtureFile(fixtureRoot, "docs/V1_SCOPE.md", "^22.22.2 || ^24 || ^26\n>=22.22.2\n");
+    writeFixtureFile(
+      fixtureRoot,
+      "docs/product-specs/v1-scope.md",
+      "^22.22.2 || ^24 || ^26\n>=22.22.2\n",
+    );
     writeFixtureFile(
       fixtureRoot,
       "docs/DEPLOY.md",
       `^22.22.2 || ^24 || ^26\n22.23.1\n${packageManager}\n`,
     );
-    writeFixtureFile(fixtureRoot, "docs/deployment/vercel.md", "^22.22.2 || ^24 || ^26\n");
+    writeFixtureFile(
+      fixtureRoot,
+      "docs/references/deployment/vercel.md",
+      "^22.22.2 || ^24 || ^26\n",
+    );
     writeFixtureFile(fixtureRoot, "deploy/vercel/README.md", "^22.22.2 || ^24 || ^26\n");
     writeFixtureFile(fixtureRoot, "RELEASE.md", "22.23.1\n");
     writeFixtureFile(fixtureRoot, "CHANGELOG.md", "22.23.1\n");

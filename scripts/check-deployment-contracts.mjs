@@ -79,7 +79,7 @@ function validateDeploymentDocsContract() {
     "server",
     "phase1-default",
   ]);
-  requireDocTerms("docs/deployment/vercel.md", [
+  requireDocTerms("docs/references/deployment/vercel.md", [
     "/mcp",
     "/health",
     "/.well-known/oauth-protected-resource",
@@ -88,7 +88,7 @@ function validateDeploymentDocsContract() {
     "B2_HTTP_CREDENTIAL_MODE=server",
     "B2_MCP_PUBLIC_URL=https://mcp.example.com/mcp",
   ]);
-  requireDocTerms("docs/deployment/cloudflare-workers.md", [
+  requireDocTerms("docs/references/deployment/cloudflare-workers.md", [
     "/mcp",
     "/health",
     "/.well-known/oauth-protected-resource/mcp",

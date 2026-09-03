@@ -122,7 +122,12 @@ describe("package surface policy", () => {
     expect(files).toContain("deploy/customer-hosted/pnpm-workspace.yaml");
     expect(files).toContain("docs/AUTHENTICATION.md");
     expect(files).toContain("docs/CLIENTS.md");
+    expect(files).toContain("docs/product-specs/clients.md");
     expect(files).toContain("docs/DEPLOY.md");
+    expect(files).toContain("docs/deployment/security-and-credentials.md");
+    expect(files).toContain("docs/deployment/vercel.md");
+    expect(files).toContain("docs/references/deployment/security-and-credentials.md");
+    expect(files).toContain("docs/references/deployment/vercel.md");
     expect(files).toContain("docs/tool-profile-contract.json");
     expect(pkg.files.filter((file) => file.startsWith("skills/"))).toEqual(skillsPack.packageFiles);
     for (const skillPath of skillsPack.packageFiles) {
@@ -419,6 +424,12 @@ describe("package surface policy", () => {
         "    }),",
         "  );",
         '  fs.writeFileSync(path.join(packageRoot, "docs", "CLIENTS.md"), "# Clients\\n");',
+        '  fs.mkdirSync(path.join(packageRoot, "docs", "deployment"), { recursive: true });',
+        '  fs.writeFileSync(path.join(packageRoot, "docs", "deployment", "security-and-credentials.md"), "# Security\\n");',
+        '  fs.mkdirSync(path.join(packageRoot, "docs", "references", "deployment"), { recursive: true });',
+        '  fs.writeFileSync(path.join(packageRoot, "docs", "references", "deployment", "security-and-credentials.md"), "# Security\\n");',
+        '  fs.mkdirSync(path.join(packageRoot, "docs", "product-specs"), { recursive: true });',
+        '  fs.writeFileSync(path.join(packageRoot, "docs", "product-specs", "clients.md"), "# Clients\\n");',
         '  fs.writeFileSync(path.join(packageRoot, "docs", "DEPLOY.md"), "# Deploy\\n");',
         '  fs.writeFileSync(path.join(packageRoot, "dist", "index.js"), "module.exports = { startStdio() {} };\\n");',
         '  fs.chmodSync(path.join(packageRoot, "dist", "index.js"), 0o755);',

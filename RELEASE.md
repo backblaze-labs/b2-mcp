@@ -25,7 +25,7 @@ removes it.
 
 Before publishing `v0.1.0`:
 
-1. Confirm `docs/V1_SCOPE.md` still matches the implemented package, runtime,
+1. Confirm `docs/product-specs/v1-scope.md` still matches the implemented package, runtime,
    tool profiles, and MCP transport contract.
 2. Confirm operators use a patched Node 22 LTS release (`.nvmrc`) or Node.js 24
    or 26. Keep CI production-dependency and deterministic workflow evidence on
@@ -42,9 +42,9 @@ Before publishing `v0.1.0`:
 3. Review `audit-policy.json` and risk-accept only unexpired, documented,
    tightly scoped upstream advisories that have no fixed stable package.
 4. Run the supply-chain denylist branch and artifact workflow in
-   `docs/SUPPLY_CHAIN_SECURITY.md`.
+   `docs/design-docs/supply-chain-security.md`.
 5. Run the secret scan and legal/provenance review in
-   `docs/SECURITY_REVIEW.md`.
+   `docs/design-docs/security-review.md`.
 6. Confirm the live B2 smoke and contract evidence required by
    `docs/TESTING.md`. A release without the latest successful protected live
    contract run requires an explicit release exception recorded in the release
@@ -237,7 +237,7 @@ exists. For the first public package only:
    gh api --method DELETE "orgs/backblaze-labs/packages/container/b2-mcp/versions/${version_id}"
    ```
 7. After npm/GHCR/GitHub Release succeed, run the per-release directory actions
-   in [`docs/DISCOVERABILITY.md`](docs/DISCOVERABILITY.md) ("On every release"):
+   in [`docs/references/discoverability.md`](docs/references/discoverability.md) ("On every release"):
    build and upload the `.mcpb` bundle (`pnpm run build:mcpb`) through Smithery's
    Local publish tab, refresh the LobeHub listing (`lhm plugin update`), and cut
    a new Glama release. These are manual and are not part of `Publish Package`,
@@ -273,7 +273,7 @@ release issue.
 npm package versions are immutable. If a published version is bad, deprecate it
 with a direct reason and publish a fixed higher patch or prerelease version from
 the protected workflow. If credentials, provenance, or package contents may be
-compromised, follow `docs/SUPPLY_CHAIN_SECURITY.md` before publishing again.
+compromised, follow `docs/design-docs/supply-chain-security.md` before publishing again.
 
 ## Deprecation
 

@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync } from "fs";
-import { join } from "path";
+import { join, posix } from "path";
 import { helpText } from "../../src/cli";
 import { B2_OAUTH_SCOPES, OAUTH_ENVIRONMENT_VARIABLES } from "../../src/oauth-resource-server";
 import { readJson, root } from "./support";
@@ -32,6 +32,35 @@ function markdownFiles(): string[] {
 
 function sourceFiles(): string[] {
   return walkFiles("src", (relativePath) => relativePath.endsWith(".ts")).sort();
+}
+
+function designDocRows(indexText: string): Array<{ documentPath: string; owner: string }> {
+  const rows = [];
+  for (const line of indexText.split(/\r?\n/)) {
+    const cells = line
+      .split("|")
+      .slice(1, -1)
+      .map((cell) => cell.trim());
+    if (cells.length < 2) continue;
+    const linkTarget = cells[0].match(/\]\(([^)]+)\)/)?.[1];
+    if (!linkTarget) continue;
+    rows.push({
+      documentPath: posix.normalize(posix.join("docs/design-docs", linkTarget)),
+      owner: cells[1],
+    });
+  }
+  return rows;
+}
+
+function codeownerEntries(codeownersText: string): Map<string, string[]> {
+  const entries = new Map<string, string[]>();
+  for (const rawLine of codeownersText.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const [pattern, ...owners] = line.split(/\s+/);
+    entries.set(pattern, owners);
+  }
+  return entries;
 }
 
 function runtimeEnvNamesFromSource(): string[] {
@@ -75,12 +104,14 @@ function runtimeEnvNamesFromSource(): string[] {
 
 describe("public support and authentication claims", () => {
   const readme = read("README.md");
-  const clients = read("docs/CLIENTS.md");
+  const clients = read("docs/product-specs/clients.md");
   const contributing = read("CONTRIBUTING.md");
   const authentication = read("docs/AUTHENTICATION.md");
   const release = read("RELEASE.md");
   const security = read("SECURITY.md");
-  const publicContracts = read("docs/PUBLIC_CONTRACTS.md");
+  const docsReadme = read("docs/README.md");
+  const designDocsIndex = read("docs/design-docs/index.md");
+  const codeowners = read(".github/CODEOWNERS");
   const publicMarkdown = markdownFiles().map(read).join("\n");
   const packageJson = readJson<{
     bin: Record<string, string>;
@@ -96,13 +127,28 @@ describe("public support and authentication claims", () => {
       "b2-mcp-server": "dist/index.js",
     });
     expect(packageJson.files).toContain("docs/AUTHENTICATION.md");
-    expect(publicContracts).toContain("[`AUTHENTICATION.md`](AUTHENTICATION.md)");
+    expect(docsReadme).toContain("[`AUTHENTICATION.md`](AUTHENTICATION.md)");
+    expect(designDocsIndex).toContain("[`tool-contract.md`](tool-contract.md)");
 
     expect(publicMarkdown).not.toContain("@backblaze/b2-mcp-server");
     expect(readme).toContain("The canonical package name is `@backblaze-labs/b2-mcp`");
     expect(readme).toContain("binary is `b2-mcp`");
     expect(clients).toContain("The canonical npm package binary is `b2-mcp`");
     expect(release).toContain("The canonical installable binary is `b2-mcp`");
+  });
+
+  it("requires explicit QK CODEOWNERS for security-governance docs", () => {
+    const qkOwnedDocs = designDocRows(designDocsIndex)
+      .filter(({ owner }) => /(?:Sophie|QK|Security)/i.test(owner))
+      .map(({ documentPath }) => documentPath);
+    const requiredDocs = [...new Set(["docs/SECURITY.md", ...qkOwnedDocs])];
+    const entries = codeownerEntries(codeowners);
+
+    for (const documentPath of requiredDocs) {
+      expect(entries.get(documentPath), `${documentPath} needs explicit QK ownership`).toContain(
+        "@sophiecarreras",
+      );
+    }
   });
 
   it("presents npx as the documented quick start for the package", () => {
@@ -140,7 +186,7 @@ describe("public support and authentication claims", () => {
       readme,
       authentication,
       read("docs/DEPLOY.md"),
-      read("docs/deployment/security-and-credentials.md"),
+      read("docs/references/deployment/security-and-credentials.md"),
     ].join("\n");
     const missing = envNames(localEnv).filter((name) => {
       if (name.startsWith("B2_CREDENTIAL_")) return !referenceDocs.includes("B2_CREDENTIAL_<REF>");
@@ -155,7 +201,7 @@ describe("public support and authentication claims", () => {
       readme,
       authentication,
       read("docs/DEPLOY.md"),
-      read("docs/deployment/security-and-credentials.md"),
+      read("docs/references/deployment/security-and-credentials.md"),
     ].join("\n");
     const missing = runtimeEnvNamesFromSource().filter((name) => {
       if (name.startsWith("B2_CREDENTIAL_")) return !referenceDocs.includes("B2_CREDENTIAL_<REF>");
