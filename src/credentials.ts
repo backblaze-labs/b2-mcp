@@ -316,20 +316,30 @@ let warnedRemovedCredentialEnvAliases = false;
 // read as configuration. Kept as string data (not `process.env.NAME` reads) so
 // they are not classified as documented runtime configuration. The pattern also
 // covers principal-mode `B2_CREDENTIAL_<REF>_APP_KEY(_ID)`, which `envMaterial`
-// previously accepted via its prefix.
-const REMOVED_CREDENTIAL_ENV_ALIASES = ["B2_APP_KEY_ID", "B2_APP_KEY"] as const;
-const REMOVED_CREDENTIAL_ENV_ALIAS_PATTERN = /^B2_CREDENTIAL_[A-Z0-9_]+_APP_KEY(?:_ID)?$/;
+// previously accepted via its prefix. Both forms include the customer-hosted
+// `_FILE` secret-file variants (`B2_APP_KEY_FILE`, `..._APP_KEY(_ID)_FILE`): the
+// container entrypoint no longer loads them, so a deployment still exporting a
+// retired `_FILE` alias would otherwise lose its S3 credential override silently.
+const REMOVED_CREDENTIAL_ENV_ALIASES = [
+  "B2_APP_KEY_ID",
+  "B2_APP_KEY",
+  "B2_APP_KEY_ID_FILE",
+  "B2_APP_KEY_FILE",
+] as const;
+const REMOVED_CREDENTIAL_ENV_ALIAS_PATTERN =
+  /^B2_CREDENTIAL_[A-Z0-9_]+_APP_KEY(?:_ID)?(?:_FILE)?$/;
 
 /**
  * Warn once at startup when a removed credential alias env var is still set.
  *
  * @remarks
- * `B2_APP_KEY_ID` / `B2_APP_KEY` and their principal-mode
- * `B2_CREDENTIAL_<REF>_APP_KEY(_ID)` form are no longer read (issue #386).
- * Without this signal an operator whose deploy manifest still exports them gets
- * a silent behavior change: the legacy separate-S3-key override is dropped and
- * the application key signs S3 directly. The guard fires once so HTTP request
- * paths do not spam logs.
+ * `B2_APP_KEY_ID` / `B2_APP_KEY`, their principal-mode
+ * `B2_CREDENTIAL_<REF>_APP_KEY(_ID)` form, and the customer-hosted `_FILE`
+ * secret-file variants of both are no longer read (issue #386). Without this
+ * signal an operator whose deploy manifest still exports them gets a silent
+ * behavior change: the legacy separate-S3-key override is dropped and the
+ * application key signs S3 directly. The guard fires once so HTTP request paths
+ * do not spam logs.
  */
 export function warnRemovedCredentialEnvAliases(): void {
   if (warnedRemovedCredentialEnvAliases) return;
@@ -341,7 +351,7 @@ export function warnRemovedCredentialEnvAliases(): void {
   );
   if (stillSet) {
     logger.warn(
-      "config.removed_alias: B2_APP_KEY_ID/B2_APP_KEY and B2_CREDENTIAL_<REF>_APP_KEY(_ID) are no longer read and are ignored. Use a non-master B2_APPLICATION_KEY_ID/B2_APPLICATION_KEY (or B2_CREDENTIAL_<REF>_APPLICATION_KEY(_ID) for principal mode); the separate-S3-key override has been removed.",
+      "config.removed_alias: B2_APP_KEY_ID/B2_APP_KEY, B2_CREDENTIAL_<REF>_APP_KEY(_ID), and their _FILE secret-file variants are no longer read and are ignored. Use a non-master B2_APPLICATION_KEY_ID/B2_APPLICATION_KEY (or B2_CREDENTIAL_<REF>_APPLICATION_KEY(_ID) for principal mode, plus the matching _FILE names); the separate-S3-key override has been removed.",
     );
   }
 }

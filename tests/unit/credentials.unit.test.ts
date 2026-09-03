@@ -557,6 +557,19 @@ describe("removed credential env alias warning", () => {
     warn.mockRestore();
   });
 
+  it("warns when a retired _FILE secret-file alias is still set", () => {
+    process.env.B2_APP_KEY_FILE = "/run/secrets/legacy-app-key";
+    process.env.B2_CREDENTIAL_TENANT_A_APP_KEY_ID_FILE = "/run/secrets/legacy-principal-id";
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+
+    warnRemovedCredentialEnvAliases();
+
+    expect(warn.mock.calls.some((call) => String(call[0]).includes("_FILE"))).toBe(true);
+    warn.mockRestore();
+    delete process.env.B2_APP_KEY_FILE;
+    delete process.env.B2_CREDENTIAL_TENANT_A_APP_KEY_ID_FILE;
+  });
+
   it("does not warn when no removed alias env var is present", () => {
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
 
