@@ -288,7 +288,7 @@ The `full` prompt profile enables an inline dummy secret sink so sink-dependent 
 
 | Profile | Prompts | Hash prefix |
 | --- | ---: | --- |
-| `full` | 5 | `c52599d06cda` |
+| `full` | 5 | `3d072734f7ac` |
 | `live-b2-contract` | 4 | `7378ab9a0c3e` |
 | `phase1-default` | 3 | `0257b2a65d29` |
 | `read-only` | 2 | `686610d7c5bf` |
@@ -297,7 +297,7 @@ The `full` prompt profile enables an inline dummy secret sink so sink-dependent 
 
 Complete guided-workflow prompt surface: every B2 workflow launcher is advertised, including the write- and admin-capable prompts, for contract review and regression detection.
 
-Prompt profile hash: `c52599d06cdabc7017a82ac69bd71a0ae920984c652ab0517b29b6cd215c5e20`
+Prompt profile hash: `3d072734f7ac53e3c47b9e9f1b5a7d41bce7ab3584c6ff29f2d57d31492ab812`
 
 ### MCP Prompts
 

@@ -260,6 +260,7 @@
                 "writeBucketEncryption",
                 "readBucketRetentions",
                 "writeBucketRetentions",
+                "readBucketLifecycleRules",
                 "readFileRetentions",
                 "writeFileRetentions",
                 "bypassGovernance",

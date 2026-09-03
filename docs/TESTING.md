@@ -516,8 +516,9 @@ For the integration and request-shape contract suites, use the
 - Keys: one non-master B2 application key. Because it creates buckets, it cannot
   be scoped to a single bucket; it is account-wide. Capabilities:
   `bypassGovernance`, `deleteBuckets`, `deleteFiles`, `listBuckets`,
-  `listFiles`, `listKeys`, `readBucketEncryption`, `readBucketRetentions`,
-  `readBuckets`, `readFileLegalHolds`, `readFileRetentions`, `readFiles`,
+  `listFiles`, `listKeys`, `readBucketEncryption`,
+  `readBucketLifecycleRules`, `readBucketRetentions`, `readBuckets`,
+  `readFileLegalHolds`, `readFileRetentions`, `readFiles`,
   `writeBucketEncryption`, `writeBucketNotifications`, `writeBucketRetentions`,
   `writeBuckets`, `writeFileLegalHolds`, `writeFileRetentions`, and
   `writeFiles`. Do not grant `writeKeys`, `deleteKeys`, master-key access, or

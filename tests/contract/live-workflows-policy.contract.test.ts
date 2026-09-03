@@ -120,6 +120,7 @@ const liveToolCapabilities: Record<string, readonly string[]> = {
   s3_create_multipart_upload: ["readFileLegalHolds", "readFileRetentions", "writeFiles"],
   s3_delete_object: ["deleteFiles"],
   s3_delete_objects: ["bypassGovernance", "deleteFiles"],
+  s3_get_bucket_lifecycle: ["readBucketLifecycleRules"],
   s3_get_bucket_location: ["readBuckets"],
   s3_get_object: ["readFiles"],
   s3_get_presigned_url: ["readFiles", "writeFiles"],

@@ -123,7 +123,7 @@ describe("B2 Bucket and key tools", () => {
 });
 
 describe("S3-compatible bucket and object tools", () => {
-  liveIt("s3_head_bucket and s3_get_bucket_location target the run-owned bucket", async () => {
+  liveIt("S3 bucket metadata reads target the run-owned bucket", async () => {
     expectLiveSuccess(
       await callTool(server, "s3_head_bucket", { bucket: bucketName() }),
       "s3_head_bucket",
@@ -132,6 +132,12 @@ describe("S3-compatible bucket and object tools", () => {
       await callTool(server, "s3_get_bucket_location", { bucket: bucketName() }),
     );
     expect(location).toHaveProperty("locationConstraint");
+
+    const lifecycleResult = await callTool(server, "s3_get_bucket_lifecycle", {
+      bucket: bucketName(),
+    });
+    expectLiveSuccess(lifecycleResult, "s3_get_bucket_lifecycle");
+    expect(Array.isArray(parseResult(lifecycleResult).rules)).toBe(true);
   });
 
   liveIt("uploads, downloads, copies, paginates, and deletes run-owned objects", async () => {
