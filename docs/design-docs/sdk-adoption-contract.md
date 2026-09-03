@@ -262,7 +262,7 @@ The reviewed `@backblaze-labs/b2-sdk/partner` client and its documented raw
 peer expose exactly these Group-related operations and nothing that mutates a
 Group's lifecycle:
 
-| SDK method                                   | B2 Partner endpoint       |
+| SDK method                                   | MCP tool                  |
 | -------------------------------------------- | ------------------------- |
 | `listGroups` / `paginateGroups`              | `b2_list_groups`          |
 | `listGroupMembers` / `paginateGroupMembers`  | `b2_list_group_members`   |
