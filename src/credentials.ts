@@ -326,8 +326,7 @@ const REMOVED_CREDENTIAL_ENV_ALIASES = [
   "B2_APP_KEY_ID_FILE",
   "B2_APP_KEY_FILE",
 ] as const;
-const REMOVED_CREDENTIAL_ENV_ALIAS_PATTERN =
-  /^B2_CREDENTIAL_[A-Z0-9_]+_APP_KEY(?:_ID)?(?:_FILE)?$/;
+const REMOVED_CREDENTIAL_ENV_ALIAS_PATTERN = /^B2_CREDENTIAL_[A-Z0-9_]+_APP_KEY(?:_ID)?(?:_FILE)?$/;
 
 /**
  * Warn once at startup when a removed credential alias env var is still set.
