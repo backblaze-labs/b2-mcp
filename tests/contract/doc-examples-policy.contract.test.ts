@@ -203,6 +203,35 @@ describe("documentation example validator policy", () => {
     expect(result.stderr).toContain(message);
   });
 
+  it("rejects a pinned client fence with --package but no run command", () => {
+    const readme = read("README.md").replace(
+      '"command": "npx",\n     "args": ["-y", "@backblaze-labs/b2-mcp@0.2.0"]',
+      '"command": "npx",\n     "args": ["--package=@backblaze-labs/b2-mcp@0.2.0"]',
+    );
+    const expectedLine = lineOf(readme, '```json\n   {\n     "command": "npx",');
+    const result = runDocExamplesWithOverrides({ "README.md": readme });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(`README.md:${expectedLine}`);
+    expect(result.stderr).toContain("with --package must run an exported package binary");
+  });
+
+  it.each([
+    ["escaped ;", "npm --prefix /tmp/\\;cache install -g @backblaze-labs/b2-mcp@latest"],
+    ["escaped |", "npm --prefix /tmp/\\|cache install -g @backblaze-labs/b2-mcp@latest"],
+  ])("still checks a global npm install with an %s in a path", (_label, command) => {
+    const readme = read("README.md").replace(
+      "npm install -g @backblaze-labs/b2-mcp@0.2.0",
+      command,
+    );
+    const expectedLine = lineOf(readme, command);
+    const result = runDocExamplesWithOverrides({ "README.md": readme });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(`README.md:${expectedLine}`);
+    expect(result.stderr).toContain("must pin an exact version");
+  });
+
   it("rejects a pinned client fence that uses --call to run an arbitrary command", () => {
     const readme = read("README.md").replace(
       '"command": "npx",\n     "args": ["-y", "@backblaze-labs/b2-mcp@0.2.0"]',

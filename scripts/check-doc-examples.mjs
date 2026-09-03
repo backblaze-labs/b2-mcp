@@ -637,14 +637,24 @@ function validatePackageCommand(file, line, commandConfig, expectedPackage, opti
         line,
         "pinned client config must not use --call to run an arbitrary command",
       );
-    }
-    const runCommand = explicitPackageRunCommand(execArgs);
-    if (runCommand !== null && !new Set(Object.keys(pkg.bin ?? {})).has(runCommand)) {
-      addFinding(
-        file,
-        line,
-        `pinned client config command ${runCommand} must be an exported package binary`,
-      );
+    } else if (hasExplicitPackageOption(execArgs)) {
+      // `--package` only adds a package to the exec environment; a package binary
+      // must still be named as the command to run, or nothing launches and the
+      // documented server never starts. Require a non-null exported run command.
+      const runCommand = explicitPackageRunCommand(execArgs);
+      if (runCommand === null) {
+        addFinding(
+          file,
+          line,
+          "pinned client config with --package must run an exported package binary",
+        );
+      } else if (!new Set(Object.keys(pkg.bin ?? {})).has(runCommand)) {
+        addFinding(
+          file,
+          line,
+          `pinned client config command ${runCommand} must be an exported package binary`,
+        );
+      }
     }
   }
 }
@@ -738,6 +748,15 @@ function explicitPackageRunCommand(args) {
     return sawExplicitPackage ? arg : null;
   }
   return null;
+}
+
+// Whether an explicit `--package`/`-p` option is present. `explicitPackageRunCommand`
+// returns null both when no explicit package was supplied and when one was but no
+// run command follows; this distinguishes the second (an error in strict mode).
+function hasExplicitPackageOption(args) {
+  return args.some(
+    (arg) => arg === "--package" || arg === "-p" || arg.startsWith("--package="),
+  );
 }
 
 function parsePackageSpec(packageSpec) {
@@ -1040,6 +1059,14 @@ function splitShellOperators(text) {
     if (quote) {
       current += char;
       if (char === quote) quote = null;
+      continue;
+    }
+    // A backslash escapes the next character, so an escaped `;`/`|`/`&` is a
+    // literal path character, not a control operator (`/tmp/\;cache`). Keep both
+    // characters together; tokenizeShell resolves the escape later.
+    if (char === "\\" && index + 1 < text.length) {
+      current += char + text[index + 1];
+      index += 1;
       continue;
     }
     if (char === '"' || char === "'") {
