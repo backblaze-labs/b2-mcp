@@ -3,14 +3,19 @@
  * MCP protocol-version and envelope assertions live under tests/protocol/.
  */
 
-import * as http from "http";
-import * as net from "net";
-import { AsyncLocalStorage } from "async_hooks";
-import { ReadableStream } from "node:stream/web";
 import type { ReadableStreamDefaultController } from "node:stream/web";
+import { ReadableStream } from "node:stream/web";
 import { S3Client } from "@aws-sdk/client-s3";
 import type { AuthInfo } from "@modelcontextprotocol/server";
+import { AsyncLocalStorage } from "async_hooks";
+import * as http from "http";
+import * as net from "net";
 import type { MockInstance } from "vitest";
+import {
+  CredentialProvider,
+  CredentialResolutionError,
+  DISCOVERY_MODE_CREDENTIAL,
+} from "../../src/credentials";
 import {
   buildHttpServer,
   configFromHeaders,
@@ -24,20 +29,20 @@ import {
   invalidateAuthManagerCache,
   invalidateCapabilityCache,
 } from "../../src/server";
-import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
-import { CredentialProvider, CredentialResolutionError } from "../../src/credentials";
 import { logger } from "../../src/utils/logger";
+import { _resetRateLimiter } from "../../src/utils/rate-limiter";
 import {
-  JSON_HEADERS,
-  type Resp,
   closeHttpServer,
   creds,
+  JSON_HEADERS,
   listenOnLocalhost,
+  type Resp,
   request,
   restoreEnv,
   saveEnv,
   setDefaultHttpTestEnv,
 } from "../support/http";
+import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
 import {
   authorizeResponse,
   b2EndpointName,
@@ -170,9 +175,12 @@ const savedHttpEnv = saveEnv();
 const savedMutableEnv = saveEnv([
   "B2_MAX_SESSIONS",
   "B2_MAX_SESSIONS_PER_KEY",
+  "B2_MCP_RATE_LIMIT_BURST",
+  "B2_MCP_RATE_LIMIT_RPS",
   "B2_ALLOWED_HOSTS",
   "B2_ALLOWED_ORIGINS",
   "B2_MCP_OUTPUT_FORMAT",
+  "B2_TRUST_PROXY_HEADERS",
 ]);
 
 beforeAll(() => {
@@ -193,6 +201,7 @@ beforeEach(async () => {
   delete process.env.B2_CREDENTIAL_TENANT_A_APPLICATION_KEY;
   restoreEnv(savedMutableEnv);
   invalidateCapabilityCache();
+  _resetRateLimiter();
   installSdkTransport(
     new RecordingTransport((request) => {
       if (b2EndpointName(request) === "b2_authorize_account") {
@@ -213,6 +222,7 @@ afterEach(async () => {
   vi.clearAllMocks();
   setB2SdkClientFactoryForTests(null);
   invalidateAuthManagerCache();
+  _resetRateLimiter();
   await closeHttpServer(handle);
 });
 
@@ -270,6 +280,14 @@ function callToolBody(name: string, args: Record<string, unknown> = {}, id = 1):
   return modernBody("tools/call", { name, arguments: args }, id);
 }
 
+function initializedNotificationBody(): string {
+  return JSON.stringify({
+    jsonrpc: "2.0",
+    method: "notifications/initialized",
+    params: { _meta: META },
+  });
+}
+
 async function replaceHandle(
   getAuthInfo?: (req: any) => AuthInfo | null,
   overrides: Omit<HttpServerOptions, "getAuthInfo"> = {},
@@ -280,13 +298,118 @@ async function replaceHandle(
 }
 
 describe("HTTP transport handler", () => {
-  it("returns 401 on modern /mcp without credentials", async () => {
+  it("serves modern discovery without credentials and gates tool calls", async () => {
+    const infoSpy = vi.spyOn(logger, "info").mockImplementation(() => undefined as never);
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined as never);
     const res = await request(port, "POST", "/mcp", {
       headers: modernHeaders("tools/list"),
       body: LIST_TOOLS,
     });
-    expect(res.status).toBe(401);
-    expect(res.body).toMatch(/credentials/i);
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.body).result.tools.length).toBeGreaterThan(0);
+    expect(warnSpy.mock.calls.some(([, event]) => event === "credential.resolve.failed")).toBe(
+      false,
+    );
+    expect(infoSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "http-headers",
+        code: "missing_credentials",
+        mcpMethod: "tools/list",
+      }),
+      "credential.discovery_mode",
+    );
+
+    const call = await request(port, "POST", "/mcp", {
+      headers: modernHeaders("tools/call", "s3_head_bucket"),
+      body: callToolBody("s3_head_bucket"),
+    });
+    const callResult = JSON.parse(call.body).result;
+    expect(call.status).toBe(200);
+    expect(callResult.isError).toBe(true);
+    expect(JSON.stringify(callResult)).toContain("missing_credentials");
+  });
+
+  it("sanitizes discovery-mode tools/call audit fields", async () => {
+    const infoSpy = vi.spyOn(logger, "info").mockImplementation(() => undefined as never);
+    const leakedName = "B2_APPLICATION_KEY=leaked-secret-or-oversized";
+    const leakedKey = "B2_MASTER_KEY=leaked-secret";
+    const res = await request(port, "POST", "/mcp", {
+      headers: modernHeaders("tools/call", leakedName),
+      body: callToolBody(leakedName, { [leakedKey]: "x" }),
+    });
+
+    const callResult = JSON.parse(res.body).result;
+    expect(res.status).toBe(200);
+    expect(callResult.isError).toBe(true);
+    const callLog = infoSpy.mock.calls.find(([, event]) => event === "tool.call")?.[0] as
+      | Record<string, unknown>
+      | undefined;
+    expect(callLog).toMatchObject({
+      tool: "unknown_tool",
+      argKeyCount: 1,
+      code: "missing_credentials",
+    });
+    expect(callLog).not.toHaveProperty("argKeys");
+    expect(JSON.stringify(infoSpy.mock.calls)).not.toContain(leakedName);
+    expect(JSON.stringify(infoSpy.mock.calls)).not.toContain(leakedKey);
+  });
+
+  it("serves non-executing discovery methods without credentials", async () => {
+    process.env.B2_ENABLE_MCP_PROMPTS = "true";
+
+    const prompts = await request(port, "POST", "/mcp", {
+      headers: modernHeaders("prompts/list"),
+      body: modernBody("prompts/list"),
+    });
+    expect(prompts.status).toBe(200);
+    expect(JSON.parse(prompts.body).result.prompts.length).toBeGreaterThan(0);
+
+    const prompt = await request(port, "POST", "/mcp", {
+      headers: modernHeaders("prompts/get", "b2_audit_public_exposure"),
+      body: modernBody("prompts/get", {
+        name: "b2_audit_public_exposure",
+        arguments: { limit: "25" },
+      }),
+    });
+    expect(prompt.status).toBe(200);
+    expect(JSON.stringify(JSON.parse(prompt.body).result.messages)).toContain("b2_list_buckets");
+
+    const resources = await request(port, "POST", "/mcp", {
+      headers: modernHeaders("resources/list"),
+      body: modernBody("resources/list"),
+    });
+    expect(resources.status).toBe(200);
+    expect(
+      JSON.parse(resources.body).result.resources.map((resource: { uri: string }) => resource.uri),
+    ).toContain("b2://server-config");
+
+    const serverConfig = await request(port, "POST", "/mcp", {
+      headers: modernHeaders("resources/read", "b2://server-config"),
+      body: modernBody("resources/read", { uri: "b2://server-config" }),
+    });
+    expect(serverConfig.status).toBe(200);
+    expect(JSON.parse(serverConfig.body).result.contents[0].uri).toBe("b2://server-config");
+
+    const templates = await request(port, "POST", "/mcp", {
+      headers: modernHeaders("resources/templates/list"),
+      body: modernBody("resources/templates/list"),
+    });
+    expect(templates.status).toBe(200);
+    expect(templates.body).not.toContain("B2 application credentials");
+
+    const ping = await request(port, "POST", "/mcp", {
+      headers: modernHeaders("ping"),
+      body: modernBody("ping"),
+    });
+    expect([200, 404]).toContain(ping.status);
+    expect(ping.body).not.toContain("B2 application credentials");
+
+    const initialized = await request(port, "POST", "/mcp", {
+      headers: modernHeaders("notifications/initialized"),
+      body: initializedNotificationBody(),
+    });
+    expect(initialized.status).not.toBe(401);
+    expect(initialized.body).not.toContain("B2 application credentials");
   });
 
   it("returns 200 on /health when default header mode needs no static B2 env", async () => {
@@ -389,7 +512,7 @@ describe("HTTP transport handler", () => {
     expect(res.status).toBe(200);
   });
 
-  it("requires headers on every request in header compatibility mode", async () => {
+  it("uses request headers for real calls but permits headerless discovery", async () => {
     const ok = await request(port, "POST", "/mcp", {
       headers: { ...creds, ...modernHeaders("tools/list") },
       body: LIST_TOOLS,
@@ -400,7 +523,246 @@ describe("HTTP transport handler", () => {
       headers: modernHeaders("tools/list"),
       body: LIST_TOOLS,
     });
-    expect(missing.status).toBe(401);
+    expect(missing.status).toBe(200);
+    expect(JSON.parse(missing.body).result.tools.length).toBeGreaterThan(0);
+  });
+
+  it("uses a neutral discovery credential after rejected header credentials", async () => {
+    const seenKeyIds: string[] = [];
+    const fetchCapabilities = vi.fn(async () => {
+      throw new CredentialResolutionError(
+        "Credential or capability resolution failed",
+        401,
+        "capability_auth_failed",
+      );
+    });
+    await replaceHandle(undefined, {
+      fetchCapabilities,
+      createServer: (config, capabilities, options) => {
+        seenKeyIds.push(config.applicationKeyId);
+        return createServer(config, capabilities, options);
+      },
+    });
+
+    for (let i = 0; i < 3; i++) {
+      const res = await request(port, "POST", "/mcp", {
+        headers: {
+          "x-b2-key-id": `invalid-${i}`,
+          "x-b2-key": `invalid-secret-${i}`,
+          ...modernHeaders("tools/list"),
+        },
+        body: LIST_TOOLS,
+      });
+      expect(res.status).toBe(200);
+    }
+
+    expect(fetchCapabilities).toHaveBeenCalledTimes(3);
+    expect(new Set(seenKeyIds)).toEqual(new Set([DISCOVERY_MODE_CREDENTIAL]));
+  });
+
+  it("holds invalid header verification behind a shared in-flight key", async () => {
+    delete process.env.B2_REGISTER_ALL_TOOLS;
+    process.env.B2_TRUST_PROXY_HEADERS = "true";
+    process.env.B2_MAX_SESSIONS_PER_KEY = "1";
+    let releaseCapabilities!: () => void;
+    const capabilitiesBlocked = new Promise<void>((resolve) => {
+      releaseCapabilities = resolve;
+    });
+    const fetchCapabilities = vi.fn(async () => {
+      await capabilitiesBlocked;
+      throw new CredentialResolutionError(
+        "Credential or capability resolution failed",
+        401,
+        "capability_auth_failed",
+      );
+    });
+    await replaceHandle(undefined, { fetchCapabilities });
+
+    const first = request(port, "POST", "/mcp", {
+      headers: {
+        "x-b2-key-id": "invalid-a",
+        "x-b2-key": "invalid-secret-a",
+        "x-forwarded-for": "198.51.100.10",
+        ...modernHeaders("tools/list"),
+      },
+      body: LIST_TOOLS,
+    });
+    await vi.waitFor(() => expect(fetchCapabilities).toHaveBeenCalledTimes(1));
+
+    const second = await request(port, "POST", "/mcp", {
+      headers: {
+        "x-b2-key-id": "invalid-b",
+        "x-b2-key": "invalid-secret-b",
+        "x-forwarded-for": "198.51.100.11",
+        ...modernHeaders("tools/list"),
+      },
+      body: LIST_TOOLS,
+    });
+    expect(second.status).toBe(429);
+    expect(fetchCapabilities).toHaveBeenCalledTimes(1);
+
+    releaseCapabilities();
+    await expect(first).resolves.toMatchObject({ status: 200 });
+  });
+
+  it("preserves per-credential limits during shared verification", async () => {
+    delete process.env.B2_REGISTER_ALL_TOOLS;
+    process.env.B2_MAX_SESSIONS_PER_KEY = "1";
+    let releaseCapabilities!: () => void;
+    const capabilitiesBlocked = new Promise<void>((resolve) => {
+      releaseCapabilities = resolve;
+    });
+    const fetchCapabilities = vi.fn(async () => {
+      await capabilitiesBlocked;
+      return ["listBuckets"];
+    });
+    await replaceHandle(undefined, { fetchCapabilities });
+
+    const first = request(port, "POST", "/mcp", {
+      headers: {
+        "x-b2-key-id": "same-valid-key",
+        "x-b2-key": "same-secret",
+        ...modernHeaders("tools/list"),
+      },
+      body: LIST_TOOLS,
+    });
+    await vi.waitFor(() => expect(fetchCapabilities).toHaveBeenCalledTimes(1));
+
+    const second = await request(port, "POST", "/mcp", {
+      headers: {
+        "x-b2-key-id": "same-valid-key",
+        "x-b2-key": "same-secret",
+        ...modernHeaders("tools/list"),
+      },
+      body: LIST_TOOLS,
+    });
+    expect(second.status).toBe(429);
+    expect(fetchCapabilities).toHaveBeenCalledTimes(1);
+
+    releaseCapabilities();
+    await expect(first).resolves.toMatchObject({ status: 200 });
+  });
+
+  it("does not double-count fresh header verification against the global in-flight cap", async () => {
+    // Regression: verification held a second permit on the shared in-flight
+    // limiter, so one uncached credential consumed two of B2_MAX_SESSIONS and
+    // the very first fresh request was wrongly rejected with 503.
+    delete process.env.B2_REGISTER_ALL_TOOLS;
+    process.env.B2_MAX_SESSIONS = "1";
+    const fetchCapabilities = vi.fn(async () => ["listBuckets"]);
+    await replaceHandle(undefined, { fetchCapabilities });
+
+    const response = await request(port, "POST", "/mcp", {
+      headers: {
+        "x-b2-key-id": "fresh-valid-key",
+        "x-b2-key": "fresh-secret",
+        ...modernHeaders("tools/list"),
+      },
+      body: LIST_TOOLS,
+    });
+
+    expect(response.status).toBe(200);
+    expect(fetchCapabilities).toHaveBeenCalledTimes(1);
+  });
+
+  it("rate-limits invalid header verification before upstream auth", async () => {
+    delete process.env.B2_REGISTER_ALL_TOOLS;
+    process.env.B2_TRUST_PROXY_HEADERS = "true";
+    process.env.B2_MCP_RATE_LIMIT_BURST = "1";
+    process.env.B2_MCP_RATE_LIMIT_RPS = "1";
+    _resetRateLimiter();
+    const fetchCapabilities = vi.fn(async () => {
+      throw new CredentialResolutionError(
+        "Credential or capability resolution failed",
+        401,
+        "capability_auth_failed",
+      );
+    });
+    await replaceHandle(undefined, { fetchCapabilities });
+
+    const first = await request(port, "POST", "/mcp", {
+      headers: {
+        "x-b2-key-id": "invalid-a",
+        "x-b2-key": "invalid-secret-a",
+        "x-forwarded-for": "198.51.100.20",
+        ...modernHeaders("tools/list"),
+      },
+      body: LIST_TOOLS,
+    });
+    expect(first.status).toBe(200);
+
+    const second = await request(port, "POST", "/mcp", {
+      headers: {
+        "x-b2-key-id": "invalid-b",
+        "x-b2-key": "invalid-secret-b",
+        "x-forwarded-for": "198.51.100.21",
+        ...modernHeaders("tools/list"),
+      },
+      body: LIST_TOOLS,
+    });
+    expect(second.status).toBe(429);
+    expect(fetchCapabilities).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps valid cached header credentials isolated from verification limits", async () => {
+    delete process.env.B2_REGISTER_ALL_TOOLS;
+    process.env.B2_MAX_SESSIONS_PER_KEY = "1";
+    await replaceHandle();
+
+    for (const keyId of ["valid-a", "valid-b"]) {
+      const warm = await request(port, "POST", "/mcp", {
+        headers: {
+          "x-b2-key-id": keyId,
+          "x-b2-key": `secret-${keyId}`,
+          ...modernHeaders("tools/list"),
+        },
+        body: LIST_TOOLS,
+      });
+      expect(warm.status).toBe(200);
+    }
+
+    const controllers: ReadableStreamDefaultController<Uint8Array>[] = [];
+    await replaceHandle(undefined, {
+      mcpHandler: {
+        fetch: vi.fn(async () => {
+          const stream = new ReadableStream<Uint8Array>({
+            start(controller) {
+              controllers.push(controller);
+              controller.enqueue(new TextEncoder().encode("data: open\n\n"));
+            },
+          });
+          return new Response(stream, {
+            status: 200,
+            headers: { "Content-Type": "text/event-stream" },
+          });
+        }),
+        close: vi.fn(),
+      },
+    });
+
+    const first = request(port, "POST", "/mcp", {
+      headers: {
+        "x-b2-key-id": "valid-a",
+        "x-b2-key": "secret-valid-a",
+        ...modernHeaders("tools/list"),
+      },
+      body: LIST_TOOLS,
+    });
+    await vi.waitFor(() => expect(controllers).toHaveLength(1));
+
+    const second = request(port, "POST", "/mcp", {
+      headers: {
+        "x-b2-key-id": "valid-b",
+        "x-b2-key": "secret-valid-b",
+        ...modernHeaders("tools/list"),
+      },
+      body: LIST_TOOLS,
+    });
+    await vi.waitFor(() => expect(controllers).toHaveLength(2));
+
+    for (const controller of controllers) controller.close();
+    await expect(first).resolves.toMatchObject({ status: 200 });
+    await expect(second).resolves.toMatchObject({ status: 200 });
   });
 
   it("keeps concurrent header credentials isolated through the shared handler", async () => {
@@ -997,6 +1359,29 @@ describe("HTTP transport handler", () => {
     expect(ok.status).toBe(200);
   });
 
+  it("keeps rejected server-mode credentials observable", async () => {
+    process.env.B2_HTTP_CREDENTIAL_MODE = "server";
+    process.env.B2_APPLICATION_KEY_ID = "server-key";
+    process.env.B2_APPLICATION_KEY = "server-secret";
+    await replaceHandle(undefined, {
+      fetchCapabilities: vi.fn(async () => {
+        throw new CredentialResolutionError(
+          "Credential or capability resolution failed",
+          401,
+          "capability_auth_failed",
+        );
+      }),
+    });
+
+    const res = await request(port, "POST", "/mcp", {
+      headers: modernHeaders("tools/list"),
+      body: LIST_TOOLS,
+    });
+    const parsed = JSON.parse(res.body);
+    expect(res.status).toBe(401);
+    expect(parsed.error.data).toMatchObject({ code: "capability_auth_failed", status: 401 });
+  });
+
   it("server mode applies in-flight caps per verified principal", async () => {
     process.env.B2_HTTP_CREDENTIAL_MODE = "server";
     process.env.B2_APPLICATION_KEY_ID = "server-key";
@@ -1089,7 +1474,43 @@ describe("HTTP transport handler", () => {
     expect(ok.status).toBe(200);
   });
 
-  it("principal mode requires verified authInfo", async () => {
+  it("keeps rejected principal-mode credentials observable", async () => {
+    process.env.B2_HTTP_CREDENTIAL_MODE = "principal";
+    process.env.B2_PRINCIPAL_CREDENTIAL_MAP = JSON.stringify({ alice: "tenant_a" });
+    await replaceHandle(
+      () => ({
+        token: "verified-token",
+        clientId: "client-a",
+        scopes: ["b2:read"],
+        extra: { sub: "alice" },
+      }),
+      {
+        secretBroker: {
+          resolve: (ref) =>
+            ref === "tenant_a"
+              ? { applicationKeyId: "tenant-key", applicationKey: "tenant-secret" }
+              : null,
+        },
+        fetchCapabilities: vi.fn(async () => {
+          throw new CredentialResolutionError(
+            "Credential or capability resolution failed",
+            401,
+            "capability_auth_failed",
+          );
+        }),
+      },
+    );
+
+    const res = await request(port, "POST", "/mcp", {
+      headers: modernHeaders("tools/list"),
+      body: LIST_TOOLS,
+    });
+    const parsed = JSON.parse(res.body);
+    expect(res.status).toBe(401);
+    expect(parsed.error.data).toMatchObject({ code: "capability_auth_failed", status: 401 });
+  });
+
+  it("principal mode serves discovery when the B2 credential is not mapped", async () => {
     process.env.B2_HTTP_CREDENTIAL_MODE = "principal";
     process.env.B2_PRINCIPAL_CREDENTIAL_MAP = JSON.stringify({ alice: "tenant_a" });
     process.env.B2_CREDENTIAL_TENANT_A_APPLICATION_KEY_ID = "tenant-key";
@@ -1100,6 +1521,22 @@ describe("HTTP transport handler", () => {
       headers: modernHeaders("tools/list"),
       body: LIST_TOOLS,
     });
-    expect(missingAuth.status).toBe(401);
+    expect(missingAuth.status).toBe(200);
+    expect(JSON.parse(missingAuth.body).result.tools.length).toBeGreaterThan(0);
+
+    await replaceHandle(() => ({
+      token: "verified-token",
+      clientId: "client-b",
+      scopes: ["b2:read"],
+      extra: { sub: "bob" },
+    }));
+    const unmappedCall = await request(port, "POST", "/mcp", {
+      headers: modernHeaders("tools/call", "b2_list_buckets"),
+      body: callToolBody("b2_list_buckets"),
+    });
+    const callResult = JSON.parse(unmappedCall.body).result;
+    expect(unmappedCall.status).toBe(200);
+    expect(callResult.isError).toBe(true);
+    expect(JSON.stringify(callResult)).toContain("missing_credentials");
   });
 });

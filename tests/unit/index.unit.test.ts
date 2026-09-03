@@ -172,7 +172,7 @@ describe("stdio entry point", () => {
     expect(process.env.B2_REGISTER_ALL_TOOLS).toBe("true");
     expect(process.env.B2_SECRET_SINK).toBe("off");
     expect(fetchCapabilities).toHaveBeenCalled();
-    expect(createServer).toHaveBeenCalledWith(config, null, { credentialsMissing: true });
+    expect(createServer).toHaveBeenCalledWith(config, null, { credentialsUnavailable: true });
     expect(warn).toHaveBeenCalledWith(
       { transport: "stdio", reason: "no_credentials" },
       "server.stdio_discovery_mode",
@@ -200,7 +200,7 @@ describe("stdio entry point", () => {
     expect(process.env.B2_APPLICATION_KEY_ID).toBe("test-key-id");
     expect(createServer).toHaveBeenCalledWith(config, ["listBuckets"]);
     expect(createServer).not.toHaveBeenCalledWith(config, expect.anything(), {
-      credentialsMissing: true,
+      credentialsUnavailable: true,
     });
   });
 
@@ -227,7 +227,7 @@ describe("stdio entry point", () => {
     expect(process.env.B2_APPLICATION_KEY_ID).toBe("test-key-id");
     expect(process.env.B2_APPLICATION_KEY).toBeUndefined();
     expect(createServer).not.toHaveBeenCalledWith(config, expect.anything(), {
-      credentialsMissing: true,
+      credentialsUnavailable: true,
     });
   });
 
@@ -259,6 +259,37 @@ describe("stdio entry point", () => {
     expect(warn).toHaveBeenCalledWith(
       { code: "capability_upstream_unavailable", reason: "upstream_unavailable" },
       "capability.fetch.stdio_degraded",
+    );
+  });
+
+  it("starts discovery mode when bootstrap capability lookup rejects credentials", async () => {
+    const config = testConfig();
+    const server = { close: vi.fn(async () => undefined) };
+    const createServer = vi.spyOn(serverModule, "createServer").mockReturnValue(server as never);
+    vi.spyOn(serverModule, "loadConfig").mockReturnValue(config);
+    vi.spyOn(serverModule, "fetchCapabilities").mockRejectedValue(
+      new CredentialResolutionError(
+        "Credential or capability resolution failed",
+        401,
+        "capability_auth_failed",
+      ),
+    );
+    const error = vi.spyOn(loggerModule.logger, "error").mockImplementation(() => undefined);
+    const serveStdio = vi.mocked(stdioTransport.serveStdio).mockImplementation(
+      () =>
+        ({
+          close: vi.fn(async () => undefined),
+        }) as ReturnType<typeof stdioTransport.serveStdio>,
+    );
+
+    await startStdio();
+
+    const factory = serveStdio.mock.calls[0]?.[0] as (() => unknown) | undefined;
+    expect(factory?.()).toBe(server);
+    expect(createServer).toHaveBeenCalledWith(config, null, { credentialsUnavailable: true });
+    expect(error).toHaveBeenCalledWith(
+      { code: "capability_auth_failed", reason: "auth_failed" },
+      "capability.fetch.stdio_discovery_mode",
     );
   });
 

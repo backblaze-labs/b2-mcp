@@ -31,6 +31,7 @@ const savedEnv = saveEnv([
   "B2_HTTP_CREDENTIAL_MODE",
   "B2_MAX_SESSIONS",
   "B2_MAX_SESSIONS_PER_KEY",
+  "B2_TRUST_PROXY_HEADERS",
 ]);
 
 interface Deferred<T> {
@@ -74,6 +75,7 @@ beforeEach(() => {
   delete process.env.B2_APPLICATION_KEY;
   delete process.env.B2_MAX_SESSIONS;
   delete process.env.B2_MAX_SESSIONS_PER_KEY;
+  delete process.env.B2_TRUST_PROXY_HEADERS;
 });
 
 afterEach(async () => {
@@ -91,7 +93,7 @@ describe("HTTP transport guards (MCP 2026-07-28)", () => {
   it("rejects a request with a non-localhost Origin (DNS-rebinding guard)", async () => {
     await startHandle();
     const res = await request(port, "POST", "/mcp", {
-      headers: { ...creds, ...JSON_HEADERS, origin: "https://evil.example.com" },
+      headers: { ...JSON_HEADERS, origin: "https://evil.example.com" },
       body: LIST_TOOLS,
     });
     expect(res.status).toBe(403);
@@ -123,13 +125,13 @@ describe("HTTP transport guards (MCP 2026-07-28)", () => {
     });
 
     const first = request(port, "POST", "/mcp", {
-      headers: { ...creds, ...modernHeaders("tools/list") },
+      headers: modernHeaders("tools/list"),
       body: LIST_TOOLS,
     });
     await entered.promise; // first request now occupies the only in-flight slot
 
     const second = await request(port, "POST", "/mcp", {
-      headers: { ...creds, ...modernHeaders("tools/list") },
+      headers: modernHeaders("tools/list"),
       body: LIST_TOOLS,
     });
     expect(second.status).toBe(503);
@@ -219,6 +221,45 @@ describe("HTTP transport guards (MCP 2026-07-28)", () => {
     const second = await request(port, "POST", "/mcp", {
       headers: { ...creds, ...modernHeaders("tools/call", "b2_list_buckets") },
       body: callToolBody("b2_list_buckets"),
+    });
+    expect(second.status).toBe(429);
+    expect(JSON.parse(second.body).error).toMatch(/credential/i);
+
+    gate.resolve();
+    await first;
+  });
+
+  it("bounds credential-free discovery despite spoofed proxy headers", async () => {
+    process.env.B2_TRUST_PROXY_HEADERS = "true";
+    process.env.B2_MAX_SESSIONS_PER_KEY = "1";
+    const entered = deferred<void>();
+    const gate = deferred<void>();
+    await startHandle({
+      mcpHandler: {
+        fetch: async () => {
+          entered.resolve();
+          await gate.promise;
+          return Response.json({ jsonrpc: "2.0", id: 1, result: { tools: [] } });
+        },
+        close: () => undefined,
+      },
+    });
+
+    const first = request(port, "POST", "/mcp", {
+      headers: {
+        ...modernHeaders("tools/list"),
+        "x-forwarded-for": "198.51.100.10",
+      },
+      body: LIST_TOOLS,
+    });
+    await entered.promise;
+
+    const second = await request(port, "POST", "/mcp", {
+      headers: {
+        ...modernHeaders("tools/list"),
+        "x-forwarded-for": "198.51.100.11",
+      },
+      body: LIST_TOOLS,
     });
     expect(second.status).toBe(429);
     expect(JSON.parse(second.body).error).toMatch(/credential/i);

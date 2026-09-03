@@ -14,14 +14,18 @@ customer-operated edge, adapter, or resource-server layer before B2 credential
 resolution. The standalone Node HTTP entry point (`b2-mcp --transport http` and
 `startHttp()`) does not authenticate callers by itself; with
 `B2_HTTP_CREDENTIAL_MODE` unset it uses `headers` compatibility mode and expects
-B2 credential headers on each request. Do not expose that endpoint without TLS,
-host/origin allowlists, and a separate caller-authentication boundary. For the
-built-in hosted adapters, `src/oauth-resource-server.ts` validates the bearer
-token and passes verified MCP `authInfo` into the shared request pipeline. The
-published package does not expose a semver-managed Node HTTP embedding API;
-custom deployments should use the documented hosted adapter boundary or
-maintain their own source-level adapter that only forwards `authInfo` after
-caller authentication.
+B2 credential headers on each tool-execution request. Credential-free discovery
+methods such as `initialize`, `server/discover`, `tools/list`, `resources/list`,
+`prompts/list`, and `ping` may run without B2 keys so scanners can enumerate the
+server; `tools/call` still returns `missing_credentials` until usable B2
+credentials are available. Do not expose that endpoint without TLS, host/origin
+allowlists, and a separate caller-authentication boundary. For the built-in
+hosted adapters, `src/oauth-resource-server.ts` validates the bearer token and
+passes verified MCP `authInfo` into the shared request pipeline. The published
+package does not expose a semver-managed Node HTTP embedding API; custom
+deployments should use the documented hosted adapter boundary or maintain their
+own source-level adapter that only forwards `authInfo` after caller
+authentication.
 
 B2 credential custody is separate from MCP OAuth. OAuth proves who may call the
 MCP endpoint. B2 application keys are then selected by one of the credential

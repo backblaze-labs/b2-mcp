@@ -198,4 +198,45 @@ describe("HTTP legacy protocol fallback (2025 era)", () => {
     expect(JSON.stringify(parseMcpBody(s3Call.body).result)).toContain("objects");
     expect(handle.sessions.size).toBe(0);
   });
+
+  it("serves credential-free initialize and list while gating calls", async () => {
+    const init = await request(port, "POST", "/mcp", {
+      headers: JSON_HEADERS,
+      body: legacyInit("2025-06-18"),
+    });
+    const initialized = await request(port, "POST", "/mcp", {
+      headers: JSON_HEADERS,
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        method: "notifications/initialized",
+        params: {},
+      }),
+    });
+    const listed = await request(port, "POST", "/mcp", {
+      headers: JSON_HEADERS,
+      body: legacyRequest("tools/list", {}, 2),
+    });
+    const call = await request(port, "POST", "/mcp", {
+      headers: JSON_HEADERS,
+      body: legacyCallTool("s3_head_bucket", {}, 3),
+    });
+
+    expect(init.status).toBe(200);
+    expect(parseMcpBody(init.body).result.protocolVersion).toBe("2025-06-18");
+    expect(initialized.status).not.toBe(401);
+    expect(initialized.body).not.toContain("B2 application credentials");
+
+    expect(listed.status).toBe(200);
+    const toolNames = parseMcpBody(listed.body).result.tools.map(
+      (tool: { name: string }) => tool.name,
+    );
+    expect(toolNames).toContain("b2_list_buckets");
+    expect(toolNames).toContain("s3_head_bucket");
+
+    expect(call.status).toBe(200);
+    const callResult = parseMcpBody(call.body).result;
+    expect(callResult.isError).toBe(true);
+    expect(JSON.stringify(callResult)).toContain("missing_credentials");
+    expect(JSON.stringify(callResult)).not.toContain("validation");
+  });
 });

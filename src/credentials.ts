@@ -12,6 +12,8 @@ import { parseMcpOutputFormat, preflightMcpOutputFormat } from "./utils/result-s
 import { resolveSecretSinkConfig } from "./utils/secret-sink.js";
 
 const DEFAULT_REGION = "us-west-004";
+/** Placeholder credential material used only for credential-free MCP discovery. */
+export const DISCOVERY_MODE_CREDENTIAL = "b2-mcp-discovery-mode";
 
 const HEADER_NAMES = {
   keyId: ["x-b2-mcp-key-id", "x-b2-key-id"],
@@ -352,6 +354,37 @@ function httpConfigOptions(): ConfigOptions {
     allowLocalFiles: process.env.B2_ALLOW_LOCAL_FILES === "true" && !!process.env.B2_FILE_ROOT,
     fileRoot: process.env.B2_FILE_ROOT ?? null,
     strictOptionalPairs: true,
+  };
+}
+
+/**
+ * Build a non-secret placeholder credential resolution for HTTP MCP discovery.
+ *
+ * @remarks
+ * Directory scanners and MCP inspectors need to initialize and enumerate tools
+ * before a user supplies real B2 credentials. The placeholder credential is
+ * never sent to B2: callers must pass the returned config to `createServer`
+ * with `credentialsUnavailable: true`, which short-circuits all tool execution.
+ *
+ * @param cacheKey - Non-secret caller key used for request cleanup/rate scopes.
+ *
+ * @returns Credential resolution suitable for HTTP discovery-mode server creation.
+ */
+export function httpDiscoveryCredentialResolution(
+  cacheKey = `credential:${DISCOVERY_MODE_CREDENTIAL}`,
+): CredentialResolution {
+  const config = configFromMaterial(
+    {
+      applicationKeyId: DISCOVERY_MODE_CREDENTIAL,
+      applicationKey: DISCOVERY_MODE_CREDENTIAL,
+    },
+    httpConfigOptions(),
+  );
+  config.callerFingerprint = callerFingerprintForConfig(config, cacheKey);
+  return {
+    config,
+    cacheKey,
+    capabilityCacheKey: `discovery:${credentialFingerprint(["http", cacheKey].join("\0"))}`,
   };
 }
 

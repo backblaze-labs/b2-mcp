@@ -192,32 +192,42 @@ export interface CreateServerOptions {
    */
   failClosedUnknownCapabilities?: boolean;
   /**
-   * Register the full tool surface for discovery while no B2 credentials are
-   * configured, and answer every tool call with a clear `missing_credentials`
-   * error instead of attempting a doomed provider call.
+   * Register the full tool surface for discovery when B2 credentials are not
+   * available to execute calls, and answer every tool call with a clear
+   * `missing_credentials` error instead of attempting a doomed provider call.
    *
    * @remarks
-   * Set by the stdio bootstrap when it starts without
-   * `B2_APPLICATION_KEY_ID` / `B2_APPLICATION_KEY` so registry/directory
-   * services (mcp.so, Glama, LobeHub) can still enumerate `tools/list` in a
-   * credential-less sandbox. Tool *calls* fail with an actionable message; the
-   * placeholder credentials the bootstrap injects are never used because this
-   * short-circuits before the handler runs.
+   * Set by stdio bootstrap and the HTTP request pipeline when no usable B2
+   * credential is available for this request, so registry/directory services
+   * (mcp.so, Glama, LobeHub) can still initialize and enumerate `tools/list` in
+   * a sandbox. Tool *calls* fail with an actionable message; any placeholder
+   * credentials are never used because this short-circuits before the handler
+   * runs.
+   *
+   * @internal
+   */
+  credentialsUnavailable?: boolean;
+  /**
+   * Deprecated alias for {@link CreateServerOptions.credentialsUnavailable}.
+   *
+   * @deprecated Use `credentialsUnavailable`.
    *
    * @internal
    */
   credentialsMissing?: boolean;
 }
 
-/** Tool-call error returned in credential-less stdio discovery mode. */
+/** Tool-call error returned in credential-less discovery mode. */
 const MISSING_CREDENTIALS_TOOL_ERROR = Object.freeze({
   status: 401,
   code: "missing_credentials",
   message:
-    "B2 credentials are not configured. Set B2_APPLICATION_KEY_ID and B2_APPLICATION_KEY " +
-    "(stdio) or send the credential headers (HTTP) before calling B2 tools. The server is " +
-    "running in discovery mode, so tools are listed but cannot execute.",
+    "B2 credentials are missing or could not be verified. Set B2_APPLICATION_KEY_ID and " +
+    "B2_APPLICATION_KEY (stdio) or send valid credential headers (HTTP) before calling B2 " +
+    "tools. The server is running in discovery mode, so tools are listed but cannot execute.",
 });
+const UNKNOWN_DISCOVERY_TOOL = "unknown_tool";
+const MAX_DISCOVERY_ARG_KEY_COUNT = 100;
 
 /**
  * Build the MCP server and register the B2 tool surface.
@@ -256,6 +266,9 @@ export function createServer(
   const outputFormat = config.outputFormat ?? DEFAULT_MCP_OUTPUT_FORMAT;
   const oauthScopes = options.oauthScopes ? new Set(options.oauthScopes) : null;
   const requestStateCodec = createDestructiveElicitationRequestStateCodec(config);
+  const credentialsUnavailable =
+    options.credentialsUnavailable === true || options.credentialsMissing === true;
+  const discoveryCacheTtlMs = credentialsUnavailable ? 0 : 30_000;
   const server = createMcpServer(
     {
       name: "backblaze-b2",
@@ -290,11 +303,11 @@ export function createServer(
         "Optional client-side Backblaze B2 Skills pack: `b2-backup-restore`, `b2-incident-response`, `b2-least-privilege-keys`, `b2-lifecycle-cost-hygiene`, `b2-migration`, `b2-object-lock`. If relevant and inactive, suggest installing it using the MCP client's skills docs. Do not block; tools work without skills.",
       ].join("\n"),
       cacheHints: {
-        "server/discover": { ttlMs: 30_000, cacheScope: "private" },
+        "server/discover": { ttlMs: discoveryCacheTtlMs, cacheScope: "private" },
         ...(config.enableMcpPrompts === true
-          ? { "prompts/list": { ttlMs: 30_000, cacheScope: "private" } }
+          ? { "prompts/list": { ttlMs: discoveryCacheTtlMs, cacheScope: "private" } }
           : {}),
-        "tools/list": { ttlMs: 30_000, cacheScope: "private" },
+        "tools/list": { ttlMs: discoveryCacheTtlMs, cacheScope: "private" },
       },
       requestState: {
         verify: requestStateCodec.verify,
@@ -325,7 +338,7 @@ export function createServer(
   const registrar = new ToolRegistrationAdapter(server, {
     shouldRegister: shouldRegisterForResolvedAuthz,
     wrapCallback: (name, callback) =>
-      options.credentialsMissing === true
+      credentialsUnavailable
         ? createMissingCredentialsToolCallback(name, config)
         : createAuditedToolCallback(name, callback, config, {
             getClientCapabilities: () => getMcpClientCapabilities(server),
@@ -367,7 +380,7 @@ export function createServer(
   // sink availability) so registries learn real inputs like keyName/capabilities/
   // email; the discovery guard still rejects every call before execution.
   const durableSecretOptions = {
-    registerDurableSecretSchemas: options.credentialsMissing === true,
+    registerDurableSecretSchemas: credentialsUnavailable,
   };
 
   // ── B2 Native API tools (control plane: buckets, keys, object lock) ──────
@@ -437,7 +450,7 @@ export function createServer(
   const toolCount = registrar.commit();
   registerControlPlaneResources(server, b2Client, config, capabilities, {
     oauthScopes,
-    credentialsMissing: options.credentialsMissing,
+    credentialsMissing: credentialsUnavailable,
     failClosedUnknownCapabilities,
   });
   // This flag gates both prompt-handler registration and prompts/list
@@ -462,7 +475,7 @@ export function createServer(
   // Discovery mode: reject every tools/call ahead of the SDK's input-schema
   // validation so required-argument tools also return missing_credentials, while
   // tools/list keeps the real schemas registered above.
-  if (options.credentialsMissing === true) {
+  if (credentialsUnavailable) {
     installDiscoveryModeToolCallHandler(server, config);
   }
 
@@ -486,9 +499,10 @@ export function createServer(
 /**
  * One-shot authorize to read the key's capabilities for capability-aware
  * registration. Returns null only when discovery is explicitly skipped via
- * B2_REGISTER_ALL_TOOLS=true. Lookup failures throw so callers fail closed
- * instead of exposing the full tool surface; an empty array is a fail-closed
- * capability set and is deliberately not cached at the positive TTL.
+ * B2_REGISTER_ALL_TOOLS=true. Lookup failures throw so callers can decide
+ * whether to fail closed or enter credential-free discovery mode; an empty
+ * array is a fail-closed capability set and is deliberately not cached at the
+ * positive TTL.
  */
 interface CapabilityCacheEntry {
   capabilities: string[];
@@ -566,6 +580,27 @@ export function sweepCapabilityCache(now = Date.now()): void {
   for (const [key, entry] of capabilityCache) {
     if (entry.expiresAt <= now) capabilityCache.delete(key);
   }
+}
+
+/**
+ * Return whether a capability lookup would need a fresh B2 authorize request.
+ *
+ * @remarks
+ * HTTP uses this to put only actual capability-authorize work behind shared
+ * verification limits. This inspects only the requested key and leaves global
+ * cleanup to normal fetch and idle sweeps.
+ *
+ * @param cacheKey - Exact capability cache key to inspect.
+ * @param now - Millisecond timestamp used for deterministic tests.
+ *
+ * @returns True when no fresh cache entry or in-flight lookup exists.
+ */
+export function requiresCapabilityDiscovery(cacheKey: string, now = Date.now()): boolean {
+  if (process.env.B2_REGISTER_ALL_TOOLS === "true") return false;
+  const cached = capabilityCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) return false;
+  if (cached) capabilityCache.delete(cacheKey);
+  return !capabilityInflight.has(cacheKey);
 }
 
 /**
@@ -1011,16 +1046,20 @@ export function createAuditedPromptCallback(
  * code/status and keep rejected attempts observable.
  *
  * @param name - Registered tool name recorded in the audit event.
- * @param argKeys - Argument key names (never values) recorded in the event.
+ * @param argSummary - Bounded count of top-level argument keys.
  * @param config - Resolved B2 credentials and runtime policy.
  */
-function logMissingCredentialsAudit(name: unknown, argKeys: string[], config: B2Config): void {
+function logMissingCredentialsAudit(
+  name: string,
+  argSummary: { argKeyCount: number; argKeysTruncated?: true },
+  config: B2Config,
+): void {
   logger.info(
     {
       tool: name,
       credential: config.credentialFingerprint ?? fingerprintConfig(config),
       outputFormat: config.outputFormat ?? DEFAULT_MCP_OUTPUT_FORMAT,
-      argKeys,
+      ...argSummary,
       durationMs: 0,
       error: true,
       resultType: "complete",
@@ -1033,6 +1072,21 @@ function logMissingCredentialsAudit(name: unknown, argKeys: string[], config: B2
 
 function argKeysOf(args: unknown): string[] {
   return args && typeof args === "object" && !Array.isArray(args) ? Object.keys(args) : [];
+}
+
+function argKeySummaryOf(args: unknown): { argKeyCount: number; argKeysTruncated?: true } {
+  if (!args || typeof args !== "object" || Array.isArray(args)) return { argKeyCount: 0 };
+  const count = Object.keys(args).length;
+  if (count > MAX_DISCOVERY_ARG_KEY_COUNT) {
+    return { argKeyCount: MAX_DISCOVERY_ARG_KEY_COUNT, argKeysTruncated: true };
+  }
+  return { argKeyCount: count };
+}
+
+function registeredDiscoveryToolName(server: McpServer, name: unknown): string {
+  if (typeof name !== "string") return UNKNOWN_DISCOVERY_TOOL;
+  const tools = getRegisteredTools(server) ?? {};
+  return Object.prototype.hasOwnProperty.call(tools, name) ? name : UNKNOWN_DISCOVERY_TOOL;
 }
 
 /**
@@ -1060,7 +1114,7 @@ function argKeysOf(args: unknown): string[] {
  */
 export function createMissingCredentialsToolCallback(name: string, config: B2Config): ToolCallback {
   return async function missingCredentialsToolCallback(args: any) {
-    logMissingCredentialsAudit(name, argKeysOf(args), config);
+    logMissingCredentialsAudit(name, argKeySummaryOf(args), config);
     return toolError(MISSING_CREDENTIALS_TOOL_ERROR);
   };
 }
@@ -1084,7 +1138,11 @@ export function createMissingCredentialsToolCallback(name: string, config: B2Con
 function installDiscoveryModeToolCallHandler(server: McpServer, config: B2Config): void {
   server.server.setRequestHandler("tools/call", async (request) => {
     const params = (request as { params?: { name?: unknown; arguments?: unknown } }).params;
-    logMissingCredentialsAudit(params?.name, argKeysOf(params?.arguments), config);
+    logMissingCredentialsAudit(
+      registeredDiscoveryToolName(server, params?.name),
+      argKeySummaryOf(params?.arguments),
+      config,
+    );
     return toolError(MISSING_CREDENTIALS_TOOL_ERROR) as CallToolResult;
   });
 }

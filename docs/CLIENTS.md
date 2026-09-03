@@ -217,7 +217,12 @@ Point it at `https://<host>/mcp`. In `server` mode, do not send B2 credential he
 
 ### Header compatibility mode
 
-If the operator sets `B2_HTTP_CREDENTIAL_MODE=headers` or leaves it unset, send B2 credentials on every MCP request. Prefer the explicit header names:
+If the operator sets `B2_HTTP_CREDENTIAL_MODE=headers` or leaves it unset, send
+B2 credentials on every MCP request that executes tools. Credential-free
+discovery requests can initialize, list tools/resources/prompts, and ping
+without B2 headers so inspectors and directory scanners can enumerate the
+server; `tools/call` remains credential-gated and returns `missing_credentials`
+until valid B2 headers are present. Prefer the explicit header names:
 
 ```json
 {
@@ -237,7 +242,9 @@ If Partner API tools require a distinct master key, also send `X-B2-MCP-Master-K
 
 - **stdio:** the key goes in the `env` block of the client's config file, in **plaintext**. Protect that file and never commit it to a repo.
 - **hosted server/principal modes:** the client sends no B2 key. Front the server with TLS and, for principal mode, an MCP OAuth resource-server validation layer that supplies verified `authInfo`.
-- **hosted headers mode:** the key travels in `X-B2-MCP-*` headers on every request. Treat those headers as durable secrets in the proxy, logs, APM, and test fixtures.
+- **hosted headers mode:** the key travels in `X-B2-MCP-*` headers on every
+  tool-execution request. Discovery requests may omit it. Treat those headers as
+  durable secrets in the proxy, logs, APM, and test fixtures.
 - **Master-key caveat:** only the Partner API needs a master key in Phase 1. S3 tools use the same authorized application key that controls tool registration, so use a non-master `B2_APPLICATION_KEY_*` credential for object and presign tools.
 
 See the [README](../README.md) for the full environment-variable list and the tool catalog.

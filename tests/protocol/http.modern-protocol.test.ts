@@ -16,6 +16,7 @@ import {
   type HttpServerHandle,
   type HttpServerOptions,
 } from "../../src/http-server";
+import { CredentialResolutionError } from "../../src/credentials";
 import { invalidateAuthManagerCache } from "../../src/server";
 import {
   closeHttpServer,
@@ -134,8 +135,10 @@ describe("HTTP handler (MCP 2026-07-28)", () => {
       const discover = client.getDiscoverResult() ?? (await client.discover());
       expect(discover.supportedVersions).toContain(MODERN_PROTOCOL_VERSION);
       expect(discover.cacheScope).toBe("private");
+      expect(discover.ttlMs).toBe(30_000);
 
       const listed = await client.listTools(undefined, { cacheMode: "refresh" });
+      expect(listed.ttlMs).toBe(30_000);
       const toolNames = listed.tools.map((tool) => tool.name);
       expect(toolNames).toContain("b2_list_buckets");
       expect(toolNames).toContain("s3_list_objects_v2");
@@ -485,23 +488,100 @@ describe("HTTP handler (MCP 2026-07-28)", () => {
     expect(JSON.parse(res.body).result.tools.length).toBeGreaterThan(0);
   });
 
-  it("returns MCP-shaped errors when modern requests omit credentials", async () => {
-    const res = await request(port, "POST", "/mcp", {
-      headers: modernHeaders("tools/list"),
-      body: LIST_TOOLS,
+  it("serves modern discovery without credentials and gates tool calls", async () => {
+    const { client } = await connectHttpClient(port, {
+      era: "modern",
+      headers: {},
+      cachePartition: "credential-free",
     });
-    const body = parsedJson(res.body);
+    try {
+      expect(client.getProtocolEra()).toBe("modern");
 
-    expect(res.status).toBe(401);
-    expect(body).toMatchObject({
-      jsonrpc: "2.0",
-      id: 1,
-      error: {
-        code: -32001,
-        message: "B2 application credentials are required",
-        data: { code: "missing_credentials", status: 401 },
-      },
+      const discover = client.getDiscoverResult() ?? (await client.discover());
+      expect(discover.ttlMs).toBe(0);
+      expect(discover.cacheScope).toBe("private");
+
+      const listed = await client.listTools(undefined, { cacheMode: "refresh" });
+      expect(listed.ttlMs).toBe(0);
+      const toolNames = listed.tools.map((tool) => tool.name);
+      expect(toolNames).toContain("b2_list_buckets");
+      expect(toolNames).toContain("s3_head_bucket");
+
+      const call = await client.callTool({ name: "s3_head_bucket", arguments: {} });
+      expect(call.isError).toBe(true);
+      expect(JSON.stringify(call)).toContain("missing_credentials");
+      expect(JSON.stringify(call)).not.toContain("validation");
+    } finally {
+      await closeClient(client);
+    }
+  });
+
+  it("does not reuse credential-free discovery cache for credentialed tools/list", async () => {
+    await replaceHandle({ fetchCapabilities: vi.fn(async () => ["listBuckets"]) });
+
+    const partition = "discovery-then-credentialed";
+    const anonymous = await connectHttpClient(port, {
+      era: "modern",
+      headers: {},
+      cachePartition: partition,
     });
+    try {
+      const listed = await anonymous.client.listTools();
+      expect(listed.ttlMs).toBe(0);
+      expect(listed.tools.map((tool) => tool.name)).toContain("b2_create_bucket");
+    } finally {
+      await closeClient(anonymous.client);
+    }
+
+    const credentialed = await connectHttpClient(port, {
+      era: "modern",
+      headers: creds,
+      cachePartition: partition,
+    });
+    try {
+      const listed = await credentialed.client.listTools();
+      const toolNames = listed.tools.map((tool) => tool.name);
+      expect(listed.ttlMs).toBe(30_000);
+      expect(toolNames).toContain("b2_list_buckets");
+      expect(toolNames).not.toContain("b2_create_bucket");
+    } finally {
+      await closeClient(credentialed.client);
+    }
+  });
+
+  it("serves modern discovery with invalid credentials and gates tool calls", async () => {
+    const fetchCapabilities = vi.fn(async () => {
+      throw new CredentialResolutionError(
+        "Credential or capability resolution failed",
+        401,
+        "capability_auth_failed",
+      );
+    });
+    await replaceHandle({ fetchCapabilities });
+
+    const { client } = await connectHttpClient(port, {
+      era: "modern",
+      headers: creds,
+      cachePartition: "invalid-credential-discovery",
+    });
+    try {
+      const discover = client.getDiscoverResult() ?? (await client.discover());
+      expect(discover.ttlMs).toBe(0);
+
+      const listed = await client.listTools(undefined, { cacheMode: "refresh" });
+      expect(listed.ttlMs).toBe(0);
+      const toolNames = listed.tools.map((tool) => tool.name);
+      expect(toolNames).toContain("b2_list_buckets");
+      expect(toolNames).toContain("s3_head_bucket");
+      expect(fetchCapabilities).toHaveBeenCalled();
+
+      const call = await client.callTool({ name: "s3_head_bucket", arguments: {} });
+      expect(call.isError).toBe(true);
+      expect(JSON.stringify(call)).toContain("missing_credentials");
+      expect(JSON.stringify(call)).not.toContain("validation");
+    } finally {
+      await closeClient(client);
+    }
   });
 
   it("returns MCP-shaped errors for server-mode credential-header rejections", async () => {

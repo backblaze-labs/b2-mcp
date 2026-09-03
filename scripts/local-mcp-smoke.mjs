@@ -5,8 +5,9 @@
  * Bootstrap mode builds by default, then strips sensitive parent environment
  * variables before starting the runner. Runner mode starts a local HTTP server
  * worker from the built dist/ artifacts, connects over 127.0.0.1 with a minimal
- * modern MCP HTTP client, validates discovery and tools/list, then verifies a
- * missing-credential request returns a JSON-RPC error instead of crashing.
+ * modern MCP HTTP client, validates credentialed and credential-free discovery,
+ * then verifies credential-free tools/call returns missing_credentials instead
+ * of crashing or touching B2.
  */
 
 import { spawn, spawnSync } from "node:child_process";
@@ -43,7 +44,8 @@ const READY_TIMEOUT_MS = 10_000;
 const REQUEST_TIMEOUT_MS = 10_000;
 const SHUTDOWN_TIMEOUT_MS = 5_000;
 const STDERR_TAIL_BYTES = 8192;
-const MISSING_CREDENTIAL_REQUEST_ID = 7001;
+const MISSING_CREDENTIAL_LIST_REQUEST_ID = 7001;
+const MISSING_CREDENTIAL_CALL_REQUEST_ID = 7002;
 
 const allowedSensitiveEnvNames = new Set([
   MODE_ENV_NAME,
@@ -409,15 +411,15 @@ async function stopChild(child) {
   }
 }
 
-async function requestWithoutCredentials(endpoint) {
+async function requestWithoutCredentials(endpoint, method, params, id) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   timeout.unref?.();
   try {
     const response = await localFetch(endpoint, {
       method: "POST",
-      headers: modernHeaders("tools/list"),
-      body: modernBody("tools/list", {}, MISSING_CREDENTIAL_REQUEST_ID),
+      headers: modernHeaders(method, params?.name),
+      body: modernBody(method, params, id),
       signal: controller.signal,
     });
     const body = await response.json();
@@ -603,30 +605,64 @@ async function runRunner() {
       snapshot.names.includes("b2_list_buckets") && snapshot.names.includes("s3_list_objects_v2"),
     );
 
-    const missingCredentials = await requestWithoutCredentials(endpoint);
-    const missingBody = missingCredentials.body;
-    const missingText = JSON.stringify(missingBody);
+    const missingDiscovery = await requestWithoutCredentials(
+      endpoint,
+      "tools/list",
+      {},
+      MISSING_CREDENTIAL_LIST_REQUEST_ID,
+    );
+    const missingDiscoveryBody = missingDiscovery.body;
+    const missingDiscoveryText = JSON.stringify(missingDiscoveryBody);
     recordCheck(
       checks,
-      "no-credential request returns HTTP 401",
-      missingCredentials.status === 401,
-      `status=${missingCredentials.status}`,
+      "no-credential tools/list returns HTTP 200",
+      missingDiscovery.status === 200,
+      `status=${missingDiscovery.status}`,
     );
     recordCheck(
       checks,
-      "no-credential request returns JSON-RPC error",
-      missingBody?.jsonrpc === "2.0" &&
-        missingBody?.id === MISSING_CREDENTIAL_REQUEST_ID &&
-        missingBody?.error?.code === -32001 &&
-        missingBody?.error?.data?.code === "missing_credentials",
-      `code=${missingBody?.error?.code ?? "missing"}`,
+      "no-credential tools/list returns registered tools",
+      missingDiscoveryBody?.jsonrpc === "2.0" &&
+        missingDiscoveryBody?.id === MISSING_CREDENTIAL_LIST_REQUEST_ID &&
+        Array.isArray(missingDiscoveryBody?.result?.tools) &&
+        missingDiscoveryBody.result.tools.length === snapshot.names.length,
+      `${missingDiscoveryBody?.result?.tools?.length ?? 0} tools`,
     );
     recordCheck(
       checks,
-      "no-credential error is sanitized",
-      !missingText.includes("B2_APPLICATION_KEY") &&
-        !missingText.includes("local-smoke-key") &&
-        !missingText.includes("process.env"),
+      "no-credential tools/list is sanitized",
+      !missingDiscoveryText.includes("B2_APPLICATION_KEY") &&
+        !missingDiscoveryText.includes("local-smoke-key") &&
+        !missingDiscoveryText.includes("process.env"),
+    );
+
+    const missingCall = await requestWithoutCredentials(
+      endpoint,
+      "tools/call",
+      { name: "b2_list_buckets", arguments: {} },
+      MISSING_CREDENTIAL_CALL_REQUEST_ID,
+    );
+    const missingCallBody = missingCall.body;
+    const missingCallText = JSON.stringify(missingCallBody);
+    recordCheck(
+      checks,
+      "no-credential tools/call returns HTTP 200",
+      missingCall.status === 200,
+      `status=${missingCall.status}`,
+    );
+    recordCheck(
+      checks,
+      "no-credential tools/call returns missing_credentials",
+      missingCallBody?.jsonrpc === "2.0" &&
+        missingCallBody?.id === MISSING_CREDENTIAL_CALL_REQUEST_ID &&
+        missingCallBody?.result?.isError === true &&
+        missingCallText.includes("missing_credentials"),
+      `isError=${String(missingCallBody?.result?.isError)}`,
+    );
+    recordCheck(
+      checks,
+      "no-credential tools/call error is sanitized",
+      !missingCallText.includes("local-smoke-key") && !missingCallText.includes("process.env"),
     );
   } catch (error) {
     primaryError = error;

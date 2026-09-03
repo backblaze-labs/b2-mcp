@@ -151,4 +151,34 @@ describe("stdio transport legacy protocol fallback (2025 era)", () => {
     expect(listCall.isError).toBe(true);
     expect(JSON.stringify(listCall)).toContain("missing_credentials");
   });
+
+  it("lists tools with present-but-invalid credentials and gates calls", async () => {
+    raw = new RawStdioSession();
+    raw.start({
+      B2_APPLICATION_KEY_ID: "invalid-key-id",
+      B2_APPLICATION_KEY: "invalid-key-secret",
+      B2_REGISTER_ALL_TOOLS: "false",
+    });
+
+    resultOf(
+      await raw.request("initialize", {
+        protocolVersion: LEGACY_PROTOCOL_VERSION,
+        capabilities: {},
+        clientInfo: { name: "b2-mcp-invalid-credential-discovery", version: "1.0.0" },
+      }),
+    );
+    raw.send({ jsonrpc: "2.0", method: "notifications/initialized", params: {} });
+
+    const listed = resultOf(await raw.request("tools/list"));
+    const toolNames = listed.tools.map((tool: { name: string }) => tool.name);
+    expect(toolNames).toContain("b2_list_buckets");
+    expect(toolNames).toContain("s3_head_bucket");
+
+    const call = resultOf(
+      await raw.request("tools/call", { name: "s3_head_bucket", arguments: {} }),
+    );
+    expect(call.isError).toBe(true);
+    expect(JSON.stringify(call)).toContain("missing_credentials");
+    expect(JSON.stringify(call)).not.toContain("validation");
+  });
 });
