@@ -248,6 +248,42 @@ Each retained row has exactly one reviewed implementation class:
 `s3_copy_object.acl` remains accepted as a no-op S3 compatibility hint; B2
 access follows the destination bucket policy.
 
+## Partner Groups Lifecycle Coverage Decision
+
+Glama's Server Coherence review ([#360](https://github.com/backblaze-labs/b2-mcp/issues/360),
+tracked by [#366](https://github.com/backblaze-labs/b2-mcp/issues/366)) flagged
+that the Partner Groups surface exposes membership operations
+(`b2_list_groups`, `b2_list_group_members`, `b2_create_group_member`,
+`b2_eject_group_member`) but no create/update/delete for the Group entities
+themselves. The finding is recorded here rather than answered with new tools.
+
+**Finding: the B2 Partner API exposes no Group create/update/delete endpoint.**
+The reviewed `@backblaze-labs/b2-sdk/partner` client and its documented raw
+peer expose exactly these Group-related operations and nothing that mutates a
+Group's lifecycle:
+
+| SDK method                                   | MCP tool                  |
+| -------------------------------------------- | ------------------------- |
+| `listGroups` / `paginateGroups`              | `b2_list_groups`          |
+| `listGroupMembers` / `paginateGroupMembers`  | `b2_list_group_members`   |
+| `createGroupMember`                          | `b2_create_group_member`  |
+| `ejectGroupMember`                           | `b2_eject_group_member`   |
+
+There is no `createGroup`, `updateGroup`, or `deleteGroup` on either the
+`partner` facade (`PartnerClient`) or the documented `partner/raw`
+(`PartnerRawClient`), and the B2 Partner API publishes no matching
+`b2_create_group` / `b2_update_group` / `b2_delete_group` endpoint. Group
+lifecycle (creating, renaming, or deleting a Group) is an **admin-console-only**
+operation with no public API or SDK surface to wrap.
+
+**Decision: no new Group tools.** Because the capability is not exposed by the
+Partner API/SDK, there is nothing to add — Group lifecycle is not an intentional
+omission of an available endpoint but the absence of one. Should Backblaze later
+publish Group create/update/delete endpoints, adding them would still be weighed
+against the deliberately lean 40-tool surface, and callers would be pointed at
+the admin console in the interim. The Groups membership rows above remain the
+complete Partner Groups tool coverage.
+
 ## Release Gate For #49
 
 [#49](https://github.com/backblaze-labs/b2-mcp/issues/49) must not freeze tool

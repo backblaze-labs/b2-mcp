@@ -191,6 +191,12 @@ otherwise they register as non-secret compatibility stubs. That is an
 availability annotation; all three remain in the Native B2 SDK backing category. Partner/Groups read/eject/list
 tools are SDK-backed native B2 operations in the full profile.
 
+Partner Groups tool coverage stops at membership operations by design: the B2
+Partner API and `@backblaze-labs/b2-sdk/partner` expose no Group
+create/update/delete endpoint (Group lifecycle is admin-console-only), so no
+Group-lifecycle tools are added. The finding and decision are recorded in
+[`../design-docs/sdk-adoption-contract.md`](../design-docs/sdk-adoption-contract.md#partner-groups-lifecycle-coverage-decision).
+
 `b2_*` tools in `full`:
 
 - `b2_authorize_account`
