@@ -1355,7 +1355,7 @@
     },
     {
       "name": "s3_create_multipart_upload",
-      "descriptionSha256": "6ac14d0a0f837fee403cd883ba6a535a8e1d158312531505a46676eb72b2e561",
+      "descriptionSha256": "08e41baed27672d1065b789c6044af1fa1eafcb05107b61929d46fec014b0f1e",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -2034,7 +2034,7 @@
             "type": "string"
           },
           "copySourceVersionId": {
-            "description": "Version ID of the source object to copy; omit to copy the current version. It is folded into the copy source so the exact version is copied rather than the live one.",
+            "description": "Version ID of the source object to copy; set to copy that exact version, or omit to copy the current version.",
             "type": "string"
           },
           "key": {
@@ -2067,5 +2067,5 @@
     "toolsListCacheHint": null,
     "discover": null
   },
-  "hash": "440ed9fecd1fa6815346b5d9399c2afa15e6620dc746298ffca15dea5b10fe0b"
+  "hash": "5f99a77e3aab5072d6e0ab16aac979f5e41283be0555a15aa4b8d7e0edd7d7b6"
 }
