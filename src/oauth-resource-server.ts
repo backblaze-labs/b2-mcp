@@ -371,28 +371,6 @@ function ensureFiniteNonNegative(value: number, label: string): void {
   }
 }
 
-/**
- * Load and validate OAuth resource-server configuration from environment variables.
- *
- * @remarks
- * At least one verification mechanism is required: an introspection endpoint or
- * a JWKS URI. Issuer, authorization endpoint, token endpoint, resource URL, and
- * public URL must be HTTPS unless the explicit localhost-only insecure override
- * is enabled for development.
- *
- * @param env - Environment-like object to read configuration from.
- *
- * @returns A validated introspection, JWKS, or dual-mode OAuth configuration.
- *
- * @throws Error when required values are missing, unsafe, or internally
- * inconsistent.
- *
- * @example
- * ```ts
- * const config = loadOAuthResourceServerConfig(process.env);
- * const verifier = new OAuthBearerTokenVerifier({ config });
- * ```
- */
 const REMOVED_INTROSPECTION_CACHE_ALIASES: ReadonlyArray<readonly [string, string]> = [
   ["B2_OAUTH_INTROSPECTION_CACHE_MAX_ENTRIES", "B2_OAUTH_TOKEN_CACHE_MAX_ENTRIES"],
   ["B2_OAUTH_INTROSPECTION_CACHE_TTL_SECONDS", "B2_OAUTH_TOKEN_CACHE_TTL_SECONDS"],
@@ -420,6 +398,28 @@ function warnRemovedIntrospectionCacheAliases(env: NodeJS.ProcessEnv): void {
   }
 }
 
+/**
+ * Load and validate OAuth resource-server configuration from environment variables.
+ *
+ * @remarks
+ * At least one verification mechanism is required: an introspection endpoint or
+ * a JWKS URI. Issuer, authorization endpoint, token endpoint, resource URL, and
+ * public URL must be HTTPS unless the explicit localhost-only insecure override
+ * is enabled for development.
+ *
+ * @param env - Environment-like object to read configuration from.
+ *
+ * @returns A validated introspection, JWKS, or dual-mode OAuth configuration.
+ *
+ * @throws Error when required values are missing, unsafe, or internally
+ * inconsistent.
+ *
+ * @example
+ * ```ts
+ * const config = loadOAuthResourceServerConfig(process.env);
+ * const verifier = new OAuthBearerTokenVerifier({ config });
+ * ```
+ */
 export function loadOAuthResourceServerConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): OAuthResourceServerConfig {
