@@ -93,6 +93,14 @@ describe("privacy page generator", () => {
     );
   });
 
+  it("renders Markdown-looking content inside inline code spans", async () => {
+    const { renderMarkdown } = await privacyPageModule();
+
+    expect(renderMarkdown("`![literal](image.png)` and `[**literal**](https://example.com)`")).toBe(
+      "<p><code>![literal](image.png)</code> and <code>[**literal**](https://example.com)</code></p>",
+    );
+  });
+
   it("writes both hosted privacy page paths from the canonical Markdown", async () => {
     const { HOSTED_PRIVACY_URL, pageHtml, writePrivacyPage } = await privacyPageModule();
     const outputRoot = mkdtempSync(join(tmpdir(), "b2-mcp-privacy-page-"));

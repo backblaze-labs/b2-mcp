@@ -44,8 +44,12 @@ function supportedLinkPattern() {
   return /\[([^\]\n]+)\]\(([^()<>\s]+)(?:\s+"([^"\n]+)")?\)/g;
 }
 
+function withoutSupportedCode(markdown) {
+  return markdown.replace(/`[^`\n]+`/g, "");
+}
+
 function withoutSupportedInline(markdown) {
-  return markdown.replace(/`[^`\n]+`/g, "").replace(supportedLinkPattern(), "");
+  return withoutSupportedCode(markdown).replace(supportedLinkPattern(), "");
 }
 
 function unsupported(lineNumber, message) {
@@ -53,11 +57,13 @@ function unsupported(lineNumber, message) {
 }
 
 function assertSupportedInline(markdown, lineNumber) {
-  if (/!\[[^\]\n]*\]\([^)]+\)/.test(markdown)) {
+  const textWithoutCode = withoutSupportedCode(markdown);
+
+  if (/!\[[^\]\n]*\]\([^)]+\)/.test(textWithoutCode)) {
     unsupported(lineNumber, "images are not supported");
   }
 
-  for (const match of markdown.matchAll(supportedLinkPattern())) {
+  for (const match of textWithoutCode.matchAll(supportedLinkPattern())) {
     const label = match[1];
     const unsupportedLabelChars = ["`", "*", "_", "~", "<", ">", "[", "]"];
     if (unsupportedLabelChars.some((char) => label.includes(char))) {
