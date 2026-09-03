@@ -88,3 +88,6 @@ klass
 pathb
 Xhsm
 m8ven
+cafile
+insta
+noproxy

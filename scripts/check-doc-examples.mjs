@@ -223,6 +223,31 @@ const npmInstallValueOptions = new Set([
   "--location",
   "-w",
   "--workspace",
+  // npm config value-taking options that also appear before/after the
+  // subcommand; missing any of these let its value (e.g. `--loglevel warn`) be
+  // misread as the subcommand or the package operand. This tracks npm's
+  // documented value options; the durable fix (a real arg parser) is #384.
+  "--loglevel",
+  "-d",
+  "--depth",
+  "--before",
+  "--tag",
+  "--proxy",
+  "--https-proxy",
+  "--noproxy",
+  "--ca",
+  "--cafile",
+  "--cert",
+  "--key",
+  "--fetch-timeout",
+  "--fetch-retries",
+  "--fetch-retry-mintimeout",
+  "--fetch-retry-maxtimeout",
+  "--fetch-retry-factor",
+  "--maxsockets",
+  "--auth-type",
+  "--script-shell",
+  "--node-options",
 ]);
 
 // npx options that consume the following token as their value, so it is not
@@ -569,20 +594,32 @@ function validatePackageCommand(file, line, commandConfig, expectedPackage, opti
     return;
   }
 
-  const packageSpec = packageExecutedByCommand(command, args);
-  const parsedPackageSpec = parsePackageSpec(packageSpec);
-  if (parsedPackageSpec?.name !== expectedPackage) {
+  const packageSpecs = packagesExecutedByCommand(command, args);
+  if (packageSpecs.length === 0) {
     addFinding(
       file,
       line,
-      `${command} client config executes ${packageSpec ?? "no package"}, expected ${expectedPackage}`,
+      `${command} client config executes no package, expected ${expectedPackage}`,
     );
+    return;
   }
-  if (parsedPackageSpec?.version && !isExactPackageVersion(parsedPackageSpec.version)) {
-    addFinding(file, line, `${command} client config package version must be exact semver`);
-  }
-  if (options.requireExactVersion && !isExactPackageVersion(parsedPackageSpec?.version)) {
-    addFinding(file, line, `${command} client config must pin an exact package version`);
+  // Validate every executed operand; npx allows repeated `--package`, so a
+  // single-operand check let a second, drifting package fetch attacker code.
+  for (const packageSpec of packageSpecs) {
+    const parsedPackageSpec = parsePackageSpec(packageSpec);
+    if (parsedPackageSpec?.name !== expectedPackage) {
+      addFinding(
+        file,
+        line,
+        `${command} client config executes ${packageSpec ?? "no package"}, expected ${expectedPackage}`,
+      );
+    }
+    if (parsedPackageSpec?.version && !isExactPackageVersion(parsedPackageSpec.version)) {
+      addFinding(file, line, `${command} client config package version must be exact semver`);
+    }
+    if (options.requireExactVersion && !isExactPackageVersion(parsedPackageSpec?.version)) {
+      addFinding(file, line, `${command} client config must pin an exact package version`);
+    }
   }
 }
 
@@ -613,37 +650,47 @@ function validateDirectClientCommand(file, line, commandConfig, options = {}) {
   }
 }
 
-function packageExecutedByCommand(command, args) {
-  if (command === "npx") return firstPackageArg(args);
+function packagesExecutedByCommand(command, args) {
+  if (command === "npx") return allPackageArgs(args);
   if (command === "npm") {
     const [subcommand, ...rest] = args;
-    if (subcommand !== "exec") return null;
-    return firstPackageArg(rest);
+    if (subcommand !== "exec") return [];
+    return allPackageArgs(rest);
   }
   if (command === "pnpm") {
     const [subcommand, ...rest] = args;
-    if (subcommand !== "dlx") return null;
-    return firstPackageArg(rest);
+    if (subcommand !== "dlx") return [];
+    return allPackageArgs(rest);
   }
-  return null;
+  return [];
 }
 
-function firstPackageArg(args) {
+// Collect every package operand an npx/exec/dlx invocation fetches: each
+// `--package`/`-p` value (which npx allows repeated) plus the first positional
+// operand. Returning only the first let `npx --package=A --package=B` fetch B
+// while only A was validated.
+function allPackageArgs(args) {
+  const packages = [];
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === "--") continue;
-    if (arg.startsWith("--package=")) return arg.slice("--package=".length);
-    if (arg === "--package" || arg === "-p") return args[index + 1] ?? null;
+    if (arg.startsWith("--package=")) {
+      packages.push(arg.slice("--package=".length));
+      continue;
+    }
+    if (arg === "--package" || arg === "-p") {
+      if (args[index + 1] !== undefined) packages.push(args[index + 1]);
+      index += 1;
+      continue;
+    }
     if (arg.startsWith("-")) {
-      // Skip an option and, for value-taking options, its value. Parsing to the
-      // real operand keeps `npx --yes --offline @attacker/pkg` from capturing an
-      // option (`--offline`) as the package spec.
       if (!arg.includes("=") && npxValueOptions.has(arg)) index += 1;
       continue;
     }
-    return arg;
+    packages.push(arg);
+    break;
   }
-  return null;
+  return packages;
 }
 
 function parsePackageSpec(packageSpec) {
@@ -842,7 +889,7 @@ function validatePackageNameReferences(file, text, startLine) {
 }
 
 // Locate the package operand of every `npx` invocation on a logical line by
-// tokenizing and parsing options through the same `firstPackageArg` logic used
+// tokenizing and parsing options through the same `allPackageArgs` logic used
 // for JSON client configs. Scanning tokens (rather than a fixed regex) means an
 // extra option such as `npx --yes --offline @attacker/pkg` no longer captures
 // the option as the package, and both scoped and unscoped operands are covered.
@@ -851,8 +898,9 @@ function npxPackageSpecsInLine(logicalLine) {
   const specs = [];
   for (let index = 0; index < tokens.length; index += 1) {
     if (tokens[index] !== "npx") continue;
-    const operand = firstPackageArg(tokens.slice(index + 1));
-    if (operand) specs.push(operand);
+    for (const operand of allPackageArgs(tokens.slice(index + 1))) {
+      if (operand) specs.push(operand);
+    }
   }
   return specs;
 }
@@ -965,7 +1013,36 @@ function validateMcpLogWildcardRedaction(file, text, startLine) {
 }
 
 function isExecutablePackageLine(line) {
-  return /\b(?:npx|npm\s+exec|pnpm\s+dlx)\b/.test(line);
+  // Tokenize each command segment and look for a package executor, allowing
+  // options before the subcommand: `npm --loglevel warn exec <pkg>@latest` is
+  // executable, but an adjacent-only regex (`npm\s+exec`) missed it and let a
+  // mutable-version exec through.
+  for (const chunk of line.split("`")) {
+    for (const segment of chunk.split(/\s*(?:&&|\|\||[;|])\s*/)) {
+      if (segmentIsPackageExecutor(segment)) return true;
+    }
+  }
+  return false;
+}
+
+function segmentIsPackageExecutor(segment) {
+  const tokens = segment.split(/\s+/).map(stripShellToken).filter(Boolean);
+  for (let index = 0; index < tokens.length; index += 1) {
+    const command = tokens[index];
+    if (command === "npx") return true;
+    const isNpm = command === "npm" || command === "npm.cmd";
+    const isPnpm = command === "pnpm" || command === "pnpm.cmd";
+    if (!isNpm && !isPnpm) continue;
+    let cursor = index + 1;
+    while (cursor < tokens.length && tokens[cursor].startsWith("-")) {
+      if (!tokens[cursor].includes("=") && npxValueOptions.has(tokens[cursor])) cursor += 1;
+      cursor += 1;
+    }
+    const subcommand = tokens[cursor];
+    if (isNpm && subcommand === "exec") return true;
+    if (isPnpm && subcommand === "dlx") return true;
+  }
+  return false;
 }
 
 function isGlobalNpmInstallLine(line) {
@@ -991,8 +1068,10 @@ function npmInstallInvocation(segment) {
     if (!option.includes("=") && npmInstallValueOptions.has(option)) index += 1;
     index += 1;
   }
-  // `install`, its `i` shorthand, and the `add` alias all install packages.
-  if (!["install", "i", "add"].includes(tokens[index])) return null;
+  // npm accepts `add` and every abbreviation of `install` (`i`, `in`, `ins`,
+  // `inst`, `insta`, `instal`, `install`) as the install subcommand; matching
+  // only `install`/`i`/`add` let `npm in -g <pkg>` bypass every operand check.
+  if (!isNpmInstallSubcommand(tokens[index])) return null;
   index += 1;
 
   const operands = [];
@@ -1016,9 +1095,19 @@ function npmInstallInvocation(segment) {
 // treated as local and skip every package-name/version check.
 function isGlobalModeOption(option, nextToken) {
   if (option === "-g" || option === "--global") return true;
+  // npm's boolean assignment form: `--global=true` is global, `--global=false`
+  // is local. Missing this let `npm install --global=true <pkg>` be treated as a
+  // local install and skip every package-name/version check.
+  const globalAssign = option.match(/^--global=(.*)$/);
+  if (globalAssign) return globalAssign[1] !== "false";
   if (option === "--location=global") return true;
   if (option === "--location" && nextToken === "global") return true;
   return false;
+}
+
+// npm install subcommand: `add`, or any abbreviation of `install`.
+function isNpmInstallSubcommand(token) {
+  return token === "add" || /^i(?:n(?:s(?:t(?:a(?:l(?:l)?)?)?)?)?)?$/.test(token);
 }
 
 function npmInstallSegmentSpecs(line) {

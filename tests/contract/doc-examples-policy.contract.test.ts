@@ -223,6 +223,77 @@ describe("documentation example validator policy", () => {
     },
   );
 
+  it("rejects a global npm install with a value option before the subcommand", () => {
+    const command = "npm --loglevel warn install -g @attacker/b2-mcp@0.2.0";
+    const readme = read("README.md").replace(
+      "npm install -g @backblaze-labs/b2-mcp@0.2.0",
+      command,
+    );
+    const expectedLine = lineOf(readme, command);
+    const result = runDocExamplesWithOverrides({ "README.md": readme });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(`README.md:${expectedLine}`);
+    expect(result.stderr).toContain("global npm install examples must install");
+  });
+
+  it("rejects a global npm install using an install abbreviation", () => {
+    const command = "npm in -g @attacker/b2-mcp@0.2.0";
+    const readme = read("README.md").replace(
+      "npm install -g @backblaze-labs/b2-mcp@0.2.0",
+      command,
+    );
+    const expectedLine = lineOf(readme, command);
+    const result = runDocExamplesWithOverrides({ "README.md": readme });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(`README.md:${expectedLine}`);
+    expect(result.stderr).toContain("global npm install examples must install");
+  });
+
+  it("rejects a global npm install using --global=true", () => {
+    const command = "npm install --global=true @attacker/b2-mcp@0.2.0";
+    const readme = read("README.md").replace(
+      "npm install -g @backblaze-labs/b2-mcp@0.2.0",
+      command,
+    );
+    const expectedLine = lineOf(readme, command);
+    const result = runDocExamplesWithOverrides({ "README.md": readme });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(`README.md:${expectedLine}`);
+    expect(result.stderr).toContain("global npm install examples must install");
+  });
+
+  it("rejects a repeated npx --package that drifts to another package", () => {
+    const command =
+      "npx --package=@backblaze-labs/b2-mcp@0.2.0 --package=@attacker/b2-mcp@0.2.0 b2-mcp --version";
+    const readme = read("README.md").replace(
+      "npx -y @backblaze-labs/b2-mcp@0.2.0 --version",
+      command,
+    );
+    const expectedLine = lineOf(readme, command);
+    const result = runDocExamplesWithOverrides({ "README.md": readme });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(`README.md:${expectedLine}`);
+    expect(result.stderr).toContain("references package @attacker/b2-mcp@0.2.0");
+  });
+
+  it("rejects a mutable npm exec with a value option before the subcommand", () => {
+    const command = "npm --loglevel warn exec @backblaze-labs/b2-mcp@latest";
+    const readme = read("README.md").replace(
+      "npm install -g @backblaze-labs/b2-mcp@0.2.0",
+      command,
+    );
+    const expectedLine = lineOf(readme, command);
+    const result = runDocExamplesWithOverrides({ "README.md": readme });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(`README.md:${expectedLine}`);
+    expect(result.stderr).toContain("must not execute mutable-versioned package examples");
+  });
+
   it("rejects an npx --yes long-form launcher that drifts to another package", () => {
     const readme = read("README.md").replace(
       "npx -y @backblaze-labs/b2-mcp@0.2.0 --version",
