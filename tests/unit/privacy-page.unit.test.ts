@@ -43,7 +43,7 @@ describe("privacy page generator", () => {
       <li>In HTTP <code>principal</code> mode, verified caller identity is mapped to operator-managed B2 credentials, which stay inside the operator's deployment except for outbound calls to Backblaze B2.</li>
       </ul>
       <p>Credentials supplied to authenticate b2-mcp HTTP requests are not written to disk by the HTTP transport. The HTTP transport keeps bounded, TTL-limited in-memory credential managers, B2 authorization state, and capability state for the running process. Raw credential values can therefore remain in process memory after a request until cache eviction, TTL expiry, or process exit, but cache keys and logs use non-secret fingerprints rather than raw credential values. B2 credentials are sent only to Backblaze B2 API endpoints needed to authorize or perform the requested operation. They are never collected, sold, or transmitted to the publisher.</p>
-      <p>Generated application-key secrets from <code>b2_create_key</code> are handled separately by the operator-selected durable secret sink. By default the sink is off and the tool returns a compatibility stub. If an operator explicitly enables <code>B2_SECRET_SINK=file</code>, b2-mcp writes newly created application-key secrets to the configured operator-controlled JSONL file.</p>
+      <p>Generated application-key secrets from <code>b2_create_key</code> are handled separately by the durable secret sink. In local stdio mode on supported POSIX systems, the default sink is <code>file</code>, which writes newly created application-key secrets to <code>~/.b2-mcp/secrets.jsonl</code> unless configured differently. In HTTP and serverless deployments, the default sink is <code>off</code> and the tool returns a compatibility stub unless the operator explicitly enables a sink mode. If an operator enables <code>B2_SECRET_SINK=file</code> for HTTP or serverless, b2-mcp writes newly created application-key secrets to the configured operator-controlled JSONL file.</p>
       "
     `);
     expect(list).not.toContain("<p>");
@@ -70,6 +70,9 @@ describe("privacy page generator", () => {
     ["table", "| Field | Value |\n| --- | --- |"],
     ["bold link label", "[**Policy**](https://example.com)"],
     ["HTML link label", "[<b>Policy</b>](https://example.com)"],
+    ["parenthesized link target", "[Policy](https://example.com/legal_(terms))"],
+    ["indented continuation fence", "- item\n    ```text\n    secret\n    ```"],
+    ["indented continuation quote", "- item\n    > quote"],
   ])("rejects unsupported Markdown: %s", async (_name, markdown) => {
     const { renderMarkdown } = await privacyPageModule();
 

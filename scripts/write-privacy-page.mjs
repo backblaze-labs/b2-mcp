@@ -11,9 +11,11 @@ export const HOSTED_PRIVACY_URL = "https://backblaze-labs.github.io/b2-mcp/priva
 export const REPO_BLOB_URL = "https://github.com/backblaze-labs/b2-mcp/blob/main/";
 
 // Supported Markdown subset for PRIVACY.md: blank lines, paragraphs, #/##/###
-// headings, top-level "- " bullets with indented continuation lines, inline
-// links, and inline code spans. The generator fails closed on unsupported
-// constructs so the hosted page cannot silently drift from the canonical file.
+// headings, top-level "- " bullets with two- or three-space indented
+// continuation lines, inline links whose destinations do not contain spaces or
+// parentheses, optional quoted link titles, and inline code spans. The generator
+// fails closed on unsupported constructs so the hosted page cannot silently
+// drift from the canonical file.
 
 function escapeHtml(value) {
   return value
@@ -39,7 +41,7 @@ function linkTarget(rawTarget) {
 }
 
 function supportedLinkPattern() {
-  return /\[([^\]\n]+)\]\(([^) \n]+)(?:\s+"([^"\n]+)")?\)/g;
+  return /\[([^\]\n]+)\]\(([^() \n]+)(?:\s+"([^"\n]+)")?\)/g;
 }
 
 function withoutSupportedInline(markdown) {
@@ -69,6 +71,9 @@ function assertSupportedInline(markdown, lineNumber) {
   }
   if (/[<>]/.test(text)) {
     unsupported(lineNumber, "raw HTML and autolinks are not supported");
+  }
+  if (/`/.test(text)) {
+    unsupported(lineNumber, "only inline code spans are supported");
   }
   if (/\[|\]/.test(text)) {
     unsupported(lineNumber, "only inline [text](url) links are supported");
@@ -126,7 +131,7 @@ export function assertSupportedMarkdown(markdown) {
     }
 
     if (/^\s+/.test(line)) {
-      if (inList && /^ {2,}\S/.test(line)) {
+      if (inList && /^ {2,3}\S/.test(line)) {
         assertSupportedInline(trimmed, lineNumber);
         continue;
       }
@@ -139,7 +144,7 @@ export function assertSupportedMarkdown(markdown) {
 }
 
 export function renderInline(markdown) {
-  const inlinePattern = /\[([^\]\n]+)\]\(([^) \n]+)(?:\s+"([^"\n]+)")?\)|`([^`\n]+)`/g;
+  const inlinePattern = /\[([^\]\n]+)\]\(([^() \n]+)(?:\s+"([^"\n]+)")?\)|`([^`\n]+)`/g;
   let output = "";
   let cursor = 0;
   for (const match of markdown.matchAll(inlinePattern)) {
@@ -214,7 +219,7 @@ export function renderMarkdown(markdown) {
       continue;
     }
 
-    if (listOpen && currentListItem && /^ {2,}\S/.test(line)) {
+    if (listOpen && currentListItem && /^ {2,3}\S/.test(line)) {
       currentListItem.push(line.trim());
       continue;
     }
