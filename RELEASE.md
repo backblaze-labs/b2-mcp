@@ -64,7 +64,8 @@ Before publishing `v0.1.0`:
    release approval, and restricts deployments to protected release refs.
 10. Confirm `live-b2-contract` has environment secrets `LIVE_B2_KEY_ID` and
    `LIVE_B2_KEY` plus environment variable `B2_LIVE_TEST_ACCOUNT_ID`. Confirm
-   `live-b2-smoke` has its four `LIVE_B2_*` environment secrets plus
+   `live-b2-smoke` has environment secrets `LIVE_B2_KEY_ID` and `LIVE_B2_KEY`
+   (the retired `LIVE_B2_APP_KEY*` pair is no longer used, issue #386) plus
    environment variables `MCP_URL`, `B2_SMOKE_BUCKET`, and
    `B2_MCP_EXPECTED_TOOL_PROFILE`. If deployment smoke should accept an
    environment other than `production`, set repository or organization variable

@@ -222,7 +222,7 @@ B2 credentials on every MCP request that executes tools. Credential-free
 discovery requests can initialize, list tools/resources/prompts, and ping
 without B2 headers so inspectors and directory scanners can enumerate the
 server; `tools/call` remains credential-gated and returns `missing_credentials`
-until valid B2 headers are present. Prefer the explicit header names:
+until valid B2 headers are present. Use the canonical `X-B2-MCP-*` header names:
 
 ```json
 {

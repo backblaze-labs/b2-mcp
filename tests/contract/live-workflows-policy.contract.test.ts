@@ -36,7 +36,7 @@ const liveWorkflows = [
     concurrency:
       "live-b2-smoke-${{ github.repository }}-${{ github.event.deployment.environment || github.ref_name || github.run_id }}",
     cancelsInProgress: false,
-    b2Secrets: ["LIVE_B2_KEY_ID", "LIVE_B2_KEY", "LIVE_B2_APP_KEY_ID", "LIVE_B2_APP_KEY"],
+    b2Secrets: ["LIVE_B2_KEY_ID", "LIVE_B2_KEY"],
   },
 ];
 
@@ -449,7 +449,7 @@ describe("live secret workflow policy", () => {
     );
     expect(smokeJob).not.toContain("B2_REQUIRE_LIVE_TESTS");
     expect(smokeJob).toContain(
-      "MCP_URL B2_KEY_ID B2_KEY B2_APP_KEY_ID B2_APP_KEY B2_SMOKE_BUCKET B2_MCP_EXPECTED_TOOL_PROFILE B2_MCP_REQUIRE_SMOKE_BUCKET",
+      "MCP_URL B2_KEY_ID B2_KEY B2_SMOKE_BUCKET B2_MCP_EXPECTED_TOOL_PROFILE B2_MCP_REQUIRE_SMOKE_BUCKET",
     );
     expect(smokeJob).toContain(
       "MCP_URL MCP_AUTHORIZATION B2_SMOKE_BUCKET B2_MCP_EXPECTED_TOOL_PROFILE B2_MCP_REQUIRE_SMOKE_BUCKET",

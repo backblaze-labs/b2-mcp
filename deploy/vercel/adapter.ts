@@ -15,6 +15,11 @@ import { logger } from "../../src/utils/logger.js";
 const ALLOW_HEADER_MODE_FLAG = "B2_VERCEL_ALLOW_HEADER_CREDENTIAL_MODE";
 const ALLOW_PREVIEW_B2_CREDENTIALS_FLAG = "B2_VERCEL_ALLOW_PREVIEW_B2_CREDENTIALS";
 const ALLOW_SHARED_SERVER_CREDENTIAL_FLAG = "B2_VERCEL_ALLOW_SHARED_SERVER_CREDENTIAL";
+// The preview custody guard is deliberately broader than the runtime credential
+// reader. A lagging B2_APP_KEY* or principal-scoped alias (issue #386) can still
+// hold a live production secret even though authentication now ignores it, so it
+// must not be exposed to a Preview deployment. Keep matching the retired APP_KEY
+// variants here even though credentials.ts no longer reads them.
 const PREVIEW_B2_CREDENTIAL_ENV_PATTERN =
   /^B2_(?:APPLICATION_KEY|APP_KEY|MASTER_KEY)(?:_ID)?$|^B2_CREDENTIAL_[A-Z0-9_]+_(?:APPLICATION_KEY|APP_KEY|MASTER_KEY)(?:_ID)?$/;
 

@@ -57,6 +57,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the registry API's `2025-12-11` response shape, so it renders the published
   version again. (#297)
 
+### Removed
+- **Breaking:** dropped the deprecated credential env-var and HTTP header
+  aliases; only the canonical names are read anywhere now. (#386)
+  - `B2_APP_KEY_ID` / `B2_APP_KEY` (and the `X-B2-App-Key-Id` / `X-B2-App-Key`
+    plus namespaced `X-B2-MCP-App-Key-Id` / `X-B2-MCP-App-Key` headers) are gone
+    → use a non-master `B2_APPLICATION_KEY_ID` / `B2_APPLICATION_KEY`. This
+    retires the legacy "sign S3 with a separate non-master key" override; the
+    application key now signs S3 directly, so callers on the old path must switch
+    to a non-master application key.
+  - The principal-mode `B2_CREDENTIAL_<REF>_APP_KEY` / `B2_CREDENTIAL_<REF>_APP_KEY_ID`
+    override is gone → use `B2_CREDENTIAL_<REF>_APPLICATION_KEY` /
+    `B2_CREDENTIAL_<REF>_APPLICATION_KEY_ID`.
+  - The customer-hosted `_FILE` secret-file variants of all the above
+    (`B2_APP_KEY_FILE`, `B2_APP_KEY_ID_FILE`, and
+    `B2_CREDENTIAL_<REF>_APP_KEY(_ID)_FILE`) are no longer loaded by the
+    container entrypoint → use the matching `B2_APPLICATION_KEY(_ID)_FILE` /
+    `B2_CREDENTIAL_<REF>_APPLICATION_KEY(_ID)_FILE` names.
+  - `B2_OAUTH_INTROSPECTION_CACHE_MAX_ENTRIES` / `_TTL_SECONDS` / `_SKEW_SECONDS`
+    are gone → use `B2_OAUTH_TOKEN_CACHE_MAX_ENTRIES` / `_TTL_SECONDS` /
+    `_SKEW_SECONDS`.
+  - The short `X-B2-*` credential headers (`X-B2-Key-Id`, `X-B2-Key`,
+    `X-B2-Master-Key-Id`, `X-B2-Master-Key`) are gone → use the canonical
+    `X-B2-MCP-*` form (`X-B2-MCP-Key-Id`, `X-B2-MCP-Key`,
+    `X-B2-MCP-Master-Key-Id`, `X-B2-MCP-Master-Key`).
+  - **Rollout:** migrate clients to `X-B2-MCP-*` before deploying. During a
+    rolling deploy, old replicas still accept the short headers while new
+    replicas reject them, so legacy-header requests can intermittently fail for
+    the duration of the rollout. On startup the server now logs a `warn`-level
+    `config.removed_alias` message when a removed alias env var
+    (`B2_APP_KEY_ID` / `B2_APP_KEY`, the principal-mode
+    `B2_CREDENTIAL_<REF>_APP_KEY(_ID)`, their `_FILE` secret-file variants, and
+    `B2_OAUTH_INTROSPECTION_CACHE_*`) is still set, naming the canonical
+    replacement. Log-redaction sets still scrub the
+    retired header/env names for the migration window so a still-in-flight
+    legacy secret is never written to logs in cleartext.
+
 ## [0.2.0] - 2026-09-01
 
 ### Added

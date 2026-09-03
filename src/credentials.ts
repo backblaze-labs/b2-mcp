@@ -16,15 +16,29 @@ const DEFAULT_REGION = "us-west-004";
 export const DISCOVERY_MODE_CREDENTIAL = "b2-mcp-discovery-mode";
 
 const HEADER_NAMES = {
-  keyId: ["x-b2-mcp-key-id", "x-b2-key-id"],
-  key: ["x-b2-mcp-key", "x-b2-key"],
-  appKeyId: ["x-b2-mcp-app-key-id", "x-b2-app-key-id"],
-  appKey: ["x-b2-mcp-app-key", "x-b2-app-key"],
-  masterKeyId: ["x-b2-mcp-master-key-id", "x-b2-master-key-id"],
-  masterKey: ["x-b2-mcp-master-key", "x-b2-master-key"],
+  keyId: ["x-b2-mcp-key-id"],
+  key: ["x-b2-mcp-key"],
+  masterKeyId: ["x-b2-mcp-master-key-id"],
+  masterKey: ["x-b2-mcp-master-key"],
 } as const;
 
-const ALL_CREDENTIAL_HEADER_NAMES = new Set<string>(Object.values(HEADER_NAMES).flat());
+// Detection guard for hasCredentialHeaders(). Deliberately broader than the
+// canonical parsing set above: it also lists the retired credential header names
+// (issue #386) so that in server/principal mode a lagging client still sending a
+// legacy X-B2-* / X-B2-App-Key-* header gets a clean credential_headers_rejected
+// failure instead of silently executing under the server-held credential.
+// Parsing stays canonical-only via HEADER_NAMES.
+const CREDENTIAL_HEADER_DETECTION_NAMES = new Set<string>([
+  ...Object.values(HEADER_NAMES).flat(),
+  "x-b2-key-id",
+  "x-b2-key",
+  "x-b2-master-key-id",
+  "x-b2-master-key",
+  "x-b2-app-key-id",
+  "x-b2-app-key",
+  "x-b2-mcp-app-key-id",
+  "x-b2-mcp-app-key",
+]);
 
 /** Supported HTTP credential routing modes. */
 export type HttpCredentialMode = "server" | "principal" | "headers";
@@ -94,10 +108,6 @@ export interface CredentialMaterial {
   applicationKeyId?: string;
   /** Primary B2 application key secret. */
   applicationKey?: string;
-  /** Deprecated legacy S3 application key ID override. */
-  appKeyId?: string;
-  /** Deprecated legacy S3 application key secret override. */
-  appKey?: string;
   /** Optional B2 master key ID used only for Partner API tools. */
   masterKeyId?: string;
   /** Optional B2 master key secret used only for Partner API tools. */
@@ -234,14 +244,6 @@ function configFromMaterial(material: CredentialMaterial, options: ConfigOptions
   }
 
   const strictOptionalPairs = options.strictOptionalPairs === true;
-  const app = resolveOptionalPair(
-    material.appKeyId,
-    material.appKey,
-    keyId,
-    key,
-    "B2 app key override",
-    strictOptionalPairs,
-  );
   const master = resolveOptionalPair(
     material.masterKeyId,
     material.masterKey,
@@ -254,8 +256,11 @@ function configFromMaterial(material: CredentialMaterial, options: ConfigOptions
   const config: B2Config = {
     applicationKeyId: keyId,
     applicationKey: key,
-    appKeyId: app.id,
-    appKey: app.key,
+    // The application key signs S3 requests directly. The appKeyId/appKey fields
+    // are retained internally and always mirror the application key; the legacy
+    // separate-S3-key override (B2_APP_KEY_ID/B2_APP_KEY, X-B2-App-Key*) is gone.
+    appKeyId: keyId,
+    appKey: key,
     masterKeyId: master.id,
     masterKey: master.key,
     // Treat a blank/whitespace B2_REGION as unset so a launcher that forwards an
@@ -300,11 +305,63 @@ function envMaterial(prefix = "B2"): CredentialMaterial {
   return {
     applicationKeyId: process.env[`${prefix}_APPLICATION_KEY_ID`],
     applicationKey: process.env[`${prefix}_APPLICATION_KEY`],
-    appKeyId: process.env[`${prefix}_APP_KEY_ID`],
-    appKey: process.env[`${prefix}_APP_KEY`],
     masterKeyId: process.env[`${prefix}_MASTER_KEY_ID`],
     masterKey: process.env[`${prefix}_MASTER_KEY`],
   };
+}
+
+let warnedRemovedCredentialEnvAliases = false;
+
+// Retired credential env names, checked only to warn that they are ignored — not
+// read as configuration. Kept as string data (not `process.env.NAME` reads) so
+// they are not classified as documented runtime configuration. The pattern also
+// covers principal-mode `B2_CREDENTIAL_<REF>_APP_KEY(_ID)`, which `envMaterial`
+// previously accepted via its prefix. Both forms include the customer-hosted
+// `_FILE` secret-file variants (`B2_APP_KEY_FILE`, `..._APP_KEY(_ID)_FILE`): the
+// container entrypoint no longer loads them, so a deployment still exporting a
+// retired `_FILE` alias would otherwise lose its S3 credential override silently.
+const REMOVED_CREDENTIAL_ENV_ALIASES = [
+  "B2_APP_KEY_ID",
+  "B2_APP_KEY",
+  "B2_APP_KEY_ID_FILE",
+  "B2_APP_KEY_FILE",
+] as const;
+const REMOVED_CREDENTIAL_ENV_ALIAS_PATTERN = /^B2_CREDENTIAL_[A-Z0-9_]+_APP_KEY(?:_ID)?(?:_FILE)?$/;
+
+/**
+ * Warn once at startup when a removed credential alias env var is still set.
+ *
+ * @remarks
+ * `B2_APP_KEY_ID` / `B2_APP_KEY`, their principal-mode
+ * `B2_CREDENTIAL_<REF>_APP_KEY(_ID)` form, and the customer-hosted `_FILE`
+ * secret-file variants of both are no longer read (issue #386). Without this
+ * signal an operator whose deploy manifest still exports them gets a silent
+ * behavior change: the legacy separate-S3-key override is dropped and the
+ * application key signs S3 directly. The guard fires once so HTTP request paths
+ * do not spam logs.
+ */
+export function warnRemovedCredentialEnvAliases(): void {
+  if (warnedRemovedCredentialEnvAliases) return;
+  warnedRemovedCredentialEnvAliases = true;
+  const stillSet = Object.keys(process.env).some(
+    (name) =>
+      REMOVED_CREDENTIAL_ENV_ALIASES.some((alias) => alias === name) ||
+      REMOVED_CREDENTIAL_ENV_ALIAS_PATTERN.test(name),
+  );
+  if (stillSet) {
+    logger.warn(
+      "config.removed_alias: B2_APP_KEY_ID/B2_APP_KEY, B2_CREDENTIAL_<REF>_APP_KEY(_ID), and their _FILE secret-file variants are no longer read and are ignored. Use a non-master B2_APPLICATION_KEY_ID/B2_APPLICATION_KEY (or B2_CREDENTIAL_<REF>_APPLICATION_KEY(_ID) for principal mode, plus the matching _FILE names); the separate-S3-key override has been removed.",
+    );
+  }
+}
+
+/**
+ * Test-only: reset the one-time removed-alias warning guard.
+ *
+ * @internal
+ */
+export function _resetRemovedCredentialEnvAliasWarning(): void {
+  warnedRemovedCredentialEnvAliases = false;
 }
 
 function valueFromHeader(
@@ -330,8 +387,6 @@ function headerMaterial(headers: http.IncomingHttpHeaders): CredentialMaterial {
   return {
     applicationKeyId: valueFromHeader(headers, HEADER_NAMES.keyId),
     applicationKey: valueFromHeader(headers, HEADER_NAMES.key),
-    appKeyId: valueFromHeader(headers, HEADER_NAMES.appKeyId),
-    appKey: valueFromHeader(headers, HEADER_NAMES.appKey),
     masterKeyId: valueFromHeader(headers, HEADER_NAMES.masterKeyId),
     masterKey: valueFromHeader(headers, HEADER_NAMES.masterKey),
   };
@@ -345,7 +400,9 @@ function headerMaterial(headers: http.IncomingHttpHeaders): CredentialMaterial {
  * @returns `true` when a B2 credential header is present.
  */
 export function hasCredentialHeaders(headers: http.IncomingHttpHeaders): boolean {
-  return Object.keys(headers).some((name) => ALL_CREDENTIAL_HEADER_NAMES.has(name.toLowerCase()));
+  return Object.keys(headers).some((name) =>
+    CREDENTIAL_HEADER_DETECTION_NAMES.has(name.toLowerCase()),
+  );
 }
 
 function httpConfigOptions(): ConfigOptions {
@@ -401,11 +458,7 @@ export class StdioEnvCredentialProvider implements CredentialProvider {
    * @throws CredentialResolutionError when required credentials are missing.
    */
   resolve(): CredentialResolution {
-    if (process.env.B2_APP_KEY_ID) {
-      logger.warn(
-        "config.deprecated: B2_APP_KEY_ID/B2_APP_KEY is deprecated. Use B2_APPLICATION_KEY_ID/B2_APPLICATION_KEY with B2_MASTER_KEY_* only when a separate master credential is required.",
-      );
-    }
+    warnRemovedCredentialEnvAliases();
     const config = configFromMaterial(envMaterial(), {
       transport: "stdio",
       allowLocalFiles: process.env.B2_ALLOW_LOCAL_FILES !== "false",
@@ -730,6 +783,7 @@ export function validateHttpCredentialConfiguration(
  * @throws Error when output format, secret sink, or credential mode is invalid.
  */
 export function validateHttpStartupConfiguration(): void {
+  warnRemovedCredentialEnvAliases();
   resolveOutputFormat();
   resolveSecretSinkConfig({ transport: "http", preflight: true });
   getHttpCredentialMode();

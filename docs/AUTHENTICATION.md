@@ -150,9 +150,6 @@ are public metadata and are cacheable for a short period.
 | `B2_OAUTH_TOKEN_CACHE_MAX_ENTRIES` | Maximum verified-token cache entries. |
 | `B2_OAUTH_TOKEN_CACHE_TTL_SECONDS` | Maximum verified-token cache TTL. |
 | `B2_OAUTH_TOKEN_CACHE_SKEW_SECONDS` | Expiry skew subtracted from token cache lifetime. |
-| `B2_OAUTH_INTROSPECTION_CACHE_MAX_ENTRIES` | Legacy alias for token cache max entries. |
-| `B2_OAUTH_INTROSPECTION_CACHE_TTL_SECONDS` | Legacy alias for token cache TTL. |
-| `B2_OAUTH_INTROSPECTION_CACHE_SKEW_SECONDS` | Legacy alias for token cache skew. |
 | `B2_OAUTH_JWKS_URI` | JWKS URI for local JWT access-token verification. |
 | `B2_OAUTH_ALLOWED_JWT_TYPES` | Accepted JWT header `typ` values. |
 | `B2_OAUTH_JWKS_CACHE_TTL_SECONDS` | Maximum JWKS cache TTL. |

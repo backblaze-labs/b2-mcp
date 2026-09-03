@@ -15,6 +15,7 @@ import {
   resetOAuthVerifierCacheForTests,
   validatePreverifiedOAuthAuthInfo,
   validateOAuthResourceServerConfiguration,
+  _resetRemovedIntrospectionCacheAliasWarning,
 } from "../../src/oauth-resource-server";
 import { logger } from "../../src/utils/logger";
 import {
@@ -2438,6 +2439,62 @@ describe("OAuth resource metadata", () => {
     }
   });
 
+  it("warns and ignores a removed introspection-cache alias env var", () => {
+    _resetRemovedIntrospectionCacheAliasWarning();
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+    // A tuned legacy alias must not silently revert cache behavior to defaults.
+    const config = loadOAuthResourceServerConfig({
+      B2_OAUTH_DANGEROUSLY_ALLOW_INSECURE_ISSUER_URL: "true",
+      B2_MCP_PUBLIC_URL: baseConfig.publicUrl,
+      B2_OAUTH_ISSUER: baseConfig.issuer,
+      B2_OAUTH_AUTHORIZATION_ENDPOINT: baseConfig.authorizationEndpoint,
+      B2_OAUTH_TOKEN_ENDPOINT: baseConfig.tokenEndpoint,
+      B2_OAUTH_INTROSPECTION_ENDPOINT: baseConfig.introspectionEndpoint,
+      B2_OAUTH_INTROSPECTION_CLIENT_ID: baseConfig.introspectionClientId,
+      B2_OAUTH_INTROSPECTION_CLIENT_SECRET: baseConfig.introspectionClientSecret,
+      B2_OAUTH_RESOURCE: baseConfig.resource,
+      B2_OAUTH_AUDIENCE: baseConfig.audience,
+      B2_OAUTH_INTROSPECTION_CACHE_TTL_SECONDS: "120",
+    });
+
+    // The removed alias is ignored: TTL falls back to the default, not 120.
+    expect(config.tokenCacheTtlSeconds).not.toBe(120);
+    expect(
+      warn.mock.calls.some((call) =>
+        String(call[0]).includes("B2_OAUTH_INTROSPECTION_CACHE_TTL_SECONDS is no longer read"),
+      ),
+    ).toBe(true);
+    warn.mockRestore();
+  });
+
+  it("emits the removed introspection-cache alias warning only once per process", () => {
+    _resetRemovedIntrospectionCacheAliasWarning();
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+    const env = {
+      B2_OAUTH_DANGEROUSLY_ALLOW_INSECURE_ISSUER_URL: "true",
+      B2_MCP_PUBLIC_URL: baseConfig.publicUrl,
+      B2_OAUTH_ISSUER: baseConfig.issuer,
+      B2_OAUTH_AUTHORIZATION_ENDPOINT: baseConfig.authorizationEndpoint,
+      B2_OAUTH_TOKEN_ENDPOINT: baseConfig.tokenEndpoint,
+      B2_OAUTH_INTROSPECTION_ENDPOINT: baseConfig.introspectionEndpoint,
+      B2_OAUTH_INTROSPECTION_CLIENT_ID: baseConfig.introspectionClientId,
+      B2_OAUTH_INTROSPECTION_CLIENT_SECRET: baseConfig.introspectionClientSecret,
+      B2_OAUTH_RESOURCE: baseConfig.resource,
+      B2_OAUTH_AUDIENCE: baseConfig.audience,
+      B2_OAUTH_INTROSPECTION_CACHE_TTL_SECONDS: "120",
+    };
+    // loadOAuthResourceServerConfig runs per metadata request; repeated loads
+    // must not re-emit the startup-only migration warning.
+    loadOAuthResourceServerConfig(env);
+    loadOAuthResourceServerConfig(env);
+    loadOAuthResourceServerConfig(env);
+    const aliasWarnings = warn.mock.calls.filter((call) =>
+      String(call[0]).includes("B2_OAUTH_INTROSPECTION_CACHE_TTL_SECONDS is no longer read"),
+    );
+    expect(aliasWarnings).toHaveLength(1);
+    warn.mockRestore();
+  });
+
   it("loads JWKS-only static configuration without introspection credentials", () => {
     const config = loadOAuthResourceServerConfig({
       B2_OAUTH_DANGEROUSLY_ALLOW_INSECURE_ISSUER_URL: "true",
@@ -2542,7 +2599,7 @@ describe("OAuth resource metadata", () => {
       new Request(protectedResourceMetadataUrl(baseConfig), {
         method: "OPTIONS",
         headers: {
-          "Access-Control-Request-Headers": "authorization,x-b2-key",
+          "Access-Control-Request-Headers": "authorization,x-b2-mcp-key",
         },
       }),
     );
@@ -2551,7 +2608,9 @@ describe("OAuth resource metadata", () => {
     expect(response?.status).toBe(204);
     expect(response?.headers.get("access-control-allow-origin")).toBe("*");
     expect(response?.headers.get("access-control-allow-methods")).toBe("GET, HEAD, OPTIONS");
-    expect(response?.headers.get("access-control-allow-headers")).toBe("authorization,x-b2-key");
+    expect(response?.headers.get("access-control-allow-headers")).toBe(
+      "authorization,x-b2-mcp-key",
+    );
     expect(response?.headers.get("vary")).toBe("Access-Control-Request-Headers");
   });
 

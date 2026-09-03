@@ -25,14 +25,12 @@ for var_name in \
   B2_APPLICATION_KEY_ID \
   B2_APPLICATION_KEY \
   B2_MASTER_KEY_ID \
-  B2_MASTER_KEY \
-  B2_APP_KEY_ID \
-  B2_APP_KEY
+  B2_MASTER_KEY
 do
   load_secret_file "$var_name"
 done
 
-for file_var_name in $(env | sed -n 's/=.*//p' | grep -E '^B2_CREDENTIAL_[A-Z0-9_]+_(APPLICATION_KEY_ID|APPLICATION_KEY|MASTER_KEY_ID|MASTER_KEY|APP_KEY_ID|APP_KEY)_FILE$' || true)
+for file_var_name in $(env | sed -n 's/=.*//p' | grep -E '^B2_CREDENTIAL_[A-Z0-9_]+_(APPLICATION_KEY_ID|APPLICATION_KEY|MASTER_KEY_ID|MASTER_KEY)_FILE$' || true)
 do
   load_secret_file "${file_var_name%_FILE}"
 done

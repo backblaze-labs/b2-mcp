@@ -181,8 +181,8 @@ describe("HTTP round-robin replica smoke (MCP 2026-07-28)", () => {
     });
     const listBPrincipal = await request(proxy.port, "POST", "/mcp", {
       headers: {
-        "x-b2-key-id": "protocol-other-key-id",
-        "x-b2-key": "protocol-other-key-secret",
+        "x-b2-mcp-key-id": "protocol-other-key-id",
+        "x-b2-mcp-key": "protocol-other-key-secret",
         ...modernHeaders("tools/list"),
       },
       body: modernBody("tools/list", {}, 5),

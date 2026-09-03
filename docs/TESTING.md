@@ -559,19 +559,20 @@ evidence.
   `s3_head_bucket` in `scripts/smoke-test.mjs`; it does not create a bucket.
   Put that bucket name in `B2_SMOKE_BUCKET`.
 - Keys: `LIVE_B2_KEY_ID` / `LIVE_B2_KEY`, which the smoke client sends to the
-  deployed MCP, and `LIVE_B2_APP_KEY_ID` / `LIVE_B2_APP_KEY`, a non-master key
-  for the S3 path because B2's S3 endpoint rejects master keys. Both pairs can
-  point at the same non-master key when the primary key is already non-master.
-  They only need read access to the smoke bucket: `listBuckets`, `listFiles`,
-  and `readFiles`; they may be bucket-scoped.
+  deployed MCP. This must be a non-master application key because B2's S3
+  endpoint rejects master keys and the same key now signs the S3 path. It only
+  needs read access to the smoke bucket: `listBuckets`, `listFiles`, and
+  `readFiles`; it may be bucket-scoped.
 - Also required as variables or secrets: `MCP_URL`,
   `B2_MCP_EXPECTED_TOOL_PROFILE`, `B2_MCP_REQUIRE_SMOKE_BUCKET=1`, and
   `MCP_AUTHORIZATION` / `VERCEL_PROTECTION_BYPASS` according to the deployment.
 
-Remove obsolete repository-level B2 secrets named `B2_KEY`, `B2_KEY_ID`,
-`B2_APP_KEY`, and `B2_APP_KEY_ID` in the GitHub UI. The live workflows use the
-environment-scoped secrets above and do not reference those repository-level
-secrets.
+Remove obsolete repository-level B2 secrets named `B2_KEY` and `B2_KEY_ID`, and
+the retired `B2_APP_KEY` / `B2_APP_KEY_ID` pair (issue #386), in the GitHub UI.
+Also delete the now-unused `LIVE_B2_APP_KEY` / `LIVE_B2_APP_KEY_ID` environment
+secrets from `live-b2-smoke` — the smoke workflow reads only `LIVE_B2_KEY_ID` /
+`LIVE_B2_KEY`. The live workflows use the environment-scoped secrets above and do
+not reference those repository-level secrets.
 
 ## Live B2 Smoke Gate
 

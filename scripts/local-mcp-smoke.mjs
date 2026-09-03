@@ -56,8 +56,8 @@ const allowedSensitiveEnvNames = new Set([
 ]);
 
 const fakeCredentialHeaders = {
-  "x-b2-key-id": "local-smoke-key-id",
-  "x-b2-key": "local-smoke-key-secret",
+  "x-b2-mcp-key-id": "local-smoke-key-id",
+  "x-b2-mcp-key": "local-smoke-key-secret",
 };
 
 function readJson(relativePath) {

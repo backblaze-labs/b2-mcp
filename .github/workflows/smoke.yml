@@ -143,8 +143,6 @@ jobs:
           B2_MCP_SMOKE_CREDENTIAL_MODE: ${{ inputs.credential-mode || vars.B2_MCP_SMOKE_CREDENTIAL_MODE || 'headers' }}
           B2_KEY_ID: ${{ secrets.LIVE_B2_KEY_ID }}
           B2_KEY: ${{ secrets.LIVE_B2_KEY }}
-          B2_APP_KEY_ID: ${{ secrets.LIVE_B2_APP_KEY_ID }}
-          B2_APP_KEY: ${{ secrets.LIVE_B2_APP_KEY }}
           B2_SMOKE_BUCKET: ${{ vars.B2_SMOKE_BUCKET }}
           B2_MCP_EXPECTED_TOOL_PROFILE: ${{ vars.B2_MCP_EXPECTED_TOOL_PROFILE }}
           B2_MCP_REQUIRE_SMOKE_BUCKET: "1"
@@ -154,7 +152,7 @@ jobs:
             if [[ -n "$value" ]]; then echo "::add-mask::$value"; fi
           done
           missing=0
-          required_names="MCP_URL B2_KEY_ID B2_KEY B2_APP_KEY_ID B2_APP_KEY B2_SMOKE_BUCKET B2_MCP_EXPECTED_TOOL_PROFILE B2_MCP_REQUIRE_SMOKE_BUCKET"
+          required_names="MCP_URL B2_KEY_ID B2_KEY B2_SMOKE_BUCKET B2_MCP_EXPECTED_TOOL_PROFILE B2_MCP_REQUIRE_SMOKE_BUCKET"
           for name in ${required_names}; do
             if [[ -z "${!name:-}" ]]; then
               echo "::error::Missing required live-b2-smoke variable or secret for ${name}"
@@ -195,8 +193,6 @@ jobs:
           B2_MCP_SMOKE_CREDENTIAL_MODE: ${{ inputs.credential-mode || vars.B2_MCP_SMOKE_CREDENTIAL_MODE || 'headers' }}
           B2_KEY_ID: ${{ secrets.LIVE_B2_KEY_ID }}
           B2_KEY: ${{ secrets.LIVE_B2_KEY }}
-          B2_APP_KEY_ID: ${{ secrets.LIVE_B2_APP_KEY_ID }}
-          B2_APP_KEY: ${{ secrets.LIVE_B2_APP_KEY }}
           B2_SMOKE_BUCKET: ${{ vars.B2_SMOKE_BUCKET }}
           B2_MCP_EXPECTED_TOOL_PROFILE: ${{ vars.B2_MCP_EXPECTED_TOOL_PROFILE }}
           B2_MCP_REQUIRE_SMOKE_BUCKET: "1"

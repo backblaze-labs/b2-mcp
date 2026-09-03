@@ -380,8 +380,10 @@ Sensitive response fields and structures inventoried for the Phase 1 sanitizer:
 - Notification/webhook secrets: `hmacSha256SigningSecret` and
   `customHeaders[].value`.
 - Credential headers and secret-bearing request/response headers:
-  `Authorization`, `X-B2-Key`, `X-B2-MCP-Key`, `X-B2-App-Key`,
-  `X-B2-MCP-App-Key`, `X-B2-Master-Key`, and `X-B2-MCP-Master-Key`.
+  `Authorization`, `X-B2-MCP-Key`, and `X-B2-MCP-Master-Key`. The retired
+  `X-B2-Key`, `X-B2-Master-Key`, `X-B2-App-Key`, and `X-B2-MCP-App-Key` families
+  are no longer accepted as credentials but are still classified as secrets and
+  scrubbed for the migration window, so a lagging client's value never leaks.
 
 Non-secret identifiers such as `applicationKeyId`, account IDs, bucket IDs, key
 names, scopes, capabilities, and expiry metadata may be returned when a
@@ -595,10 +597,9 @@ must meet all of these requirements:
 - It remains the default for one release to preserve existing hosted clients;
   hosted operators should set `B2_HTTP_CREDENTIAL_MODE` explicitly before
   switching to `server` or `principal`.
-- It accepts the dedicated B2 MCP secret header names
+- It accepts only the dedicated B2 MCP secret header names
   `X-B2-MCP-Key-Id`, `X-B2-MCP-Key`, `X-B2-MCP-Master-Key-Id`, and
-  `X-B2-MCP-Master-Key`; inherited `X-B2-Key-*` names remain a temporary
-  compatibility alias.
+  `X-B2-MCP-Master-Key`; the short `X-B2-*` aliases have been removed.
 - Those dedicated header names are classified as secrets by the HTTP server,
   reverse proxy, APM, and log redaction configuration.
 - The edge strips inbound duplicate credential headers before forwarding.

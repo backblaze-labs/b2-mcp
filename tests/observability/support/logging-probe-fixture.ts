@@ -65,7 +65,7 @@ async function redactionProbe(): Promise<void> {
       authorization: "Bearer B2_MCP_CANARY_SECRET_TOP_LEVEL_AUTH",
       headers: {
         authorization: "Bearer B2_MCP_CANARY_SECRET_HEADER_AUTH",
-        "x-b2-key": "B2_MCP_CANARY_SECRET_HEADER_B2_KEY",
+        "x-b2-mcp-key": "B2_MCP_CANARY_SECRET_HEADER_B2_KEY",
       },
       credentials: {
         appKey: "B2_MCP_CANARY_SECRET_NESTED_APP_KEY",

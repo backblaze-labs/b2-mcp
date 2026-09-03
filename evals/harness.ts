@@ -39,8 +39,6 @@ export const EVAL_TRANSPORTS = evalTransportValues as unknown as readonly ["stdi
 const EVAL_CREDENTIAL_MARKERS: Record<string, string> = {
   B2_APPLICATION_KEY_ID: "eval-application-key-id",
   B2_APPLICATION_KEY: "eval-application-key-secret",
-  B2_APP_KEY_ID: "eval-app-key-id",
-  B2_APP_KEY: "eval-app-key-secret",
   B2_MASTER_KEY_ID: "eval-master-key-id",
   B2_MASTER_KEY: "eval-master-key-secret",
 };
@@ -292,12 +290,10 @@ function createClient(): Client {
 
 function evalHttpCredentialHeaders(): Record<string, string> {
   return {
-    "x-b2-key-id": EVAL_CREDENTIAL_MARKERS.B2_APPLICATION_KEY_ID,
-    "x-b2-key": EVAL_CREDENTIAL_MARKERS.B2_APPLICATION_KEY,
-    "x-b2-app-key-id": EVAL_CREDENTIAL_MARKERS.B2_APP_KEY_ID,
-    "x-b2-app-key": EVAL_CREDENTIAL_MARKERS.B2_APP_KEY,
-    "x-b2-master-key-id": EVAL_CREDENTIAL_MARKERS.B2_MASTER_KEY_ID,
-    "x-b2-master-key": EVAL_CREDENTIAL_MARKERS.B2_MASTER_KEY,
+    "x-b2-mcp-key-id": EVAL_CREDENTIAL_MARKERS.B2_APPLICATION_KEY_ID,
+    "x-b2-mcp-key": EVAL_CREDENTIAL_MARKERS.B2_APPLICATION_KEY,
+    "x-b2-mcp-master-key-id": EVAL_CREDENTIAL_MARKERS.B2_MASTER_KEY_ID,
+    "x-b2-mcp-master-key": EVAL_CREDENTIAL_MARKERS.B2_MASTER_KEY,
   };
 }
 

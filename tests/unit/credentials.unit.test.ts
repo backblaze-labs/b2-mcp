@@ -1,4 +1,5 @@
 import {
+  _resetRemovedCredentialEnvAliasWarning,
   CredentialResolutionError,
   fingerprintConfig,
   getHttpCredentialMode,
@@ -11,7 +12,9 @@ import {
   validateHttpCredentialConfiguration,
   validateHttpStartupConfiguration,
   verificationFingerprintConfig,
+  warnRemovedCredentialEnvAliases,
 } from "../../src/credentials";
+import { logger } from "../../src/utils/logger";
 import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -165,8 +168,8 @@ describe("credential providers", () => {
     const resolved = new HttpHeaderCredentialProvider().resolve({
       req: {
         headers: {
-          "x-b2-key-id": "header-id",
-          "x-b2-key": "header-secret",
+          "x-b2-mcp-key-id": "header-id",
+          "x-b2-mcp-key": "header-secret",
         },
       } as any,
     });
@@ -182,8 +185,8 @@ describe("credential providers", () => {
     const alice = provider.resolve({
       req: {
         headers: {
-          "x-b2-key-id": "header-id",
-          "x-b2-key": "header-secret",
+          "x-b2-mcp-key-id": "header-id",
+          "x-b2-mcp-key": "header-secret",
         },
         auth: {
           token: "verified",
@@ -196,8 +199,8 @@ describe("credential providers", () => {
     const bob = provider.resolve({
       req: {
         headers: {
-          "x-b2-key-id": "header-id",
-          "x-b2-key": "header-secret",
+          "x-b2-mcp-key-id": "header-id",
+          "x-b2-mcp-key": "header-secret",
         },
         auth: {
           token: "verified",
@@ -226,8 +229,8 @@ describe("credential providers", () => {
     const resolved = new HttpHeaderCredentialProvider().resolve({
       req: {
         headers: {
-          "x-b2-key-id": "header-id",
-          "x-b2-key": "header-secret",
+          "x-b2-mcp-key-id": "header-id",
+          "x-b2-mcp-key": "header-secret",
         },
       } as any,
     });
@@ -242,9 +245,9 @@ describe("credential providers", () => {
       new HttpHeaderCredentialProvider().resolve({
         req: {
           headers: {
-            "x-b2-key-id": "header-id",
-            "x-b2-key": "header-secret",
-            "x-b2-app-key-id": "s3-id",
+            "x-b2-mcp-key-id": "header-id",
+            "x-b2-mcp-key": "header-secret",
+            "x-b2-mcp-master-key-id": "master-id",
           },
         } as any,
       }),
@@ -259,7 +262,7 @@ describe("credential providers", () => {
     expect(resolved.config.applicationKeyId).toBe("server-id");
     expect(() =>
       provider.resolve({
-        req: { headers: { "x-b2-key-id": "spoof", "x-b2-key": "spoof-secret" } } as any,
+        req: { headers: { "x-b2-mcp-key-id": "spoof", "x-b2-mcp-key": "spoof-secret" } } as any,
       }),
     ).toThrow(/not accepted/i);
   });
@@ -343,10 +346,10 @@ describe("credential providers", () => {
   it("uses the secret in capability-cache identity without changing log identity", () => {
     const provider = new HttpHeaderCredentialProvider();
     const first = provider.resolve({
-      req: { headers: { "x-b2-key-id": "header-id", "x-b2-key": "secret-a" } } as any,
+      req: { headers: { "x-b2-mcp-key-id": "header-id", "x-b2-mcp-key": "secret-a" } } as any,
     });
     const second = provider.resolve({
-      req: { headers: { "x-b2-key-id": "header-id", "x-b2-key": "secret-b" } } as any,
+      req: { headers: { "x-b2-mcp-key-id": "header-id", "x-b2-mcp-key": "secret-b" } } as any,
     });
     expect(first.cacheKey).toBe(second.cacheKey);
     expect(first.capabilityCacheKey).not.toBe(second.capabilityCacheKey);
@@ -445,7 +448,7 @@ describe("credential providers", () => {
     expect(() =>
       provider.resolve({
         req: {
-          headers: { "x-b2-key-id": "spoof", "x-b2-key": "spoof-secret" },
+          headers: { "x-b2-mcp-key-id": "spoof", "x-b2-mcp-key": "spoof-secret" },
           auth: { token: "verified", clientId: "client-a", scopes: [] },
         } as any,
       }),
@@ -507,9 +510,80 @@ describe("credential fingerprints and header detection", () => {
     expect(a).not.toContain("secret-a");
   });
 
-  it("detects legacy and explicit B2 credential headers", () => {
-    expect(hasCredentialHeaders({ "x-b2-key-id": "k" })).toBe(true);
+  it("detects canonical and retired B2 credential headers for the rejection guard", () => {
     expect(hasCredentialHeaders({ "x-b2-mcp-key-id": "k" })).toBe(true);
+    expect(hasCredentialHeaders({ "x-b2-mcp-master-key-id": "k" })).toBe(true);
+    // Retired aliases are no longer parsed, but the detection guard stays broad so
+    // a lagging legacy client is cleanly rejected in server/principal mode rather
+    // than silently running under the server-held credential.
+    expect(hasCredentialHeaders({ "x-b2-key-id": "k" })).toBe(true);
+    expect(hasCredentialHeaders({ "x-b2-key": "k" })).toBe(true);
+    expect(hasCredentialHeaders({ "x-b2-master-key": "k" })).toBe(true);
+    expect(hasCredentialHeaders({ "x-b2-app-key-id": "k" })).toBe(true);
+    expect(hasCredentialHeaders({ "x-b2-mcp-app-key": "k" })).toBe(true);
     expect(hasCredentialHeaders({ authorization: "Bearer t" })).toBe(false);
+  });
+});
+
+describe("removed credential env alias warning", () => {
+  beforeEach(() => {
+    _resetRemovedCredentialEnvAliasWarning();
+    // Strip any retired alias inherited from the developer/CI environment so the
+    // "does not warn" assertion is not tripped by an ambient migration variable.
+    for (const name of Object.keys(process.env)) {
+      if (/^B2_APP_KEY(?:_ID)?(?:_FILE)?$/.test(name)) delete process.env[name];
+      if (/^B2_CREDENTIAL_[A-Z0-9_]+_APP_KEY(?:_ID)?(?:_FILE)?$/.test(name)) {
+        delete process.env[name];
+      }
+    }
+  });
+
+  it("warns once when a removed B2_APP_KEY_* env var is still set", () => {
+    process.env.B2_APP_KEY_ID = "still-exported-id";
+    process.env.B2_APP_KEY = "still-exported-secret";
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+
+    warnRemovedCredentialEnvAliases();
+    warnRemovedCredentialEnvAliases();
+
+    const removedAliasWarnings = warn.mock.calls.filter((call) =>
+      String(call[0]).includes("B2_APP_KEY_ID/B2_APP_KEY"),
+    );
+    expect(removedAliasWarnings).toHaveLength(1);
+    warn.mockRestore();
+  });
+
+  it("warns when a removed principal-mode B2_CREDENTIAL_<REF>_APP_KEY alias is still set", () => {
+    process.env.B2_CREDENTIAL_TENANT_A_APP_KEY = "still-exported-principal-secret";
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+
+    warnRemovedCredentialEnvAliases();
+
+    expect(
+      warn.mock.calls.some((call) => String(call[0]).includes("B2_CREDENTIAL_<REF>_APP_KEY")),
+    ).toBe(true);
+    warn.mockRestore();
+  });
+
+  it("warns when a retired _FILE secret-file alias is still set", () => {
+    process.env.B2_APP_KEY_FILE = "/run/secrets/legacy-app-key";
+    process.env.B2_CREDENTIAL_TENANT_A_APP_KEY_ID_FILE = "/run/secrets/legacy-principal-id";
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+
+    warnRemovedCredentialEnvAliases();
+
+    expect(warn.mock.calls.some((call) => String(call[0]).includes("_FILE"))).toBe(true);
+    warn.mockRestore();
+    delete process.env.B2_APP_KEY_FILE;
+    delete process.env.B2_CREDENTIAL_TENANT_A_APP_KEY_ID_FILE;
+  });
+
+  it("does not warn when no removed alias env var is present", () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+
+    warnRemovedCredentialEnvAliases();
+
+    expect(warn.mock.calls.some((call) => String(call[0]).includes("removed_alias"))).toBe(false);
+    warn.mockRestore();
   });
 });

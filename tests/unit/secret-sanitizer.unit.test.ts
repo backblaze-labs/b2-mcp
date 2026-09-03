@@ -6,6 +6,7 @@ import {
   configuredSecretValuesFromConfig,
   LOG_SANITIZER_FAILURE,
   LOGGER_SECRET_REDACTION_PATHS,
+  redactExactTextSecrets,
   sanitizeProviderCode,
   sanitizeProviderRequestId,
   SECRET_SANITIZER_REDACTION,
@@ -16,6 +17,7 @@ import {
   sanitizeStructuredLogValue,
   sanitizeText,
   TEXT_SECRET_LABELS,
+  webRequestSecrets,
 } from "../../src/utils/secret-sanitizer";
 import { B2Config } from "../../src/utils/types";
 
@@ -198,7 +200,7 @@ describe("secret sanitizer canary policy", () => {
       headers: {
         cookie: longerOverlappingSecret,
         "set-cookie": "session=configured-cookie-secret",
-        "x-b2-key": "configured-header-secret",
+        "x-b2-mcp-key": "configured-header-secret",
       },
       nested: {
         secretName: "public-secret-name",
@@ -524,41 +526,98 @@ describe("secret sanitizer canary policy", () => {
   it("redacts supported configured secret env aliases from text", () => {
     const oldEnv = {
       B2_APPLICATION_KEY: process.env.B2_APPLICATION_KEY,
-      B2_APP_KEY: process.env.B2_APP_KEY,
       B2_MASTER_KEY: process.env.B2_MASTER_KEY,
       B2_CREDENTIAL_TENANT_APPLICATION_KEY: process.env.B2_CREDENTIAL_TENANT_APPLICATION_KEY,
-      B2_CREDENTIAL_TENANT_APP_KEY: process.env.B2_CREDENTIAL_TENANT_APP_KEY,
       B2_CREDENTIAL_TENANT_MASTER_KEY: process.env.B2_CREDENTIAL_TENANT_MASTER_KEY,
     };
     process.env.B2_APPLICATION_KEY = "env-application-secret-value";
-    process.env.B2_APP_KEY = "env-app-secret-value";
     process.env.B2_MASTER_KEY = "env-master-secret-value";
     process.env.B2_CREDENTIAL_TENANT_APPLICATION_KEY = "env-tenant-secret-value";
-    process.env.B2_CREDENTIAL_TENANT_APP_KEY = "env-tenant-app-secret-value";
     process.env.B2_CREDENTIAL_TENANT_MASTER_KEY = "env-tenant-master-secret-value";
 
     try {
       const text = sanitizeText(
         [
           process.env.B2_APPLICATION_KEY,
-          process.env.B2_APP_KEY,
           process.env.B2_MASTER_KEY,
           process.env.B2_CREDENTIAL_TENANT_APPLICATION_KEY,
-          process.env.B2_CREDENTIAL_TENANT_APP_KEY,
           process.env.B2_CREDENTIAL_TENANT_MASTER_KEY,
         ].join(" "),
       );
       expect(text).not.toContain("env-application-secret-value");
-      expect(text).not.toContain("env-app-secret-value");
       expect(text).not.toContain("env-master-secret-value");
       expect(text).not.toContain("env-tenant-secret-value");
-      expect(text).not.toContain("env-tenant-app-secret-value");
       expect(text).not.toContain("env-tenant-master-secret-value");
     } finally {
       for (const [key, value] of Object.entries(oldEnv)) {
         if (value === undefined) delete process.env[key];
         else process.env[key] = value;
       }
+    }
+  });
+
+  it("still redacts retired legacy credential env values during the migration window", () => {
+    // These env names are no longer READ for auth (issue #386), but a lagging
+    // deploy manifest may still export a live secret under them. Redaction must
+    // outlive the read so an auth-failure log never leaks the raw value.
+    const oldEnv = {
+      B2_APP_KEY: process.env.B2_APP_KEY,
+      B2_CREDENTIAL_TENANT_APP_KEY: process.env.B2_CREDENTIAL_TENANT_APP_KEY,
+    };
+    process.env.B2_APP_KEY = "env-legacy-app-secret-value";
+    process.env.B2_CREDENTIAL_TENANT_APP_KEY = "env-legacy-tenant-app-secret-value";
+
+    try {
+      const text = sanitizeText(
+        [process.env.B2_APP_KEY, process.env.B2_CREDENTIAL_TENANT_APP_KEY].join(" "),
+      );
+      expect(text).not.toContain("env-legacy-app-secret-value");
+      expect(text).not.toContain("env-legacy-tenant-app-secret-value");
+    } finally {
+      for (const [key, value] of Object.entries(oldEnv)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  });
+
+  it("still redacts the retired B2_APP_KEY_ID key handle from logs", () => {
+    // Key-ID env values are credential handles: kept in MCP output but scrubbed
+    // from logs/bootstrap text. The retired B2_APP_KEY_ID stays in that net.
+    const keyId = "005legacyappkeyid00000001";
+    const env = { B2_APP_KEY_ID: keyId };
+    expect(sanitizeStructuredLogValue(`auth failed for ${keyId}`, { env })).toBe(
+      `auth failed for ${SECRET_SANITIZER_REDACTION}`,
+    );
+    // MCP output still keeps key IDs.
+    expect(sanitizeText(`key ${keyId}`, { env })).toBe(`key ${keyId}`);
+  });
+
+  it("still redacts retired legacy credential header values during the migration window", () => {
+    // Lagging Claude.ai connectors and mcp-remote shims may still send the short
+    // X-B2-* / X-B2-App-Key-* headers with real, active secrets. The canonical
+    // x-b2-mcp-* header is now absent, so credential resolution fails and the
+    // request hits the error/log path — the legacy value must be scrubbed there.
+    const legacySecrets = {
+      "x-b2-key": "legacy-key-secret-value",
+      "x-b2-master-key": "legacy-master-secret-value",
+      "x-b2-app-key": "legacy-app-secret-value",
+      // The namespaced retired app-key form is also kept in SECRET_REQUEST_HEADERS.
+      "x-b2-mcp-app-key": "legacy-mcp-app-secret-value",
+    };
+    const headers = new Headers(legacySecrets);
+    const secrets = webRequestSecrets(headers);
+
+    for (const value of Object.values(legacySecrets)) {
+      expect(secrets).toContain(value);
+    }
+
+    const errorText = redactExactTextSecrets(
+      `credential resolution failed with ${Object.values(legacySecrets).join(" ")}`,
+      secrets,
+    );
+    for (const value of Object.values(legacySecrets)) {
+      expect(errorText).not.toContain(value);
     }
   });
 

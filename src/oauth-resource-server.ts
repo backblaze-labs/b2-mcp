@@ -54,12 +54,6 @@ export interface OAuthEnvironmentVariables {
   readonly dangerouslyAllowUnauthenticatedIntrospection: "B2_OAUTH_DANGEROUSLY_ALLOW_UNAUTHENTICATED_INTROSPECTION";
   /** Bearer token used to authenticate OAuth introspection requests. */
   readonly introspectionBearerToken: "B2_OAUTH_INTROSPECTION_BEARER_TOKEN";
-  /** Legacy maximum token-cache entries setting for introspection deployments. */
-  readonly introspectionCacheMaxEntries: "B2_OAUTH_INTROSPECTION_CACHE_MAX_ENTRIES";
-  /** Legacy token-cache skew setting for introspection deployments. */
-  readonly introspectionCacheSkewSeconds: "B2_OAUTH_INTROSPECTION_CACHE_SKEW_SECONDS";
-  /** Legacy token-cache TTL setting for introspection deployments. */
-  readonly introspectionCacheTtlSeconds: "B2_OAUTH_INTROSPECTION_CACHE_TTL_SECONDS";
   /** Consecutive dependency failures before opening the introspection circuit. */
   readonly introspectionCircuitFailures: "B2_OAUTH_INTROSPECTION_CIRCUIT_FAILURES";
   /** Introspection circuit open duration in milliseconds. */
@@ -128,9 +122,6 @@ export const OAUTH_ENVIRONMENT_VARIABLES: OAuthEnvironmentVariables = {
   dangerouslyAllowUnauthenticatedIntrospection:
     "B2_OAUTH_DANGEROUSLY_ALLOW_UNAUTHENTICATED_INTROSPECTION",
   introspectionBearerToken: "B2_OAUTH_INTROSPECTION_BEARER_TOKEN",
-  introspectionCacheMaxEntries: "B2_OAUTH_INTROSPECTION_CACHE_MAX_ENTRIES",
-  introspectionCacheSkewSeconds: "B2_OAUTH_INTROSPECTION_CACHE_SKEW_SECONDS",
-  introspectionCacheTtlSeconds: "B2_OAUTH_INTROSPECTION_CACHE_TTL_SECONDS",
   introspectionCircuitFailures: "B2_OAUTH_INTROSPECTION_CIRCUIT_FAILURES",
   introspectionCircuitOpenMs: "B2_OAUTH_INTROSPECTION_CIRCUIT_OPEN_MS",
   introspectionClientId: "B2_OAUTH_INTROSPECTION_CLIENT_ID",
@@ -380,6 +371,50 @@ function ensureFiniteNonNegative(value: number, label: string): void {
   }
 }
 
+const REMOVED_INTROSPECTION_CACHE_ALIASES: ReadonlyArray<readonly [string, string]> = [
+  ["B2_OAUTH_INTROSPECTION_CACHE_MAX_ENTRIES", "B2_OAUTH_TOKEN_CACHE_MAX_ENTRIES"],
+  ["B2_OAUTH_INTROSPECTION_CACHE_TTL_SECONDS", "B2_OAUTH_TOKEN_CACHE_TTL_SECONDS"],
+  ["B2_OAUTH_INTROSPECTION_CACHE_SKEW_SECONDS", "B2_OAUTH_TOKEN_CACHE_SKEW_SECONDS"],
+];
+
+let warnedRemovedIntrospectionCacheAliases = false;
+
+/**
+ * Warn when a removed OAuth introspection-cache alias env var is still set.
+ *
+ * @remarks
+ * These aliases are no longer read (issue #386). Without a warning an operator
+ * whose deploy manifest still tunes them silently reverts to the token-cache
+ * defaults, changing introspection call volume and cache pressure in
+ * production. The message names the canonical replacement.
+ *
+ * `loadOAuthResourceServerConfig` runs on every metadata request (e.g. via
+ * `oauthMetadataRouteResponse()`), so this warning is guarded to emit only once
+ * per process — a startup-only migration signal, not per-request log spam.
+ *
+ * @param env - Environment to inspect.
+ */
+function warnRemovedIntrospectionCacheAliases(env: NodeJS.ProcessEnv): void {
+  if (warnedRemovedIntrospectionCacheAliases) return;
+  warnedRemovedIntrospectionCacheAliases = true;
+  for (const [removed, canonical] of REMOVED_INTROSPECTION_CACHE_ALIASES) {
+    if (env[removed] !== undefined) {
+      logger.warn(
+        `config.removed_alias: ${removed} is no longer read and is ignored. Use ${canonical} instead.`,
+      );
+    }
+  }
+}
+
+/**
+ * Test-only: reset the one-time removed-alias warning guard.
+ *
+ * @internal
+ */
+export function _resetRemovedIntrospectionCacheAliasWarning(): void {
+  warnedRemovedIntrospectionCacheAliases = false;
+}
+
 /**
  * Load and validate OAuth resource-server configuration from environment variables.
  *
@@ -405,6 +440,7 @@ function ensureFiniteNonNegative(value: number, label: string): void {
 export function loadOAuthResourceServerConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): OAuthResourceServerConfig {
+  warnRemovedIntrospectionCacheAliases(env);
   const dangerouslyAllowInsecureIssuerUrl =
     env[OAUTH_ENV.dangerouslyAllowInsecureIssuerUrl] === "true";
   const dangerouslyAllowUnauthenticatedIntrospection =
@@ -468,19 +504,19 @@ export function loadOAuthResourceServerConfig(
     tokenCacheMaxEntries: intEnv(
       env,
       OAUTH_ENV.tokenCacheMaxEntries,
-      intEnv(env, OAUTH_ENV.introspectionCacheMaxEntries, DEFAULT_TOKEN_CACHE_MAX_ENTRIES, 1),
+      DEFAULT_TOKEN_CACHE_MAX_ENTRIES,
       1,
     ),
     tokenCacheTtlSeconds: intEnv(
       env,
       OAUTH_ENV.tokenCacheTtlSeconds,
-      intEnv(env, OAUTH_ENV.introspectionCacheTtlSeconds, DEFAULT_TOKEN_CACHE_TTL_SECONDS, 1),
+      DEFAULT_TOKEN_CACHE_TTL_SECONDS,
       1,
     ),
     tokenCacheSkewSeconds: intEnv(
       env,
       OAUTH_ENV.tokenCacheSkewSeconds,
-      intEnv(env, OAUTH_ENV.introspectionCacheSkewSeconds, DEFAULT_TOKEN_CACHE_SKEW_SECONDS),
+      DEFAULT_TOKEN_CACHE_SKEW_SECONDS,
     ),
     introspectionTimeoutMs: intEnv(
       env,

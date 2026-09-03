@@ -22,8 +22,6 @@ vi.mock("../../src/http-server.js", () => ({
 const credentialEnvKeys = [
   "B2_APPLICATION_KEY_ID",
   "B2_APPLICATION_KEY",
-  "B2_APP_KEY_ID",
-  "B2_APP_KEY",
   "B2_MASTER_KEY_ID",
   "B2_MASTER_KEY",
 ] as const;

@@ -10,12 +10,10 @@
  *   MCP_URL       — full MCP endpoint, e.g. https://mcp.example.com/mcp
  *
  * Optional env for header compatibility mode:
- *   B2_KEY_ID     — value for the X-B2-Key-Id request header
- *   B2_KEY        — value for the X-B2-Key request header
+ *   B2_KEY_ID     — value for the X-B2-MCP-Key-Id request header
+ *   B2_KEY        — value for the X-B2-MCP-Key request header
  *
  * Optional env (enables S3 tool checks):
- *   B2_APP_KEY_ID — value for the X-B2-App-Key-Id header
- *   B2_APP_KEY    — value for the X-B2-App-Key header
  *   B2_SMOKE_BUCKET — known bucket to probe with s3_head_bucket
  *   B2_MCP_EXPECTED_TOOL_PROFILE — full, phase1-default, or read-only
  *   B2_MCP_ALLOW_ANY_TOOL_PROFILE — set to true only for exploratory local smoke runs
@@ -47,8 +45,6 @@ const {
   MCP_URL,
   B2_KEY_ID,
   B2_KEY,
-  B2_APP_KEY_ID,
-  B2_APP_KEY,
   B2_SMOKE_BUCKET,
   B2_MCP_EXPECTED_TOOL_PROFILE,
   B2_MCP_ALLOW_ANY_TOOL_PROFILE,
@@ -210,12 +206,8 @@ function configureRequestContext() {
       console.error("B2_KEY_ID and B2_KEY are required for headers mode");
       process.exit(2);
     }
-    headers["X-B2-Key-Id"] = B2_KEY_ID;
-    headers["X-B2-Key"] = B2_KEY;
-    if (B2_APP_KEY_ID && B2_APP_KEY) {
-      headers["X-B2-App-Key-Id"] = B2_APP_KEY_ID;
-      headers["X-B2-App-Key"] = B2_APP_KEY;
-    }
+    headers["X-B2-MCP-Key-Id"] = B2_KEY_ID;
+    headers["X-B2-MCP-Key"] = B2_KEY;
   } else if (!MCP_AUTHORIZATION) {
     console.error("MCP_AUTHORIZATION is required for server/principal smoke modes");
     process.exit(2);
@@ -304,12 +296,10 @@ async function main() {
     console.log("  [SKIP] b2_list_buckets — not exposed for this credential profile");
   }
 
-  // s3_head_bucket — headers mode needs explicit app-key headers; server and
-  // principal modes use server-side credential resolution.
+  // s3_head_bucket — the application key signs S3 requests directly on every
+  // credential mode, so the S3 probe only needs a known bucket to target.
   const requireSmokeBucket = B2_MCP_REQUIRE_SMOKE_BUCKET === "1";
-  const credentialMode = (B2_MCP_SMOKE_CREDENTIAL_MODE || "headers").trim().toLowerCase();
-  const hasS3CredentialContext = credentialMode === "headers" ? B2_APP_KEY_ID && B2_APP_KEY : true;
-  if (hasS3CredentialContext && B2_SMOKE_BUCKET && toolNames.has("s3_head_bucket")) {
+  if (B2_SMOKE_BUCKET && toolNames.has("s3_head_bucket")) {
     try {
       assertToolSuccess(
         await mcp("tools/call", {
@@ -323,10 +313,7 @@ async function main() {
       check("s3_head_bucket confirms smoke bucket", false, e.message);
     }
   } else {
-    const detail =
-      credentialMode === "headers"
-        ? "set B2_APP_KEY_ID / B2_APP_KEY / B2_SMOKE_BUCKET and expose s3_head_bucket to enable"
-        : "set B2_SMOKE_BUCKET and expose s3_head_bucket to enable";
+    const detail = "set B2_SMOKE_BUCKET and expose s3_head_bucket to enable";
     if (requireSmokeBucket) {
       check("s3_head_bucket confirms smoke bucket", false, detail);
     } else {

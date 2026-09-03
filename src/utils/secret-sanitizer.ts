@@ -48,32 +48,42 @@ const SENSITIVE_FIELD_NAMES = new Set(
   STRUCTURED_SECRET_FIELD_NAMES.map((name) => normalizeKey(name)),
 );
 
+// Redaction lags credential removal, never leads it. The retired header and env
+// names below are no longer READ for auth (see src/credentials.ts), but lagging
+// clients and deploy manifests may still transmit or export live secrets under
+// them mid-migration — and a request that carries only a retired header now
+// fails credential resolution and hits exactly the error/log path this net
+// protects. Keep scrubbing the retired names so those in-flight secrets never
+// reach logs; they can be pruned a release after the migration window closes.
 const SECRET_HEADER_NAMES = new Set([
   "authorization",
   "cookie",
   "set-cookie",
-  "x-b2-app-key",
-  "x-b2-key",
-  "x-b2-master-key",
-  "x-b2-mcp-app-key",
   "x-b2-mcp-key",
   "x-b2-mcp-master-key",
+  // Retired for auth, retained for migration-window log safety:
+  "x-b2-key",
+  "x-b2-master-key",
+  "x-b2-app-key",
+  "x-b2-mcp-app-key",
 ]);
 
 const SECRET_ENV_VAR_NAMES = new Set([
   "AWS_SECRET_ACCESS_KEY",
-  "B2_APP_KEY",
   "B2_APPLICATION_KEY",
   "B2_MASTER_KEY",
+  // Retired for auth, retained for migration-window log safety:
+  "B2_APP_KEY",
 ]);
 
 // Key-ID env values are credential handles: redacted from logs and the
 // bootstrap fatal path (like LOGGER_SECRET_FIELD_NAMES), but intentionally
 // preserved in MCP output, where tools such as b2_list_keys return key IDs.
+// B2_APP_KEY_ID is retired for auth but retained for migration-window log safety.
 const SECRET_KEY_ID_ENV_VAR_NAMES = new Set([
-  "B2_APP_KEY_ID",
   "B2_APPLICATION_KEY_ID",
   "B2_MASTER_KEY_ID",
+  "B2_APP_KEY_ID",
 ]);
 
 const LOGGER_SECRET_FIELD_NAMES = [
@@ -229,6 +239,7 @@ function isSecretEnvName(name: string): boolean {
   const upper = name.toUpperCase();
   return (
     SECRET_ENV_VAR_NAMES.has(upper) ||
+    // APP_KEY arm retired for auth, retained for migration-window log safety.
     /^B2_CREDENTIAL_[A-Z0-9_]+_(?:APP_KEY|APPLICATION_KEY|MASTER_KEY)$/.test(upper)
   );
 }
@@ -237,6 +248,7 @@ function isSecretKeyIdEnvName(name: string): boolean {
   const upper = name.toUpperCase();
   return (
     SECRET_KEY_ID_ENV_VAR_NAMES.has(upper) ||
+    // APP_KEY_ID arm retired for auth, retained for migration-window log safety.
     /^B2_CREDENTIAL_[A-Z0-9_]+_(?:APP_KEY|APPLICATION_KEY|MASTER_KEY)_ID$/.test(upper)
   );
 }
@@ -641,18 +653,20 @@ export const SECRET_SANITIZER_REDACTION = REDACTED;
 const SECRET_REQUEST_HEADERS = [
   "authorization",
   "cookie",
-  "x-b2-app-key",
-  "x-b2-app-key-id",
-  "x-b2-key",
-  "x-b2-key-id",
-  "x-b2-master-key",
-  "x-b2-master-key-id",
-  "x-b2-mcp-app-key",
-  "x-b2-mcp-app-key-id",
   "x-b2-mcp-key",
   "x-b2-mcp-key-id",
   "x-b2-mcp-master-key",
   "x-b2-mcp-master-key-id",
+  // Retired for auth, retained so a mid-migration request still carrying a
+  // legacy credential header never echoes its value into failure-path logs.
+  "x-b2-key",
+  "x-b2-key-id",
+  "x-b2-master-key",
+  "x-b2-master-key-id",
+  "x-b2-app-key",
+  "x-b2-app-key-id",
+  "x-b2-mcp-app-key",
+  "x-b2-mcp-app-key-id",
 ] as const;
 
 type SecretHeaderName = (typeof SECRET_REQUEST_HEADERS)[number];
