@@ -128,7 +128,7 @@ function sectionBodies(text) {
 }
 
 function loadContract(root) {
-  const contractPath = path.join("docs", "tool-profile-contract.json");
+  const contractPath = path.join("docs", "generated", "tool-profile-contract.json");
   const contract = readJson(root, contractPath);
   if (!contract || typeof contract !== "object" || Array.isArray(contract)) {
     fail(`${path.join(root, contractPath)}: expected JSON object`);

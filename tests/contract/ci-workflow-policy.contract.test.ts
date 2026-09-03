@@ -233,7 +233,7 @@ describe("CI workflow policy", () => {
     expect(reliabilityJob).toContain("reports/junit/reliability.xml");
     expect(reliabilityJob).toContain("reports/vitest/reliability.json");
     expect(contractJob).toContain("pnpm run test:contract");
-    expect(contractJob).toContain("docs/tool-profile-contract.json");
+    expect(contractJob).toContain("docs/generated/tool-profile-contract.json");
     expect(protocolJob).toContain("pnpm run test:protocol");
     expect(protocolJob).toContain("protocol-*.json");
     expect(observabilityJob).toContain("name: observability/logging behavior");

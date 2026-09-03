@@ -29,7 +29,7 @@ let contract: {
 };
 
 beforeAll(() => {
-  contract = readJson("docs/tool-profile-contract.json");
+  contract = readJson("docs/generated/tool-profile-contract.json");
   packageMetadata = readJson("package.json");
   toolNames = contract.profiles.full.names;
   readme = readFileSync(join(__dirname, "../../README.md"), "utf8");

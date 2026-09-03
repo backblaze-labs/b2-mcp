@@ -485,7 +485,7 @@ they do not execute tools or approve destructive actions. Prompt availability is
 filtered against the same committed tool surface and B2 capability map as tools,
 so workflows disappear when a required handler is unavailable or only present as
 a compatibility stub. The prompt definitions live in `src/prompts.ts`; generated
-prompt fixtures are referenced from `docs/tool-profile-contract.json`.
+prompt fixtures are referenced from `docs/generated/tool-profile-contract.json`.
 
 ### Tool details and availability
 
@@ -664,7 +664,7 @@ committed lockfile and a sanitized temporary environment.
 - [`docs/references/deployment/vercel.md`](docs/references/deployment/vercel.md), [`docs/references/deployment/cloudflare-workers.md`](docs/references/deployment/cloudflare-workers.md), [`docs/references/deployment/cloudflare-containers.md`](docs/references/deployment/cloudflare-containers.md), [`docs/references/deployment/docker.md`](docs/references/deployment/docker.md), [`docs/references/deployment/google-cloud-run.md`](docs/references/deployment/google-cloud-run.md), [`docs/references/deployment/aws.md`](docs/references/deployment/aws.md), [`docs/references/deployment/azure-container-apps.md`](docs/references/deployment/azure-container-apps.md), [`docs/references/deployment/render.md`](docs/references/deployment/render.md), [`docs/references/deployment/railway.md`](docs/references/deployment/railway.md), [`docs/references/deployment/fly-io.md`](docs/references/deployment/fly-io.md) — provider deployment guides
 - [`docs/design-docs/index.md`](docs/design-docs/index.md) — public contract register with owners and status
 - [`docs/design-docs/tool-contract.md`](docs/design-docs/tool-contract.md) — Phase 1 tool-contract policy
-- [`docs/TOOL_PROFILES.md`](docs/TOOL_PROFILES.md) — generated tool-profile reference
+- [`docs/generated/tool-profiles.md`](docs/generated/tool-profiles.md) — generated tool-profile reference
 - [`docs/TESTING.md`](docs/TESTING.md) — deterministic and live-test gate skeleton
 - [`docs/EVALS.md`](docs/EVALS.md) — LLM eval local and CI runbook
 - [`docs/design-docs/security-review.md`](docs/design-docs/security-review.md) — pre-public security and provenance review checklist

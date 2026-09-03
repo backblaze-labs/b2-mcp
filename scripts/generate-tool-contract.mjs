@@ -174,8 +174,10 @@ function formatGeneratedJson(paths) {
 async function main() {
   const fixturesDir = join(root, "tests/fixtures/tool-contract");
   const promptFixturesDir = join(root, "tests/fixtures/prompt-contract");
+  const generatedDocsDir = join(root, "docs/generated");
   mkdirSync(fixturesDir, { recursive: true });
   mkdirSync(promptFixturesDir, { recursive: true });
+  mkdirSync(generatedDocsDir, { recursive: true });
 
   const fixtures = {};
   for (const profile of PROFILE_NAMES) {
@@ -259,11 +261,11 @@ async function main() {
     promptProfiles,
   };
 
-  const contractPath = join(root, "docs/tool-profile-contract.json");
+  const contractPath = join(generatedDocsDir, "tool-profile-contract.json");
   writeJson(contractPath, contract);
   generatedJsonPaths.push(contractPath);
   formatGeneratedJson(generatedJsonPaths);
-  const profileReferencePath = join(root, "docs/TOOL_PROFILES.md");
+  const profileReferencePath = join(generatedDocsDir, "tool-profiles.md");
   writeFileSync(profileReferencePath, renderProfileReference(contract));
 }
 

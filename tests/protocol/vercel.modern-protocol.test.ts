@@ -28,7 +28,7 @@ import {
 } from "./support/vercel";
 
 const savedEnv = { ...process.env };
-const contract = readJson<ContractArtifact>("docs/tool-profile-contract.json");
+const contract = readJson<ContractArtifact>("docs/generated/tool-profile-contract.json");
 const fullModernFixture = readJson<ToolFixture>(contract.profiles.full.fixtures.modern);
 const packageJson = readJson<ToolContractPackageJson>("package.json");
 

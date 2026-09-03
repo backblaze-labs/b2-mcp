@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
-import toolProfileContract from "../docs/tool-profile-contract.json";
+import toolProfileContract from "../docs/generated/tool-profile-contract.json";
 import type { Driver, EvalRun, EvalServerOptions, EvalTimeouts, RunEvalOptions } from "./harness";
 
 export type EvalCaseCategory =

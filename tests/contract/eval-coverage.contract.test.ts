@@ -13,7 +13,7 @@ interface EvalCoverageContract {
   };
 }
 
-const contract = readJson<EvalCoverageContract>("docs/tool-profile-contract.json");
+const contract = readJson<EvalCoverageContract>("docs/generated/tool-profile-contract.json");
 const fullProfile = contract.profiles.full;
 const fullToolNames = new Set(fullProfile.names);
 const confirmTools = new Set(fullProfile.confirmTools);

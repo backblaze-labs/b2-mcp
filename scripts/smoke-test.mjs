@@ -40,7 +40,7 @@ const { evaluateProfileContract, toolContractSnapshot } = smokeContract;
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const toolContract = JSON.parse(
-  readFileSync(join(root, "docs/tool-profile-contract.json"), "utf8"),
+  readFileSync(join(root, "docs/generated/tool-profile-contract.json"), "utf8"),
 );
 
 const {
