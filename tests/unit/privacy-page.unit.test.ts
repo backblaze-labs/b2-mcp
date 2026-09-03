@@ -3,6 +3,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { readJson, root } from "../contract/support";
 import {
+  canonicalizeHtml,
   compareToCommonMark,
   expectMatchesCommonMark,
   expectRejectedByOracle,
@@ -97,6 +98,8 @@ const SUPPORTED_MARKDOWN_SAMPLES: ReadonlyArray<readonly [string, string]> = [
   ["tight bullet list", "- first\n- second\n- third"],
   ["wrapped bullet continuation", "- an item that wraps\n  onto a second line"],
   ["mixed code and link", "see `b2_create_key` and [docs](https://example.com)"],
+  ["adjacent links with a separator", "[A](https://a.example) [B](https://b.example)"],
+  ["link title with internal spaces", '[Backblaze](https://www.backblaze.com "legal terms")'],
 ];
 
 describe("privacy page generator", () => {
@@ -226,6 +229,19 @@ describe("privacy page differential CommonMark oracle", () => {
       );
     },
   );
+
+  it("preserves inter-element and attribute whitespace when canonicalizing", () => {
+    // A present-vs-absent separator between inline elements is semantic and must
+    // not canonicalize to the same value, or a real inter-element regression
+    // would be masked as `matches`.
+    expect(canonicalizeHtml('<a href="x">A</a> <a href="y">B</a>')).not.toBe(
+      canonicalizeHtml('<a href="x">A</a><a href="y">B</a>'),
+    );
+    // Whitespace inside a quoted attribute value is significant too.
+    expect(canonicalizeHtml('<a href="x" title="legal  terms">A</a>')).not.toBe(
+      canonicalizeHtml('<a href="x" title="legal terms">A</a>'),
+    );
+  });
 
   it.each(UNSUPPORTED_MARKDOWN_SAMPLES)(
     "never silently mis-renders unsupported construct vs reference CommonMark: %s",

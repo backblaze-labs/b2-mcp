@@ -58,17 +58,21 @@ export function renderReferenceHtml(markdown: string): string {
  *   blob URL appearing as literal text, or prepended to a root/network-path
  *   (`.../blob/main//host`), query-only (`.../blob/main/?x`), or absolute-scheme
  *   (`.../blob/main/ftp://host`) destination, survives and forces a mismatch.
- * - insignificant whitespace (a softbreak newline vs a joined space,
- *   indentation) OUTSIDE `<code>` spans. Whitespace inside a code span is
- *   significant: CommonMark strips a single boundary space the constrained
- *   renderer keeps, so code-span content is masked before the collapse and
- *   restored verbatim, letting such a divergence surface instead of being
- *   normalized into a match.
+ * - insignificant whitespace, collapsed in a tag/text-aware way: whitespace
+ *   runs are reduced to a single space ONLY inside text nodes (so a softbreak
+ *   newline vs a joined space, or wrapping indentation, no longer differs),
+ *   while tag tokens are left byte-for-byte intact. That preserves quoted
+ *   attribute whitespace (`title="a  b"`) and significant inter-element
+ *   separators (`</a> <a>` vs `</a><a>`), so a divergence in either surfaces
+ *   instead of being normalized into a match. `<code>` span whitespace is also
+ *   significant (CommonMark strips a single boundary space the constrained
+ *   renderer keeps), so each span is masked before the collapse and restored
+ *   verbatim.
  *
  * Anything semantic (a dropped `<br>`, a construct emitted as literal text
  * instead of markup, emphasis, an entity rendered as source, mismatched
- * code-span whitespace) survives and forces a mismatch, which is exactly the
- * drift the oracle must catch.
+ * code-span or attribute or inter-element whitespace) survives and forces a
+ * mismatch, which is exactly the drift the oracle must catch.
  */
 export function canonicalizeHtml(html: string): string {
   const codeSpans: string[] = [];
@@ -76,11 +80,18 @@ export function canonicalizeHtml(html: string): string {
     codeSpans.push(span);
     return `${CODE_MASK_OPEN}${codeSpans.length - 1}${CODE_MASK_CLOSE}`;
   });
-  return masked
+  const attributesNormalized = masked
     .replace(/(<h[1-6])\s+id="[^"]*"/g, "$1")
-    .replace(BLOB_HREF_PREFIX, 'href="')
-    .replace(/>\s+</g, "><")
-    .replace(/\s+/g, " ")
+    .replace(BLOB_HREF_PREFIX, 'href="');
+  // Split into alternating text nodes and tag tokens. Because every `<`/`>` in
+  // rendered output is HTML-escaped except tag delimiters, odd indices are tag
+  // tokens (kept verbatim, so attribute whitespace stays intact) and even
+  // indices are text nodes (whitespace runs collapsed to a single space, which
+  // still preserves a present-vs-absent inter-element space).
+  return attributesNormalized
+    .split(/(<[^>]*>)/)
+    .map((part, index) => (index % 2 === 1 ? part : part.replace(/\s+/g, " ")))
+    .join("")
     .trim()
     .replace(
       new RegExp(`${CODE_MASK_OPEN}(\\d+)${CODE_MASK_CLOSE}`, "g"),
