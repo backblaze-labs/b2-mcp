@@ -528,6 +528,14 @@ describe("credential fingerprints and header detection", () => {
 describe("removed credential env alias warning", () => {
   beforeEach(() => {
     _resetRemovedCredentialEnvAliasWarning();
+    // Strip any retired alias inherited from the developer/CI environment so the
+    // "does not warn" assertion is not tripped by an ambient migration variable.
+    for (const name of Object.keys(process.env)) {
+      if (/^B2_APP_KEY(?:_ID)?(?:_FILE)?$/.test(name)) delete process.env[name];
+      if (/^B2_CREDENTIAL_[A-Z0-9_]+_APP_KEY(?:_ID)?(?:_FILE)?$/.test(name)) {
+        delete process.env[name];
+      }
+    }
   });
 
   it("warns once when a removed B2_APP_KEY_* env var is still set", () => {
