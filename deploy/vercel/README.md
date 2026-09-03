@@ -173,9 +173,9 @@ cannot use.
 Production B2 secrets must be assigned to Production only. Preview deployments
 should use no B2 credentials, deterministic fakes, or a separate disposable
 read-only key. The adapter refuses Preview deployments that contain
-`B2_APPLICATION_KEY_*`, `B2_MASTER_KEY_*`, or
-`B2_CREDENTIAL_<REF>_*` material unless
-`B2_VERCEL_ALLOW_PREVIEW_B2_CREDENTIALS=true` is set.
+`B2_APPLICATION_KEY_*`, `B2_APP_KEY_*` (retired but still guarded as a
+possible live secret), `B2_MASTER_KEY_*`, or `B2_CREDENTIAL_<REF>_*` material
+unless `B2_VERCEL_ALLOW_PREVIEW_B2_CREDENTIALS=true` is set.
 
 Legacy header credential mode is disabled on Vercel unless
 `B2_VERCEL_ALLOW_HEADER_CREDENTIAL_MODE=true` is set. Server mode is the
