@@ -8,7 +8,7 @@ export interface Resp {
   headers: http.IncomingHttpHeaders;
 }
 
-export const creds = { "x-b2-key-id": "key-abc", "x-b2-key": "secret-xyz" };
+export const creds = { "x-b2-mcp-key-id": "key-abc", "x-b2-mcp-key": "secret-xyz" };
 
 export const JSON_HEADERS = {
   "content-type": "application/json",

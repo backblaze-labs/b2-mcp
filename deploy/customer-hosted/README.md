@@ -88,8 +88,8 @@ deployment is not safe until TLS and caller auth are active.
 Production secret managers should inject server-held credentials as environment
 variables or files mounted under `/run/secrets`. The entrypoint supports
 `B2_APPLICATION_KEY_ID_FILE`, `B2_APPLICATION_KEY_FILE`, `B2_MASTER_KEY_ID_FILE`,
-`B2_MASTER_KEY_FILE`, `B2_APP_KEY_ID_FILE`, `B2_APP_KEY_FILE`, and matching
-`B2_CREDENTIAL_<REF>_*_FILE` names for principal-mode credential maps.
+`B2_MASTER_KEY_FILE`, and matching `B2_CREDENTIAL_<REF>_*_FILE` names for
+principal-mode credential maps.
 
 ## OAuth And Workload Identity
 

@@ -156,7 +156,7 @@ their current availability is a non-secret compatibility stub.
 
 **B2 SDK boundary** (`src/b2/`) — the official `@backblaze-labs/b2-sdk` integration boundary for B2 authorization state, endpoint data, retry semantics, and native bucket/key/Object Lock/notification/Partner operations. `B2Client` owns the shared auth/circuit wrapper and native lookups used by S3 safety guards, such as version-ID ownership checks and delete-marker metadata synthesis.
 
-**S3-compatible API** (`src/s3/`) — the **data-plane tool contract**: all `s3_*` object, presigned URL, multipart, bucket reachability/location/lifecycle, upload-part-copy, and report-bucket reads use the permanent AWS S3 SDK peer client configured through `@backblaze-labs/b2-sdk/s3`. B2 rejects **master** keys on the S3 endpoint, but ordinary application keys are accepted — which is why the application key (`B2_APPLICATION_KEY_ID` / `B2_APPLICATION_KEY`) is the primary credential and signs S3 requests. (The deprecated `B2_APP_KEY_ID` / `B2_APP_KEY` override remains only for legacy setups whose application key is a master key.)
+**S3-compatible API** (`src/s3/`) — the **data-plane tool contract**: all `s3_*` object, presigned URL, multipart, bucket reachability/location/lifecycle, upload-part-copy, and report-bucket reads use the permanent AWS S3 SDK peer client configured through `@backblaze-labs/b2-sdk/s3`. B2 rejects **master** keys on the S3 endpoint, but ordinary application keys are accepted — which is why a non-master application key (`B2_APPLICATION_KEY_ID` / `B2_APPLICATION_KEY`) is the primary credential and signs S3 requests. (The former `B2_APP_KEY_ID` / `B2_APP_KEY` separate-S3-key override has been removed.)
 
 **Credential routing** (`createServer` in `server.ts`): the application key drives the B2 native API, S3, and key management. Only the Partner API tools use the master key — `createServer` builds a second `B2Client` from `B2_MASTER_KEY_*` and wires it into `registerPartnerTools`, falling back to the application-key client when no distinct master key is set.
 
@@ -224,10 +224,10 @@ Because this transport is internet-facing, it is hardened by default:
 
 Client config notes:
 
-- **Claude Desktop** (`claude_desktop_config.json`) only accepts stdio entries. To connect to a hosted Streamable HTTP server, use the `mcp-remote` bridge as a local stdio shim (`command: "npx"`, `args: ["-y", "mcp-remote", "<url>/mcp", "--header", "X-B2-Key-Id:…", "--header", "X-B2-Key:…"]`). The URL + headers shape is rejected by Claude Desktop with "not a valid MCP server configuration."
-- **Claude.ai web / Pro / Max Custom Connectors** accept the URL + headers shape directly: `{ url, headers: { "X-B2-Key-Id": "…", "X-B2-Key": "…" } }`.
+- **Claude Desktop** (`claude_desktop_config.json`) only accepts stdio entries. To connect to a hosted Streamable HTTP server, use the `mcp-remote` bridge as a local stdio shim (`command: "npx"`, `args: ["-y", "mcp-remote", "<url>/mcp", "--header", "X-B2-MCP-Key-Id:…", "--header", "X-B2-MCP-Key:…"]`). The URL + headers shape is rejected by Claude Desktop with "not a valid MCP server configuration."
+- **Claude.ai web / Pro / Max Custom Connectors** accept the URL + headers shape directly: `{ url, headers: { "X-B2-MCP-Key-Id": "…", "X-B2-MCP-Key": "…" } }`.
 
-`X-B2-Key-Id` / `X-B2-Key` are required — the application key, used for B2 native, S3, and key management. `X-B2-Master-Key-Id` / `X-B2-Master-Key` are optional and used **only** by the Partner API tools (they fall back to the application key when absent). `X-B2-App-Key-Id` / `X-B2-App-Key` are the deprecated legacy non-master S3 override, kept only for setups whose `X-B2-Key-Id` is a master key.
+`X-B2-MCP-Key-Id` / `X-B2-MCP-Key` are required — the application key, used for B2 native, S3, and key management. `X-B2-MCP-Master-Key-Id` / `X-B2-MCP-Master-Key` are optional and used **only** by the Partner API tools (they fall back to the application key when absent). Use a non-master application key: B2 rejects master keys on the S3 endpoint, and the short `X-B2-*` aliases plus the `X-B2-App-Key-*` S3 override have been removed.
 
 ## Deployment target
 

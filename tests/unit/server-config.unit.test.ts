@@ -105,21 +105,14 @@ describe("loadConfig — valid env vars", () => {
     expect(config.secretSink).toEqual({ mode: "file", filePath: secretFile });
   });
 
-  it("defaults appKeyId to applicationKeyId when B2_APP_KEY_ID is not set", async () => {
-    delete process.env.B2_APP_KEY_ID;
-    delete process.env.B2_APP_KEY;
-    const config = await loadConfig();
-    expect(config.appKeyId).toBe("key-id-123");
-    expect(config.appKey).toBe("key-secret-abc");
-  });
-
-  it("uses B2_APP_KEY_ID and B2_APP_KEY when set", async () => {
+  it("always mirrors the application key into appKeyId/appKey", async () => {
+    // The legacy separate-S3-key override (B2_APP_KEY_ID/B2_APP_KEY) is removed;
+    // the S3-signing fields always mirror the application key.
     process.env.B2_APP_KEY_ID = "app-key-id-xyz";
     process.env.B2_APP_KEY = "app-key-secret-xyz";
     const config = await loadConfig();
-    expect(config.appKeyId).toBe("app-key-id-xyz");
-    expect(config.appKey).toBe("app-key-secret-xyz");
-    // Primary key is unchanged
+    expect(config.appKeyId).toBe("key-id-123");
+    expect(config.appKey).toBe("key-secret-abc");
     expect(config.applicationKeyId).toBe("key-id-123");
     expect(config.applicationKey).toBe("key-secret-abc");
   });

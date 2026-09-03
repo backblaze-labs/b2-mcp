@@ -519,8 +519,8 @@ describe("HTTP runtime security regression suite (#197)", () => {
 
     const response = await request(port, "POST", "/mcp", {
       headers: {
-        "x-b2-key-id": "public-id",
-        "x-b2-key": CANARY_B2_SECRET,
+        "x-b2-mcp-key-id": "public-id",
+        "x-b2-mcp-key": CANARY_B2_SECRET,
         authorization: `Bearer ${CANARY_BEARER}`,
         ...modernHeaders("tools/list"),
       },

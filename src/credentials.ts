@@ -16,12 +16,10 @@ const DEFAULT_REGION = "us-west-004";
 export const DISCOVERY_MODE_CREDENTIAL = "b2-mcp-discovery-mode";
 
 const HEADER_NAMES = {
-  keyId: ["x-b2-mcp-key-id", "x-b2-key-id"],
-  key: ["x-b2-mcp-key", "x-b2-key"],
-  appKeyId: ["x-b2-mcp-app-key-id", "x-b2-app-key-id"],
-  appKey: ["x-b2-mcp-app-key", "x-b2-app-key"],
-  masterKeyId: ["x-b2-mcp-master-key-id", "x-b2-master-key-id"],
-  masterKey: ["x-b2-mcp-master-key", "x-b2-master-key"],
+  keyId: ["x-b2-mcp-key-id"],
+  key: ["x-b2-mcp-key"],
+  masterKeyId: ["x-b2-mcp-master-key-id"],
+  masterKey: ["x-b2-mcp-master-key"],
 } as const;
 
 const ALL_CREDENTIAL_HEADER_NAMES = new Set<string>(Object.values(HEADER_NAMES).flat());
@@ -94,10 +92,6 @@ export interface CredentialMaterial {
   applicationKeyId?: string;
   /** Primary B2 application key secret. */
   applicationKey?: string;
-  /** Deprecated legacy S3 application key ID override. */
-  appKeyId?: string;
-  /** Deprecated legacy S3 application key secret override. */
-  appKey?: string;
   /** Optional B2 master key ID used only for Partner API tools. */
   masterKeyId?: string;
   /** Optional B2 master key secret used only for Partner API tools. */
@@ -234,14 +228,6 @@ function configFromMaterial(material: CredentialMaterial, options: ConfigOptions
   }
 
   const strictOptionalPairs = options.strictOptionalPairs === true;
-  const app = resolveOptionalPair(
-    material.appKeyId,
-    material.appKey,
-    keyId,
-    key,
-    "B2 app key override",
-    strictOptionalPairs,
-  );
   const master = resolveOptionalPair(
     material.masterKeyId,
     material.masterKey,
@@ -254,8 +240,11 @@ function configFromMaterial(material: CredentialMaterial, options: ConfigOptions
   const config: B2Config = {
     applicationKeyId: keyId,
     applicationKey: key,
-    appKeyId: app.id,
-    appKey: app.key,
+    // The application key signs S3 requests directly. The appKeyId/appKey fields
+    // are retained internally and always mirror the application key; the legacy
+    // separate-S3-key override (B2_APP_KEY_ID/B2_APP_KEY, X-B2-App-Key*) is gone.
+    appKeyId: keyId,
+    appKey: key,
     masterKeyId: master.id,
     masterKey: master.key,
     // Treat a blank/whitespace B2_REGION as unset so a launcher that forwards an
@@ -300,8 +289,6 @@ function envMaterial(prefix = "B2"): CredentialMaterial {
   return {
     applicationKeyId: process.env[`${prefix}_APPLICATION_KEY_ID`],
     applicationKey: process.env[`${prefix}_APPLICATION_KEY`],
-    appKeyId: process.env[`${prefix}_APP_KEY_ID`],
-    appKey: process.env[`${prefix}_APP_KEY`],
     masterKeyId: process.env[`${prefix}_MASTER_KEY_ID`],
     masterKey: process.env[`${prefix}_MASTER_KEY`],
   };
@@ -330,8 +317,6 @@ function headerMaterial(headers: http.IncomingHttpHeaders): CredentialMaterial {
   return {
     applicationKeyId: valueFromHeader(headers, HEADER_NAMES.keyId),
     applicationKey: valueFromHeader(headers, HEADER_NAMES.key),
-    appKeyId: valueFromHeader(headers, HEADER_NAMES.appKeyId),
-    appKey: valueFromHeader(headers, HEADER_NAMES.appKey),
     masterKeyId: valueFromHeader(headers, HEADER_NAMES.masterKeyId),
     masterKey: valueFromHeader(headers, HEADER_NAMES.masterKey),
   };
@@ -401,11 +386,6 @@ export class StdioEnvCredentialProvider implements CredentialProvider {
    * @throws CredentialResolutionError when required credentials are missing.
    */
   resolve(): CredentialResolution {
-    if (process.env.B2_APP_KEY_ID) {
-      logger.warn(
-        "config.deprecated: B2_APP_KEY_ID/B2_APP_KEY is deprecated. Use B2_APPLICATION_KEY_ID/B2_APPLICATION_KEY with B2_MASTER_KEY_* only when a separate master credential is required.",
-      );
-    }
     const config = configFromMaterial(envMaterial(), {
       transport: "stdio",
       allowLocalFiles: process.env.B2_ALLOW_LOCAL_FILES !== "false",

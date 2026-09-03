@@ -54,12 +54,6 @@ export interface OAuthEnvironmentVariables {
   readonly dangerouslyAllowUnauthenticatedIntrospection: "B2_OAUTH_DANGEROUSLY_ALLOW_UNAUTHENTICATED_INTROSPECTION";
   /** Bearer token used to authenticate OAuth introspection requests. */
   readonly introspectionBearerToken: "B2_OAUTH_INTROSPECTION_BEARER_TOKEN";
-  /** Legacy maximum token-cache entries setting for introspection deployments. */
-  readonly introspectionCacheMaxEntries: "B2_OAUTH_INTROSPECTION_CACHE_MAX_ENTRIES";
-  /** Legacy token-cache skew setting for introspection deployments. */
-  readonly introspectionCacheSkewSeconds: "B2_OAUTH_INTROSPECTION_CACHE_SKEW_SECONDS";
-  /** Legacy token-cache TTL setting for introspection deployments. */
-  readonly introspectionCacheTtlSeconds: "B2_OAUTH_INTROSPECTION_CACHE_TTL_SECONDS";
   /** Consecutive dependency failures before opening the introspection circuit. */
   readonly introspectionCircuitFailures: "B2_OAUTH_INTROSPECTION_CIRCUIT_FAILURES";
   /** Introspection circuit open duration in milliseconds. */
@@ -128,9 +122,6 @@ export const OAUTH_ENVIRONMENT_VARIABLES: OAuthEnvironmentVariables = {
   dangerouslyAllowUnauthenticatedIntrospection:
     "B2_OAUTH_DANGEROUSLY_ALLOW_UNAUTHENTICATED_INTROSPECTION",
   introspectionBearerToken: "B2_OAUTH_INTROSPECTION_BEARER_TOKEN",
-  introspectionCacheMaxEntries: "B2_OAUTH_INTROSPECTION_CACHE_MAX_ENTRIES",
-  introspectionCacheSkewSeconds: "B2_OAUTH_INTROSPECTION_CACHE_SKEW_SECONDS",
-  introspectionCacheTtlSeconds: "B2_OAUTH_INTROSPECTION_CACHE_TTL_SECONDS",
   introspectionCircuitFailures: "B2_OAUTH_INTROSPECTION_CIRCUIT_FAILURES",
   introspectionCircuitOpenMs: "B2_OAUTH_INTROSPECTION_CIRCUIT_OPEN_MS",
   introspectionClientId: "B2_OAUTH_INTROSPECTION_CLIENT_ID",
@@ -468,19 +459,19 @@ export function loadOAuthResourceServerConfig(
     tokenCacheMaxEntries: intEnv(
       env,
       OAUTH_ENV.tokenCacheMaxEntries,
-      intEnv(env, OAUTH_ENV.introspectionCacheMaxEntries, DEFAULT_TOKEN_CACHE_MAX_ENTRIES, 1),
+      DEFAULT_TOKEN_CACHE_MAX_ENTRIES,
       1,
     ),
     tokenCacheTtlSeconds: intEnv(
       env,
       OAUTH_ENV.tokenCacheTtlSeconds,
-      intEnv(env, OAUTH_ENV.introspectionCacheTtlSeconds, DEFAULT_TOKEN_CACHE_TTL_SECONDS, 1),
+      DEFAULT_TOKEN_CACHE_TTL_SECONDS,
       1,
     ),
     tokenCacheSkewSeconds: intEnv(
       env,
       OAUTH_ENV.tokenCacheSkewSeconds,
-      intEnv(env, OAUTH_ENV.introspectionCacheSkewSeconds, DEFAULT_TOKEN_CACHE_SKEW_SECONDS),
+      DEFAULT_TOKEN_CACHE_SKEW_SECONDS,
     ),
     introspectionTimeoutMs: intEnv(
       env,

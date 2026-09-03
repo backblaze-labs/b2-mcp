@@ -219,9 +219,8 @@ pnpm run smoke
 
 Protected live smoke jobs must bind a GitHub Environment with branch
 restrictions and optional required reviewers. Use environment-level secrets for
-`LIVE_B2_KEY_ID`, `LIVE_B2_KEY`, `LIVE_B2_APP_KEY_ID`, `LIVE_B2_APP_KEY`,
-`MCP_AUTHORIZATION`, and provider bypass tokens. Do not duplicate live B2
-credentials as repository-level secrets.
+`LIVE_B2_KEY_ID`, `LIVE_B2_KEY`, `MCP_AUTHORIZATION`, and provider bypass
+tokens. Do not duplicate live B2 credentials as repository-level secrets.
 
 ## Rotation And Revocation
 

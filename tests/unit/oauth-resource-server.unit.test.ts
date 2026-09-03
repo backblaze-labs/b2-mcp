@@ -2542,7 +2542,7 @@ describe("OAuth resource metadata", () => {
       new Request(protectedResourceMetadataUrl(baseConfig), {
         method: "OPTIONS",
         headers: {
-          "Access-Control-Request-Headers": "authorization,x-b2-key",
+          "Access-Control-Request-Headers": "authorization,x-b2-mcp-key",
         },
       }),
     );
@@ -2551,7 +2551,7 @@ describe("OAuth resource metadata", () => {
     expect(response?.status).toBe(204);
     expect(response?.headers.get("access-control-allow-origin")).toBe("*");
     expect(response?.headers.get("access-control-allow-methods")).toBe("GET, HEAD, OPTIONS");
-    expect(response?.headers.get("access-control-allow-headers")).toBe("authorization,x-b2-key");
+    expect(response?.headers.get("access-control-allow-headers")).toBe("authorization,x-b2-mcp-key");
     expect(response?.headers.get("vary")).toBe("Access-Control-Request-Headers");
   });
 

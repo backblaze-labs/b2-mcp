@@ -547,8 +547,8 @@ describe("HTTP transport handler", () => {
     for (let i = 0; i < 3; i++) {
       const res = await request(port, "POST", "/mcp", {
         headers: {
-          "x-b2-key-id": `invalid-${i}`,
-          "x-b2-key": `invalid-secret-${i}`,
+          "x-b2-mcp-key-id": `invalid-${i}`,
+          "x-b2-mcp-key": `invalid-secret-${i}`,
           ...modernHeaders("tools/list"),
         },
         body: LIST_TOOLS,
@@ -580,8 +580,8 @@ describe("HTTP transport handler", () => {
 
     const first = request(port, "POST", "/mcp", {
       headers: {
-        "x-b2-key-id": "invalid-a",
-        "x-b2-key": "invalid-secret-a",
+        "x-b2-mcp-key-id": "invalid-a",
+        "x-b2-mcp-key": "invalid-secret-a",
         "x-forwarded-for": "198.51.100.10",
         ...modernHeaders("tools/list"),
       },
@@ -591,8 +591,8 @@ describe("HTTP transport handler", () => {
 
     const second = await request(port, "POST", "/mcp", {
       headers: {
-        "x-b2-key-id": "invalid-b",
-        "x-b2-key": "invalid-secret-b",
+        "x-b2-mcp-key-id": "invalid-b",
+        "x-b2-mcp-key": "invalid-secret-b",
         "x-forwarded-for": "198.51.100.11",
         ...modernHeaders("tools/list"),
       },
@@ -620,8 +620,8 @@ describe("HTTP transport handler", () => {
 
     const first = request(port, "POST", "/mcp", {
       headers: {
-        "x-b2-key-id": "same-valid-key",
-        "x-b2-key": "same-secret",
+        "x-b2-mcp-key-id": "same-valid-key",
+        "x-b2-mcp-key": "same-secret",
         ...modernHeaders("tools/list"),
       },
       body: LIST_TOOLS,
@@ -630,8 +630,8 @@ describe("HTTP transport handler", () => {
 
     const second = await request(port, "POST", "/mcp", {
       headers: {
-        "x-b2-key-id": "same-valid-key",
-        "x-b2-key": "same-secret",
+        "x-b2-mcp-key-id": "same-valid-key",
+        "x-b2-mcp-key": "same-secret",
         ...modernHeaders("tools/list"),
       },
       body: LIST_TOOLS,
@@ -654,8 +654,8 @@ describe("HTTP transport handler", () => {
 
     const response = await request(port, "POST", "/mcp", {
       headers: {
-        "x-b2-key-id": "fresh-valid-key",
-        "x-b2-key": "fresh-secret",
+        "x-b2-mcp-key-id": "fresh-valid-key",
+        "x-b2-mcp-key": "fresh-secret",
         ...modernHeaders("tools/list"),
       },
       body: LIST_TOOLS,
@@ -682,8 +682,8 @@ describe("HTTP transport handler", () => {
 
     const first = await request(port, "POST", "/mcp", {
       headers: {
-        "x-b2-key-id": "invalid-a",
-        "x-b2-key": "invalid-secret-a",
+        "x-b2-mcp-key-id": "invalid-a",
+        "x-b2-mcp-key": "invalid-secret-a",
         "x-forwarded-for": "198.51.100.20",
         ...modernHeaders("tools/list"),
       },
@@ -693,8 +693,8 @@ describe("HTTP transport handler", () => {
 
     const second = await request(port, "POST", "/mcp", {
       headers: {
-        "x-b2-key-id": "invalid-b",
-        "x-b2-key": "invalid-secret-b",
+        "x-b2-mcp-key-id": "invalid-b",
+        "x-b2-mcp-key": "invalid-secret-b",
         "x-forwarded-for": "198.51.100.21",
         ...modernHeaders("tools/list"),
       },
@@ -712,8 +712,8 @@ describe("HTTP transport handler", () => {
     for (const keyId of ["valid-a", "valid-b"]) {
       const warm = await request(port, "POST", "/mcp", {
         headers: {
-          "x-b2-key-id": keyId,
-          "x-b2-key": `secret-${keyId}`,
+          "x-b2-mcp-key-id": keyId,
+          "x-b2-mcp-key": `secret-${keyId}`,
           ...modernHeaders("tools/list"),
         },
         body: LIST_TOOLS,
@@ -742,8 +742,8 @@ describe("HTTP transport handler", () => {
 
     const first = request(port, "POST", "/mcp", {
       headers: {
-        "x-b2-key-id": "valid-a",
-        "x-b2-key": "secret-valid-a",
+        "x-b2-mcp-key-id": "valid-a",
+        "x-b2-mcp-key": "secret-valid-a",
         ...modernHeaders("tools/list"),
       },
       body: LIST_TOOLS,
@@ -752,8 +752,8 @@ describe("HTTP transport handler", () => {
 
     const second = request(port, "POST", "/mcp", {
       headers: {
-        "x-b2-key-id": "valid-b",
-        "x-b2-key": "secret-valid-b",
+        "x-b2-mcp-key-id": "valid-b",
+        "x-b2-mcp-key": "secret-valid-b",
         ...modernHeaders("tools/list"),
       },
       body: LIST_TOOLS,
@@ -779,16 +779,16 @@ describe("HTTP transport handler", () => {
     const [first, second] = await Promise.all([
       request(port, "POST", "/mcp", {
         headers: {
-          "x-b2-key-id": "tenant-a",
-          "x-b2-key": "secret-a",
+          "x-b2-mcp-key-id": "tenant-a",
+          "x-b2-mcp-key": "secret-a",
           ...modernHeaders("tools/list"),
         },
         body: LIST_TOOLS,
       }),
       request(port, "POST", "/mcp", {
         headers: {
-          "x-b2-key-id": "tenant-b",
-          "x-b2-key": "secret-b",
+          "x-b2-mcp-key-id": "tenant-b",
+          "x-b2-mcp-key": "secret-b",
           ...modernHeaders("tools/list"),
         },
         body: LIST_TOOLS,
@@ -988,18 +988,15 @@ describe("HTTP transport handler", () => {
 
     const res = await request(port, "POST", "/mcp", {
       headers: {
-        "x-b2-key-id": "key",
-        "x-b2-key": "secret",
         "x-b2-mcp-key-id": "key",
         "x-b2-mcp-key": "secret",
-        "x-b2-app-key-id": "app-key",
-        "x-b2-app-key": "app-secret",
-        "x-b2-mcp-app-key-id": "app-key",
-        "x-b2-mcp-app-key": "app-secret",
-        "x-b2-master-key-id": "master-key",
-        "x-b2-master-key": "master-secret",
         "x-b2-mcp-master-key-id": "master-key",
         "x-b2-mcp-master-key": "master-secret",
+        // Removed legacy aliases must still never cross into the SDK boundary.
+        "x-b2-key-id": "key",
+        "x-b2-key": "secret",
+        "x-b2-app-key-id": "app-key",
+        "x-b2-app-key": "app-secret",
         authorization: "Bearer caller-token",
         ...modernHeaders("tools/list"),
       },
@@ -1012,18 +1009,14 @@ describe("HTTP transport handler", () => {
     expect(sdkHeaders.get("content-type")).toBe("application/json");
     expect(sdkHeaders.get("mcp-method")).toBe("tools/list");
     for (const name of [
+      "x-b2-mcp-key-id",
+      "x-b2-mcp-key",
+      "x-b2-mcp-master-key-id",
+      "x-b2-mcp-master-key",
       "x-b2-key-id",
       "x-b2-key",
       "x-b2-app-key-id",
       "x-b2-app-key",
-      "x-b2-master-key-id",
-      "x-b2-master-key",
-      "x-b2-mcp-key-id",
-      "x-b2-mcp-key",
-      "x-b2-mcp-app-key-id",
-      "x-b2-mcp-app-key",
-      "x-b2-mcp-master-key-id",
-      "x-b2-mcp-master-key",
       "authorization",
     ]) {
       expect(sdkHeaders.has(name)).toBe(false);
@@ -1326,8 +1319,8 @@ describe("HTTP transport handler", () => {
     });
     const second = await request(port, "POST", "/mcp", {
       headers: {
-        "x-b2-key-id": creds["x-b2-key-id"],
-        "x-b2-key": "different-secret",
+        "x-b2-mcp-key-id": creds["x-b2-mcp-key-id"],
+        "x-b2-mcp-key": "different-secret",
         ...modernHeaders("tools/call", "b2_list_buckets"),
       },
       body: callToolBody("b2_list_buckets", {}, 2),

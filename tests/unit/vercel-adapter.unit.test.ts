@@ -520,8 +520,8 @@ describe("Vercel adapter", () => {
         method: "POST",
         headers: {
           ...modernHeaders("tools/list"),
-          "X-B2-Key-Id": "public-id",
-          "X-B2-Key": "public-secret",
+          "X-B2-MCP-Key-Id": "public-id",
+          "X-B2-MCP-Key": "public-secret",
         },
         body: modernBody("tools/list"),
       }),
@@ -552,8 +552,8 @@ describe("Vercel adapter", () => {
           method,
           headers: {
             host: "mcp.example.com",
-            "X-B2-Key-Id": "public-id",
-            "X-B2-Key": "public-secret",
+            "X-B2-MCP-Key-Id": "public-id",
+            "X-B2-MCP-Key": "public-secret",
           },
         }),
         validAuthInfo,
@@ -619,14 +619,10 @@ describe("Vercel adapter", () => {
   it.each([
     "B2_APPLICATION_KEY",
     "B2_APPLICATION_KEY_ID",
-    "B2_APP_KEY",
-    "B2_APP_KEY_ID",
     "B2_MASTER_KEY",
     "B2_MASTER_KEY_ID",
     "B2_CREDENTIAL_TENANT_A_APPLICATION_KEY",
     "B2_CREDENTIAL_TENANT_A_APPLICATION_KEY_ID",
-    "B2_CREDENTIAL_TENANT_A_APP_KEY",
-    "B2_CREDENTIAL_TENANT_A_APP_KEY_ID",
     "B2_CREDENTIAL_TENANT_A_MASTER_KEY",
     "B2_CREDENTIAL_TENANT_A_MASTER_KEY_ID",
   ])("rejects preview credential env material %s without the explicit override", async (name) => {

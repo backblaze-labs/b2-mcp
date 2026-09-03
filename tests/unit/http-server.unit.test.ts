@@ -38,8 +38,6 @@ const shutdownSignals: readonly ShutdownSignal[] = ["SIGTERM", "SIGINT"];
 const credentialEnvKeys = [
   "B2_APPLICATION_KEY_ID",
   "B2_APPLICATION_KEY",
-  "B2_APP_KEY_ID",
-  "B2_APP_KEY",
   "B2_MASTER_KEY_ID",
   "B2_MASTER_KEY",
 ] as const;
@@ -191,17 +189,17 @@ describe("configFromHeaders", () => {
   });
 
   it("returns null when X-B2-Key-Id is missing", () => {
-    const req = { headers: { "x-b2-key": "secret" } };
+    const req = { headers: { "x-b2-mcp-key": "secret" } };
     expect(configFromHeaders(req)).toBeNull();
   });
 
   it("returns null when X-B2-Key is missing", () => {
-    const req = { headers: { "x-b2-key-id": "id" } };
+    const req = { headers: { "x-b2-mcp-key-id": "id" } };
     expect(configFromHeaders(req)).toBeNull();
   });
 
   it("rejects conflicting duplicate credential header values", () => {
-    const req = { headers: { "x-b2-key-id": ["a", "b"], "x-b2-key": "secret" } };
+    const req = { headers: { "x-b2-mcp-key-id": ["a", "b"], "x-b2-mcp-key": "secret" } };
     expect(() => configFromHeaders(req)).toThrow(/conflicting/i);
   });
 
@@ -212,8 +210,8 @@ describe("configFromHeaders", () => {
     expect(() => validateHttpCredentialConfiguration()).toThrow(/B2_ALLOW_LOCAL_FILES=true/);
   });
 
-  it("falls back to primary key when app key headers are absent", () => {
-    const req = { headers: { "x-b2-key-id": "primary-id", "x-b2-key": "primary-secret" } };
+  it("mirrors the application key into the S3-signing fields", () => {
+    const req = { headers: { "x-b2-mcp-key-id": "primary-id", "x-b2-mcp-key": "primary-secret" } };
     const config = configFromHeaders(req)!;
     expect(config.applicationKeyId).toBe("primary-id");
     expect(config.applicationKey).toBe("primary-secret");
@@ -221,54 +219,39 @@ describe("configFromHeaders", () => {
     expect(config.appKey).toBe("primary-secret");
   });
 
-  it("uses app key headers when provided", () => {
-    const req = {
-      headers: {
-        "x-b2-key-id": "master-id",
-        "x-b2-key": "master-secret",
-        "x-b2-app-key-id": "app-id",
-        "x-b2-app-key": "app-secret",
-      },
-    };
-    const config = configFromHeaders(req)!;
-    expect(config.applicationKeyId).toBe("master-id");
-    expect(config.appKeyId).toBe("app-id");
-    expect(config.appKey).toBe("app-secret");
-  });
-
   it("defaults region when env var unset", () => {
-    const req = { headers: { "x-b2-key-id": "id", "x-b2-key": "secret" } };
+    const req = { headers: { "x-b2-mcp-key-id": "id", "x-b2-mcp-key": "secret" } };
     const config = configFromHeaders(req)!;
     expect(config.region).toBe("us-west-004");
   });
 
   it("respects the B2_REGION env var", () => {
     process.env.B2_REGION = "eu-central-003";
-    const req = { headers: { "x-b2-key-id": "id", "x-b2-key": "secret" } };
+    const req = { headers: { "x-b2-mcp-key-id": "id", "x-b2-mcp-key": "secret" } };
     const config = configFromHeaders(req)!;
     expect(config.region).toBe("eu-central-003");
   });
 
   it("defaults structured tool-result text output to compact JSON", () => {
-    const req = { headers: { "x-b2-key-id": "id", "x-b2-key": "secret" } };
+    const req = { headers: { "x-b2-mcp-key-id": "id", "x-b2-mcp-key": "secret" } };
     expect(configFromHeaders(req)?.outputFormat).toBe("json");
   });
 
   it("honors TOON structured tool-result text output mode", () => {
     process.env.B2_MCP_OUTPUT_FORMAT = "toon";
-    const req = { headers: { "x-b2-key-id": "id", "x-b2-key": "secret" } };
+    const req = { headers: { "x-b2-mcp-key-id": "id", "x-b2-mcp-key": "secret" } };
     expect(configFromHeaders(req)?.outputFormat).toBe("toon");
   });
 
   it("rejects unknown structured tool-result text output modes", () => {
     process.env.B2_MCP_OUTPUT_FORMAT = "yaml";
-    const req = { headers: { "x-b2-key-id": "id", "x-b2-key": "secret" } };
+    const req = { headers: { "x-b2-mcp-key-id": "id", "x-b2-mcp-key": "secret" } };
     expect(() => configFromHeaders(req)).toThrow(/B2_MCP_OUTPUT_FORMAT/);
   });
 });
 
 describe("configFromHeaders — filesystem policy", () => {
-  const baseReq = { headers: { "x-b2-key-id": "k", "x-b2-key": "s" } };
+  const baseReq = { headers: { "x-b2-mcp-key-id": "k", "x-b2-mcp-key": "s" } };
 
   afterEach(() => {
     delete process.env.B2_ALLOW_LOCAL_FILES;
@@ -293,7 +276,7 @@ describe("configFromHeaders — filesystem policy", () => {
 describe("configFromHeaders — credential model", () => {
   it("application key drives native+S3; master falls back to it when unset", () => {
     const cfg = configFromHeaders({
-      headers: { "x-b2-key-id": "app-id", "x-b2-key": "app-secret" },
+      headers: { "x-b2-mcp-key-id": "app-id", "x-b2-mcp-key": "app-secret" },
     });
     expect(cfg?.applicationKeyId).toBe("app-id");
     expect(cfg?.appKeyId).toBe("app-id");
@@ -304,10 +287,10 @@ describe("configFromHeaders — credential model", () => {
   it("uses X-B2-Master-Key-* for the master credential when provided", () => {
     const cfg = configFromHeaders({
       headers: {
-        "x-b2-key-id": "app-id",
-        "x-b2-key": "app-secret",
-        "x-b2-master-key-id": "master-id",
-        "x-b2-master-key": "master-secret",
+        "x-b2-mcp-key-id": "app-id",
+        "x-b2-mcp-key": "app-secret",
+        "x-b2-mcp-master-key-id": "master-id",
+        "x-b2-mcp-master-key": "master-secret",
       },
     });
     expect(cfg?.applicationKeyId).toBe("app-id");
@@ -319,25 +302,26 @@ describe("configFromHeaders — credential model", () => {
     expect(() =>
       configFromHeaders({
         headers: {
-          "x-b2-key-id": "app-id",
-          "x-b2-key": "app-secret",
-          "x-b2-master-key-id": "master-id",
+          "x-b2-mcp-key-id": "app-id",
+          "x-b2-mcp-key": "app-secret",
+          "x-b2-mcp-master-key-id": "master-id",
         },
       }),
     ).toThrow(/both id and secret/i);
   });
 
-  it("still honors the deprecated X-B2-App-Key-* S3 override", () => {
+  it("ignores the removed short X-B2-App-Key-* S3 override headers", () => {
     const cfg = configFromHeaders({
       headers: {
-        "x-b2-key-id": "master-id",
-        "x-b2-key": "master-secret",
+        "x-b2-mcp-key-id": "app-id",
+        "x-b2-mcp-key": "app-secret",
         "x-b2-app-key-id": "s3-id",
         "x-b2-app-key": "s3-secret",
       },
     });
-    expect(cfg?.appKeyId).toBe("s3-id");
-    expect(cfg?.applicationKeyId).toBe("master-id");
+    // The legacy S3 key override is gone; S3 signs with the application key.
+    expect(cfg?.appKeyId).toBe("app-id");
+    expect(cfg?.applicationKeyId).toBe("app-id");
   });
 
   it("accepts the explicit X-B2-MCP-* header names", () => {
@@ -629,7 +613,7 @@ describe("HTTP server lifecycle", () => {
 
       try {
         const port = await listenOnLocalhost(handle);
-        const res = await request(port, "GET", "/mcp", { headers: { "x-b2-key": secret } });
+        const res = await request(port, "GET", "/mcp", { headers: { "x-b2-mcp-key": secret } });
 
         expect(res.status).toBe(500);
         expect(JSON.parse(res.body)).toEqual({ error: "Internal server error" });
@@ -671,7 +655,7 @@ describe("HTTP server lifecycle", () => {
 
       try {
         const port = await listenOnLocalhost(handle);
-        await request(port, "GET", "/mcp", { headers: { "x-b2-key": secret } }).catch(
+        await request(port, "GET", "/mcp", { headers: { "x-b2-mcp-key": secret } }).catch(
           () => undefined,
         );
 
@@ -705,8 +689,8 @@ describe("HTTP server lifecycle", () => {
         const port = await listenOnLocalhost(handle);
         const res = await request(port, "GET", "/mcp", {
           headers: {
-            "x-b2-app-key": firstSecret,
-            "x-b2-key": secondSecret,
+            "x-b2-mcp-master-key": firstSecret,
+            "x-b2-mcp-key": secondSecret,
           },
         });
 
@@ -777,7 +761,7 @@ describe("HTTP server lifecycle", () => {
 
       try {
         const port = await listenOnLocalhost(handle);
-        const res = await request(port, "GET", "/mcp", { headers: { "x-b2-key-id": keyId } });
+        const res = await request(port, "GET", "/mcp", { headers: { "x-b2-mcp-key-id": keyId } });
 
         expect(res.status).toBe(500);
         expect(warnSpy).toHaveBeenCalledWith(
@@ -804,7 +788,7 @@ describe("HTTP server lifecycle", () => {
 
     try {
       const port = await listenOnLocalhost(handle);
-      const res = await request(port, "GET", "/mcp", { headers: { "x-b2-key": secret } });
+      const res = await request(port, "GET", "/mcp", { headers: { "x-b2-mcp-key": secret } });
 
       expect(fetch).toHaveBeenCalledTimes(1);
       expect(res.status).toBe(500);
@@ -832,7 +816,7 @@ describe("HTTP server lifecycle", () => {
       });
       const request = new Request("http://localhost/mcp", {
         method: "POST",
-        headers: { host: "localhost", "content-type": "application/json", "x-b2-key": secret },
+        headers: { host: "localhost", "content-type": "application/json", "x-b2-mcp-key": secret },
         body: body as unknown as RequestInit["body"],
         duplex: "half",
       } as RequestInit & { duplex: "half" });
@@ -1061,8 +1045,8 @@ describe("HTTP server lifecycle", () => {
 
     try {
       expect(httpBootstrapFatalMessage(new Error(`fatal ${secret}`))).toBe("fatal [redacted]");
-      expect(httpBootstrapFatalMessage(`fatal x-b2-key=${secret}`)).toBe(
-        "fatal x-b2-key=[redacted]",
+      expect(httpBootstrapFatalMessage(`fatal x-b2-mcp-key=${secret}`)).toBe(
+        "fatal x-b2-mcp-key=[redacted]",
       );
     } finally {
       if (savedSecret === undefined) delete process.env.B2_APPLICATION_KEY;
@@ -1294,7 +1278,7 @@ describe("health and readiness endpoints", () => {
 
 describe("configFromHeaders — destructive policy default (HTTP is safe-by-default)", () => {
   const saved = process.env.B2_DESTRUCTIVE_POLICY;
-  const creds = { "x-b2-key-id": "key-abc", "x-b2-key": "secret-xyz" };
+  const creds = { "x-b2-mcp-key-id": "key-abc", "x-b2-mcp-key": "secret-xyz" };
 
   afterEach(() => {
     if (saved === undefined) delete process.env.B2_DESTRUCTIVE_POLICY;

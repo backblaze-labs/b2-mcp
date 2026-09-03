@@ -149,8 +149,7 @@ within `B2_OAUTH_INTROSPECTION_RETRIES`, and fail closed through a small
 process-local circuit breaker. Successful verified tokens are cached by token
 hash for at most `B2_OAUTH_TOKEN_CACHE_TTL_SECONDS`, never beyond the token's
 `exp` minus `B2_OAUTH_TOKEN_CACHE_SKEW_SECONDS`, with
-`B2_OAUTH_TOKEN_CACHE_MAX_ENTRIES` bounding memory. The older
-`B2_OAUTH_INTROSPECTION_CACHE_*` names remain accepted for compatibility.
+`B2_OAUTH_TOKEN_CACHE_MAX_ENTRIES` bounding memory.
 JWKS fetches use `B2_OAUTH_JWKS_TIMEOUT_MS`, `B2_OAUTH_JWKS_RETRIES`,
 `B2_OAUTH_JWKS_RETRY_DELAY_MS`, `B2_OAUTH_JWKS_CIRCUIT_*`, and
 `B2_OAUTH_JWKS_REFRESH_COOLDOWN_MS`. Introspection
@@ -174,7 +173,7 @@ cannot use.
 Production B2 secrets must be assigned to Production only. Preview deployments
 should use no B2 credentials, deterministic fakes, or a separate disposable
 read-only key. The adapter refuses Preview deployments that contain
-`B2_APPLICATION_KEY_*`, `B2_APP_KEY_*`, `B2_MASTER_KEY_*`, or
+`B2_APPLICATION_KEY_*`, `B2_MASTER_KEY_*`, or
 `B2_CREDENTIAL_<REF>_*` material unless
 `B2_VERCEL_ALLOW_PREVIEW_B2_CREDENTIALS=true` is set.
 

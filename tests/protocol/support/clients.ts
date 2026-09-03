@@ -25,8 +25,8 @@ export {
 } from "../../support/protocol";
 
 export const HTTP_CREDS = {
-  "x-b2-key-id": "protocol-key-id",
-  "x-b2-key": "protocol-key-secret",
+  "x-b2-mcp-key-id": "protocol-key-id",
+  "x-b2-mcp-key": "protocol-key-secret",
 };
 
 export const JSON_HEADERS = {

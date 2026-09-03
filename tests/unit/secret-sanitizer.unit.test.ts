@@ -198,7 +198,7 @@ describe("secret sanitizer canary policy", () => {
       headers: {
         cookie: longerOverlappingSecret,
         "set-cookie": "session=configured-cookie-secret",
-        "x-b2-key": "configured-header-secret",
+        "x-b2-mcp-key": "configured-header-secret",
       },
       nested: {
         secretName: "public-secret-name",
@@ -524,35 +524,27 @@ describe("secret sanitizer canary policy", () => {
   it("redacts supported configured secret env aliases from text", () => {
     const oldEnv = {
       B2_APPLICATION_KEY: process.env.B2_APPLICATION_KEY,
-      B2_APP_KEY: process.env.B2_APP_KEY,
       B2_MASTER_KEY: process.env.B2_MASTER_KEY,
       B2_CREDENTIAL_TENANT_APPLICATION_KEY: process.env.B2_CREDENTIAL_TENANT_APPLICATION_KEY,
-      B2_CREDENTIAL_TENANT_APP_KEY: process.env.B2_CREDENTIAL_TENANT_APP_KEY,
       B2_CREDENTIAL_TENANT_MASTER_KEY: process.env.B2_CREDENTIAL_TENANT_MASTER_KEY,
     };
     process.env.B2_APPLICATION_KEY = "env-application-secret-value";
-    process.env.B2_APP_KEY = "env-app-secret-value";
     process.env.B2_MASTER_KEY = "env-master-secret-value";
     process.env.B2_CREDENTIAL_TENANT_APPLICATION_KEY = "env-tenant-secret-value";
-    process.env.B2_CREDENTIAL_TENANT_APP_KEY = "env-tenant-app-secret-value";
     process.env.B2_CREDENTIAL_TENANT_MASTER_KEY = "env-tenant-master-secret-value";
 
     try {
       const text = sanitizeText(
         [
           process.env.B2_APPLICATION_KEY,
-          process.env.B2_APP_KEY,
           process.env.B2_MASTER_KEY,
           process.env.B2_CREDENTIAL_TENANT_APPLICATION_KEY,
-          process.env.B2_CREDENTIAL_TENANT_APP_KEY,
           process.env.B2_CREDENTIAL_TENANT_MASTER_KEY,
         ].join(" "),
       );
       expect(text).not.toContain("env-application-secret-value");
-      expect(text).not.toContain("env-app-secret-value");
       expect(text).not.toContain("env-master-secret-value");
       expect(text).not.toContain("env-tenant-secret-value");
-      expect(text).not.toContain("env-tenant-app-secret-value");
       expect(text).not.toContain("env-tenant-master-secret-value");
     } finally {
       for (const [key, value] of Object.entries(oldEnv)) {

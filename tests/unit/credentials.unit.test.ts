@@ -165,8 +165,8 @@ describe("credential providers", () => {
     const resolved = new HttpHeaderCredentialProvider().resolve({
       req: {
         headers: {
-          "x-b2-key-id": "header-id",
-          "x-b2-key": "header-secret",
+          "x-b2-mcp-key-id": "header-id",
+          "x-b2-mcp-key": "header-secret",
         },
       } as any,
     });
@@ -182,8 +182,8 @@ describe("credential providers", () => {
     const alice = provider.resolve({
       req: {
         headers: {
-          "x-b2-key-id": "header-id",
-          "x-b2-key": "header-secret",
+          "x-b2-mcp-key-id": "header-id",
+          "x-b2-mcp-key": "header-secret",
         },
         auth: {
           token: "verified",
@@ -196,8 +196,8 @@ describe("credential providers", () => {
     const bob = provider.resolve({
       req: {
         headers: {
-          "x-b2-key-id": "header-id",
-          "x-b2-key": "header-secret",
+          "x-b2-mcp-key-id": "header-id",
+          "x-b2-mcp-key": "header-secret",
         },
         auth: {
           token: "verified",
@@ -226,8 +226,8 @@ describe("credential providers", () => {
     const resolved = new HttpHeaderCredentialProvider().resolve({
       req: {
         headers: {
-          "x-b2-key-id": "header-id",
-          "x-b2-key": "header-secret",
+          "x-b2-mcp-key-id": "header-id",
+          "x-b2-mcp-key": "header-secret",
         },
       } as any,
     });
@@ -242,9 +242,9 @@ describe("credential providers", () => {
       new HttpHeaderCredentialProvider().resolve({
         req: {
           headers: {
-            "x-b2-key-id": "header-id",
-            "x-b2-key": "header-secret",
-            "x-b2-app-key-id": "s3-id",
+            "x-b2-mcp-key-id": "header-id",
+            "x-b2-mcp-key": "header-secret",
+            "x-b2-mcp-master-key-id": "master-id",
           },
         } as any,
       }),
@@ -259,7 +259,7 @@ describe("credential providers", () => {
     expect(resolved.config.applicationKeyId).toBe("server-id");
     expect(() =>
       provider.resolve({
-        req: { headers: { "x-b2-key-id": "spoof", "x-b2-key": "spoof-secret" } } as any,
+        req: { headers: { "x-b2-mcp-key-id": "spoof", "x-b2-mcp-key": "spoof-secret" } } as any,
       }),
     ).toThrow(/not accepted/i);
   });
@@ -343,10 +343,10 @@ describe("credential providers", () => {
   it("uses the secret in capability-cache identity without changing log identity", () => {
     const provider = new HttpHeaderCredentialProvider();
     const first = provider.resolve({
-      req: { headers: { "x-b2-key-id": "header-id", "x-b2-key": "secret-a" } } as any,
+      req: { headers: { "x-b2-mcp-key-id": "header-id", "x-b2-mcp-key": "secret-a" } } as any,
     });
     const second = provider.resolve({
-      req: { headers: { "x-b2-key-id": "header-id", "x-b2-key": "secret-b" } } as any,
+      req: { headers: { "x-b2-mcp-key-id": "header-id", "x-b2-mcp-key": "secret-b" } } as any,
     });
     expect(first.cacheKey).toBe(second.cacheKey);
     expect(first.capabilityCacheKey).not.toBe(second.capabilityCacheKey);
@@ -445,7 +445,7 @@ describe("credential providers", () => {
     expect(() =>
       provider.resolve({
         req: {
-          headers: { "x-b2-key-id": "spoof", "x-b2-key": "spoof-secret" },
+          headers: { "x-b2-mcp-key-id": "spoof", "x-b2-mcp-key": "spoof-secret" },
           auth: { token: "verified", clientId: "client-a", scopes: [] },
         } as any,
       }),
@@ -507,9 +507,12 @@ describe("credential fingerprints and header detection", () => {
     expect(a).not.toContain("secret-a");
   });
 
-  it("detects legacy and explicit B2 credential headers", () => {
-    expect(hasCredentialHeaders({ "x-b2-key-id": "k" })).toBe(true);
+  it("detects canonical B2 credential headers and ignores removed short aliases", () => {
     expect(hasCredentialHeaders({ "x-b2-mcp-key-id": "k" })).toBe(true);
+    expect(hasCredentialHeaders({ "x-b2-mcp-master-key-id": "k" })).toBe(true);
+    // The short x-b2-* aliases were dropped in favor of the namespaced form.
+    expect(hasCredentialHeaders({ "x-b2-key-id": "k" })).toBe(false);
+    expect(hasCredentialHeaders({ "x-b2-app-key-id": "k" })).toBe(false);
     expect(hasCredentialHeaders({ authorization: "Bearer t" })).toBe(false);
   });
 });

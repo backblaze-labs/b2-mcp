@@ -57,6 +57,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the registry API's `2025-12-11` response shape, so it renders the published
   version again. (#297)
 
+### Removed
+- **Breaking:** dropped the deprecated credential env-var and HTTP header
+  aliases; only the canonical names are read anywhere now. (#386)
+  - `B2_APP_KEY_ID` / `B2_APP_KEY` (and the `X-B2-App-Key-Id` / `X-B2-App-Key`
+    headers) are gone → use a non-master `B2_APPLICATION_KEY_ID` /
+    `B2_APPLICATION_KEY`. This retires the legacy "sign S3 with a separate
+    non-master key" override; the application key now signs S3 directly, so
+    callers on the old path must switch to a non-master application key.
+  - `B2_OAUTH_INTROSPECTION_CACHE_MAX_ENTRIES` / `_TTL_SECONDS` / `_SKEW_SECONDS`
+    are gone → use `B2_OAUTH_TOKEN_CACHE_MAX_ENTRIES` / `_TTL_SECONDS` /
+    `_SKEW_SECONDS`.
+  - The short `X-B2-*` credential headers (`X-B2-Key-Id`, `X-B2-Key`,
+    `X-B2-Master-Key-Id`, `X-B2-Master-Key`) are gone → use the canonical
+    `X-B2-MCP-*` form (`X-B2-MCP-Key-Id`, `X-B2-MCP-Key`,
+    `X-B2-MCP-Master-Key-Id`, `X-B2-MCP-Master-Key`).
+
 ## [0.2.0] - 2026-09-01
 
 ### Added

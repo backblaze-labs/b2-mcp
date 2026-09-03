@@ -52,17 +52,12 @@ const SECRET_HEADER_NAMES = new Set([
   "authorization",
   "cookie",
   "set-cookie",
-  "x-b2-app-key",
-  "x-b2-key",
-  "x-b2-master-key",
-  "x-b2-mcp-app-key",
   "x-b2-mcp-key",
   "x-b2-mcp-master-key",
 ]);
 
 const SECRET_ENV_VAR_NAMES = new Set([
   "AWS_SECRET_ACCESS_KEY",
-  "B2_APP_KEY",
   "B2_APPLICATION_KEY",
   "B2_MASTER_KEY",
 ]);
@@ -70,11 +65,7 @@ const SECRET_ENV_VAR_NAMES = new Set([
 // Key-ID env values are credential handles: redacted from logs and the
 // bootstrap fatal path (like LOGGER_SECRET_FIELD_NAMES), but intentionally
 // preserved in MCP output, where tools such as b2_list_keys return key IDs.
-const SECRET_KEY_ID_ENV_VAR_NAMES = new Set([
-  "B2_APP_KEY_ID",
-  "B2_APPLICATION_KEY_ID",
-  "B2_MASTER_KEY_ID",
-]);
+const SECRET_KEY_ID_ENV_VAR_NAMES = new Set(["B2_APPLICATION_KEY_ID", "B2_MASTER_KEY_ID"]);
 
 const LOGGER_SECRET_FIELD_NAMES = [
   ...STRUCTURED_SECRET_FIELD_NAMES,
@@ -229,7 +220,7 @@ function isSecretEnvName(name: string): boolean {
   const upper = name.toUpperCase();
   return (
     SECRET_ENV_VAR_NAMES.has(upper) ||
-    /^B2_CREDENTIAL_[A-Z0-9_]+_(?:APP_KEY|APPLICATION_KEY|MASTER_KEY)$/.test(upper)
+    /^B2_CREDENTIAL_[A-Z0-9_]+_(?:APPLICATION_KEY|MASTER_KEY)$/.test(upper)
   );
 }
 
@@ -237,7 +228,7 @@ function isSecretKeyIdEnvName(name: string): boolean {
   const upper = name.toUpperCase();
   return (
     SECRET_KEY_ID_ENV_VAR_NAMES.has(upper) ||
-    /^B2_CREDENTIAL_[A-Z0-9_]+_(?:APP_KEY|APPLICATION_KEY|MASTER_KEY)_ID$/.test(upper)
+    /^B2_CREDENTIAL_[A-Z0-9_]+_(?:APPLICATION_KEY|MASTER_KEY)_ID$/.test(upper)
   );
 }
 
@@ -641,14 +632,6 @@ export const SECRET_SANITIZER_REDACTION = REDACTED;
 const SECRET_REQUEST_HEADERS = [
   "authorization",
   "cookie",
-  "x-b2-app-key",
-  "x-b2-app-key-id",
-  "x-b2-key",
-  "x-b2-key-id",
-  "x-b2-master-key",
-  "x-b2-master-key-id",
-  "x-b2-mcp-app-key",
-  "x-b2-mcp-app-key-id",
   "x-b2-mcp-key",
   "x-b2-mcp-key-id",
   "x-b2-mcp-master-key",

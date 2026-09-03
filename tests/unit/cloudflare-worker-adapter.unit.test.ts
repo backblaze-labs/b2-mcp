@@ -388,8 +388,8 @@ describe("Cloudflare Worker adapter", () => {
         method: "POST",
         headers: {
           ...modernHeaders("tools/list"),
-          "X-B2-Key-Id": "public-id",
-          "X-B2-Key": "public-secret",
+          "X-B2-MCP-Key-Id": "public-id",
+          "X-B2-MCP-Key": "public-secret",
         },
         body: modernBody("tools/list"),
       }),

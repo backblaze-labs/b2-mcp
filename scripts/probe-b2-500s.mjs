@@ -14,8 +14,8 @@
  *
  * Usage (build first, then run with creds):
  *   pnpm run probe:500
- * Requires: B2_APPLICATION_KEY_ID / B2_APPLICATION_KEY (+ B2_APP_KEY_ID/B2_APP_KEY
- * for the S3 probes, which is where the suspected 500s live).
+ * Requires: B2_APPLICATION_KEY_ID / B2_APPLICATION_KEY (a non-master application
+ * key, which also signs the S3 probes where the suspected 500s live).
  */
 
 import * as fs from "fs";
@@ -82,7 +82,9 @@ function isUserWritableBucket(name) {
 async function main() {
   const config = loadConfig(); // exits if creds missing
   const server = createServer(config);
-  const hasS3 = !!(process.env.B2_APP_KEY_ID && process.env.B2_APP_KEY);
+  // The application key signs S3 requests directly, so S3 probes run whenever the
+  // primary application credential is present (loadConfig already required it).
+  const hasS3 = !!(process.env.B2_APPLICATION_KEY_ID && process.env.B2_APPLICATION_KEY);
 
   // Discover real targets for the probes.
   const b2Buckets = parseResult(await callTool(server, "b2_list_buckets", {}));

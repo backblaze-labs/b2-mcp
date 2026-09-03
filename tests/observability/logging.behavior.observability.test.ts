@@ -183,7 +183,7 @@ describe("observability logging behavior", () => {
     expect(log.authorization).toBe("[redacted]");
     expect(log.headers).toMatchObject({
       authorization: "[redacted]",
-      "x-b2-key": "[redacted]",
+      "x-b2-mcp-key": "[redacted]",
     });
     expect(log.credentials).toMatchObject({
       appKey: "[redacted]",
