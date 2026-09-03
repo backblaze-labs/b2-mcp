@@ -81,14 +81,60 @@ describe("documentation example validator policy", () => {
     expect(result.stderr).toContain("must pin an exact package version");
   });
 
-  it("rejects direct client commands that are not package binaries", () => {
+  it("rejects the global binary fence when it is not a package binary", () => {
     const readme = read("README.md").replace('"command": "b2-mcp"', '"command": "b2-mcp-old"');
     const expectedLine = lineOf(readme, '```json\n   {\n     "command": "b2-mcp-old"');
     const result = runDocExamplesWithOverrides({ "README.md": readme });
 
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain(`README.md:${expectedLine}`);
-    expect(result.stderr).toContain("direct client command b2-mcp-old");
+    expect(result.stderr).toContain("global binary client command b2-mcp-old");
+  });
+
+  it.each(["node", "/tmp/b2-mcp-old"])(
+    "rejects the global binary fence drifting to %s",
+    (command) => {
+      const readme = read("README.md").replace(
+        '"command": "b2-mcp"',
+        `"command": ${JSON.stringify(command)}`,
+      );
+      const expectedLine = lineOf(
+        readme,
+        `\`\`\`json\n   {\n     "command": ${JSON.stringify(command)}`,
+      );
+      const result = runDocExamplesWithOverrides({ "README.md": readme });
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(`README.md:${expectedLine}`);
+      expect(result.stderr).toContain(`global binary client command ${command}`);
+    },
+  );
+
+  it("rejects an npx --yes long-form launcher that drifts to another package", () => {
+    const readme = read("README.md").replace(
+      "npx -y @backblaze-labs/b2-mcp@0.2.0 --version",
+      "npx --yes @attacker/b2-mcp@0.2.0 --version",
+    );
+    const expectedLine = lineOf(readme, "npx --yes @attacker/b2-mcp@0.2.0 --version");
+    const result = runDocExamplesWithOverrides({ "README.md": readme });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(`README.md:${expectedLine}`);
+    expect(result.stderr).toContain("references package @attacker/b2-mcp@0.2.0");
+  });
+
+  it("rejects a global npm install with a valid operand plus an extra URL operand", () => {
+    const command = "npm install -g @backblaze-labs/b2-mcp@0.2.0 https://example.invalid/other.tgz";
+    const readme = read("README.md").replace(
+      "npm install -g @backblaze-labs/b2-mcp@0.2.0",
+      command,
+    );
+    const expectedLine = lineOf(readme, command);
+    const result = runDocExamplesWithOverrides({ "README.md": readme });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(`README.md:${expectedLine}`);
+    expect(result.stderr).toContain("global npm install examples must install");
   });
 
   it.each(["latest", "next", "^0.2.0", "0.x"])(

@@ -49,7 +49,7 @@ const validatedFenceManifest = [
   ["README.md", 3, "shell", "source install commands"],
   ["README.md", 4, "pinned-client-json", "pinned npx client command"],
   ["README.md", 5, "shell", "global package install command"],
-  ["README.md", 6, "client-json", "global binary client command"],
+  ["README.md", 6, "global-binary-client-json", "global binary client command"],
   ["README.md", 7, "shell", "targeted npx cache cleanup command"],
   ["README.md", 8, "powershell-text", "targeted Windows npx cache cleanup command"],
   ["README.md", 9, "shell", "broad npx cache cleanup commands"],
@@ -202,6 +202,24 @@ const packageManagerNativeCommands = new Set([
   "version",
   "view",
   "whoami",
+]);
+
+// Bare `npm install` options that consume a following token as their value, so
+// that value is not misread as a package operand when validating global installs.
+const npmInstallValueOptions = new Set([
+  "-C",
+  "--prefix",
+  "--registry",
+  "--cache",
+  "--userconfig",
+  "--globalconfig",
+  "--nodedir",
+  "--tmp",
+  "--otp",
+  "--omit",
+  "--include",
+  "-w",
+  "--workspace",
 ]);
 
 const findings = [];
@@ -409,6 +427,13 @@ function validateFence(file, number, fence, entry) {
     });
     return;
   }
+  if (entry.check === "global-binary-client-json") {
+    parseJsonExample(file, fence, {
+      expectedCommandPackage: pkg.name,
+      requireExportedBinary: true,
+    });
+    return;
+  }
   if (entry.check === "hosted-client-json") {
     parseJsonExample(file, fence, { expectedCommandPackage: "mcp-remote" });
     return;
@@ -455,6 +480,7 @@ function parseJsonExample(file, fence, options = {}) {
     if (options.expectedCommandPackage) {
       validateJsonCommandConfigs(file, fence, parsed, options.expectedCommandPackage, {
         requireExactVersion: options.requireExactVersion === true,
+        requireExportedBinary: options.requireExportedBinary === true,
       });
     }
   } catch (error) {
@@ -473,7 +499,7 @@ function parseJsoncFragment(file, fence) {
 function validateJsonCommandConfigs(file, fence, value, expectedPackage, options = {}) {
   for (const commandConfig of findCommandConfigs(value)) {
     validatePackageCommand(file, fence.line, commandConfig, expectedPackage, options);
-    validateDirectClientCommand(file, fence.line, commandConfig);
+    validateDirectClientCommand(file, fence.line, commandConfig, options);
   }
 }
 
@@ -527,12 +553,28 @@ function validatePackageCommand(file, line, commandConfig, expectedPackage, opti
   }
 }
 
-function validateDirectClientCommand(file, line, commandConfig) {
+function validateDirectClientCommand(file, line, commandConfig, options = {}) {
   const command = commandConfig.command.trim();
+  const binNames = new Set(Object.keys(pkg.bin ?? {}));
+
+  // The global-binary fence is meant to launch an exported package binary, so it
+  // gets no generic exemptions: `node` (running an arbitrary script path) and any
+  // filesystem path must still trip a finding. Generic/source client configs keep
+  // the launcher/path exemptions below.
+  if (options.requireExportedBinary) {
+    if (!binNames.has(command)) {
+      addFinding(
+        file,
+        line,
+        `global binary client command ${command} must be an exported package binary`,
+      );
+    }
+    return;
+  }
+
   if (["node", "npx", "npm", "pnpm"].includes(command)) return;
   if (command.includes("/") || command.includes("\\")) return;
 
-  const binNames = new Set(Object.keys(pkg.bin ?? {}));
   if (!binNames.has(command)) {
     addFinding(file, line, `direct client command ${command} must be an exported package binary`);
   }
@@ -738,7 +780,11 @@ function validatePackageNameReferences(file, text, startLine) {
   // executable and package spec across physical lines, the regex never matches,
   // and the drift passes unchecked (the launcher check only searches for the
   // canonical package, so it will not catch a different name either).
-  const npxPackagePattern = /\bnpx\s+(?:-y\s+)?(@[a-z0-9._-]+\/[a-z0-9._-]+(?:@[^\s`"',\]]+)?)/g;
+  // Accept the same skip-confirmation option forms `firstPackageArg` honors
+  // (`-y` and the long-form `--yes`); otherwise `npx --yes @attacker/...` drifts
+  // to another package with no finding because only `-y` was permitted here.
+  const npxPackagePattern =
+    /\bnpx\s+(?:(?:-y|--yes)\s+)*(@[a-z0-9._-]+\/[a-z0-9._-]+(?:@[^\s`"',\]]+)?)/g;
   for (const { line, text: logicalLine } of foldShellContinuations(text)) {
     for (const match of logicalLine.matchAll(npxPackagePattern)) {
       const packageSpec = match[1];
@@ -892,11 +938,22 @@ function globalNpmInstallSegments(line) {
     if (!args) continue;
     if (!/(?:^|\s)(?:-g|--global)(?:\s|$)/.test(args)) continue;
     const specs = [];
-    for (const arg of args.split(/\s+/)) {
-      const cleaned = arg.replace(/^[`'"]+|[`'",\]]+$/g, "");
-      if (!cleaned || cleaned.startsWith("-")) continue;
+    const tokens = args.split(/\s+/);
+    for (let index = 0; index < tokens.length; index += 1) {
+      const cleaned = tokens[index].replace(/^[`'"]+|[`'",\]]+$/g, "");
+      if (!cleaned) continue;
+      if (cleaned.startsWith("-")) {
+        // A bare value-taking option (e.g. `--prefix /path`, `--registry <url>`)
+        // consumes the next token, which must not be mistaken for a package
+        // operand. `--opt=value` forms are self-contained.
+        if (!cleaned.includes("=") && npmInstallValueOptions.has(cleaned)) index += 1;
+        continue;
+      }
       const spec = parsePackageSpec(cleaned);
-      if (spec) specs.push(spec);
+      // Fail closed on an operand `parsePackageSpec` cannot recognize (a URL or
+      // file/tarball path). Silently dropping it let a valid operand mask an extra
+      // off-policy package such as `... @backblaze-labs/b2-mcp@0.2.0 https://x/y.tgz`.
+      specs.push(spec ?? { name: cleaned, version: null });
     }
     segments.push({ specs });
   }
