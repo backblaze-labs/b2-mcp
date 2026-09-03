@@ -2017,7 +2017,7 @@
     },
     {
       "name": "s3_upload_part_copy",
-      "descriptionSha256": "7f6440f79e06455a2dd731e28cdbb7c4b956024b5ec8f2b084738e4681a6a64b",
+      "descriptionSha256": "0e3290aa583d8d38ae4fe44437c8799b2e4f3df1ff9a2288c89cfa5bea1fc194",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -2030,7 +2030,7 @@
             "type": "string"
           },
           "copySourceRange": {
-            "description": "Byte range to copy from the source, e.g. 'bytes=0-104857599' for the first 100MB; omit to copy the entire source object. The copied range must be ≥5 MiB unless this is the last part.",
+            "description": "Byte range to copy from the source, e.g. 'bytes=0-104857599' for the first 100 MiB; omit to copy the entire source object. The copied range must be ≥5 MiB unless this is the last part.",
             "type": "string"
           },
           "copySourceVersionId": {
@@ -2086,5 +2086,5 @@
       "resultType": "complete"
     }
   },
-  "hash": "5ffb78e72d4d6f4fb5b8910f28ff3e44a0f19d56d9d69fc533304e6acbae9248"
+  "hash": "de90ee9b4a61a244d96c6fef805bb6160cf5933a91975f7200f400dd81656a2a"
 }

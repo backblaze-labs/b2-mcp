@@ -326,7 +326,7 @@ export function registerS3MultipartTools(
     "s3_upload_part_copy",
     {
       description:
-        "Copy a byte range from an existing B2 object into a part of an in-progress S3-compatible multipart upload, without downloading or re-uploading the data. Requires the writeFiles capability on the destination and read access to the source object. Use this to assemble large objects from data already in B2; use s3_presign_upload_part instead when the client must upload new bytes. The copied part belongs to the upload created by s3_create_multipart_upload, so it obeys the 1–10000 part numbering and the ≥5 MiB minimum for every part except the last. Returns the part ETag to pass to s3_complete_multipart_upload.",
+        "Copy a byte range from an existing B2 object into a part of an in-progress S3-compatible multipart upload, without downloading or re-uploading the data. Requires the writeFiles capability on the destination and read access to the source object. The source must be a bucket reachable within the same B2 account and region as the destination; cross-account sources cannot be copied this way. Use this to assemble large objects from data already in B2; use s3_presign_upload_part instead when the client must upload new bytes. The copied part belongs to the upload created by s3_create_multipart_upload, so it obeys the 1–10000 part numbering and the ≥5 MiB minimum for every part except the last. A missing or inaccessible source, or a range outside the source object, fails the part copy. Returns the part ETag to pass to s3_complete_multipart_upload.",
       inputSchema: {
         bucket: z.string().describe("The destination bucket name."),
         key: z.string().describe("The destination object key."),
@@ -341,7 +341,7 @@ export function registerS3MultipartTools(
           .string()
           .optional()
           .describe(
-            "Byte range to copy from the source, e.g. 'bytes=0-104857599' for the first 100MB; omit to copy the entire source object. The copied range must be ≥5 MiB unless this is the last part.",
+            "Byte range to copy from the source, e.g. 'bytes=0-104857599' for the first 100 MiB; omit to copy the entire source object. The copied range must be ≥5 MiB unless this is the last part.",
           ),
         copySourceVersionId: z
           .string()
