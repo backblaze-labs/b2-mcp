@@ -338,6 +338,10 @@ describe("container image policy", () => {
 
   it("keeps in-image operator docs and compatibility aliases complete", () => {
     expect(dockerfile).toContain("COPY --chown=node:node docs/CLIENTS.md docs/DEPLOY.md");
+    expect(dockerfile).toContain(
+      "COPY --chown=node:node docs/generated/tool-profile-contract.json docs/generated/tool-profiles.md ./docs/generated/",
+    );
+    expect(dockerfile).not.toContain("COPY --chown=node:node docs/generated ./docs/generated");
     expect(dockerfile).toContain("COPY --chown=node:node docs/deployment ./docs/deployment");
     expect(dockerfile).toContain(
       "COPY --chown=node:node docs/product-specs/clients.md ./docs/product-specs/clients.md",

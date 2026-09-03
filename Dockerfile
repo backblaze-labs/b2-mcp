@@ -40,7 +40,7 @@ COPY --chown=node:node package.json README.md CHANGELOG.md SECURITY.md LICENSE .
 # The image keeps operator-facing docs for in-container help/debugging. It does
 # not mirror the npm packlist fixtures because they are not read at runtime.
 COPY --chown=node:node docs/CLIENTS.md docs/DEPLOY.md ./docs/
-COPY --chown=node:node docs/generated ./docs/generated
+COPY --chown=node:node docs/generated/tool-profile-contract.json docs/generated/tool-profiles.md ./docs/generated/
 COPY --chown=node:node docs/deployment ./docs/deployment
 COPY --chown=node:node docs/product-specs/clients.md ./docs/product-specs/clients.md
 COPY --chown=node:node docs/references/deployment ./docs/references/deployment
