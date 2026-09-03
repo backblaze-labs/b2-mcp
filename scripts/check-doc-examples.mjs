@@ -46,20 +46,22 @@ const validatedFenceManifest = [
   ["README.md", 1, "client-json", "Claude Desktop JSON config"],
   ["README.md", 2, "json", "fallback region env JSON"],
   ["README.md", 3, "shell", "source install commands"],
-  ["README.md", 4, "json", "pinned npx client args"],
+  ["README.md", 4, "client-json", "pinned npx client command"],
   ["README.md", 5, "shell", "global package install command"],
-  ["README.md", 6, "json", "global binary client command"],
-  ["README.md", 7, "shell", "npx cache cleanup commands"],
-  ["README.md", 8, "shell", "launcher version commands"],
-  ["README.md", 9, "shell", "Claude Desktop log commands"],
-  ["README.md", 10, "shell", "skills validation command"],
-  ["README.md", 11, "shell", "HTTP container command"],
-  ["README.md", 12, "shell", "stdio container command"],
-  ["README.md", 13, "typescript-package-api", "supported package import API"],
-  ["README.md", 14, "cli-help", "checked-in CLI help text"],
-  ["README.md", 15, "shell", "CLI examples"],
-  ["README.md", 16, "json-text", "JSON output example"],
-  ["README.md", 18, "shell", "local verification commands"],
+  ["README.md", 6, "client-json", "global binary client command"],
+  ["README.md", 7, "shell", "targeted npx cache cleanup command"],
+  ["README.md", 8, "shell", "broad npx cache cleanup commands"],
+  ["README.md", 9, "shell", "launcher version commands"],
+  ["README.md", 10, "shell", "macOS Claude Desktop log command"],
+  ["README.md", 11, "powershell-text", "Windows Claude Desktop log command"],
+  ["README.md", 12, "shell", "skills validation command"],
+  ["README.md", 13, "shell", "HTTP container command"],
+  ["README.md", 14, "shell", "stdio container command"],
+  ["README.md", 15, "typescript-package-api", "supported package import API"],
+  ["README.md", 16, "cli-help", "checked-in CLI help text"],
+  ["README.md", 17, "shell", "CLI examples"],
+  ["README.md", 18, "json-text", "JSON output example"],
+  ["README.md", 20, "shell", "local verification commands"],
   ["deploy/vercel/README.md", 2, "shell", "Vercel smoke commands"],
   ["deploy/customer-hosted/README.md", 1, "shell", "customer-hosted build commands"],
   ["deploy/customer-hosted/README.md", 2, "shell", "customer-hosted update commands"],
@@ -109,7 +111,7 @@ const validatedFenceManifest = [
 ];
 
 const illustrativeFenceManifest = [
-  ["README.md", 17, "toon output example"],
+  ["README.md", 19, "toon output example"],
   ["deploy/vercel/README.md", 1, "architecture diagram"],
   ["deploy/customer-hosted/README.md", 4, "base-image inspection command with placeholder"],
   ["docs/AUTHENTICATION.md", 1, "stdio credential-flow diagram"],
@@ -158,7 +160,7 @@ const requiredServerModeEnv = [
 
 const requiredSafeEnvByFence = new Map(
   [
-    ["README.md", 11],
+    ["README.md", 13],
     ["docs/references/deployment/security-and-credentials.md", 2],
     ["docs/references/deployment/vercel.md", 2],
   ].map(([file, fence]) => [manifestKey(file, fence), requiredServerModeEnv]),
@@ -205,6 +207,7 @@ const docs = new Map(releaseDocs.map((file) => [file, read(file)]));
 validateShippedDocCoverage();
 validateFenceClassification();
 validateDocReferences();
+validateReleaseDocSafety();
 validateStructuredConfigurationFiles();
 
 if (findings.length > 0) {
@@ -425,6 +428,10 @@ function validateFence(file, number, fence, entry) {
     requireSafeFenceEnv(file, number, fence);
     return;
   }
+  if (entry.check === "powershell-text") {
+    validatePowershellTextExample(file, fence);
+    return;
+  }
   if (entry.check === "client-text") {
     validateClientTextExample(file, fence);
     return;
@@ -454,6 +461,7 @@ function parseJsoncFragment(file, fence) {
 function validateJsonCommandConfigs(file, fence, value, expectedPackage) {
   for (const commandConfig of findCommandConfigs(value)) {
     validatePackageCommand(file, fence.line, commandConfig, expectedPackage);
+    validateDirectClientCommand(file, fence.line, commandConfig);
   }
 }
 
@@ -490,13 +498,25 @@ function validatePackageCommand(file, line, commandConfig, expectedPackage) {
     return;
   }
 
-  const packageName = packageExecutedByCommand(command, args);
-  if (packageName !== expectedPackage) {
+  const packageSpec = packageExecutedByCommand(command, args);
+  const parsedPackageSpec = parsePackageSpec(packageSpec);
+  if (parsedPackageSpec?.name !== expectedPackage) {
     addFinding(
       file,
       line,
-      `${command} client config executes ${packageName ?? "no package"}, expected ${expectedPackage}`,
+      `${command} client config executes ${packageSpec ?? "no package"}, expected ${expectedPackage}`,
     );
+  }
+}
+
+function validateDirectClientCommand(file, line, commandConfig) {
+  const command = commandConfig.command.trim();
+  if (["node", "npx", "npm", "pnpm"].includes(command)) return;
+  if (command.includes("/") || command.includes("\\")) return;
+
+  const binNames = new Set(Object.keys(pkg.bin ?? {}));
+  if (!binNames.has(command)) {
+    addFinding(file, line, `direct client command ${command} must be an exported package binary`);
   }
 }
 
@@ -526,6 +546,21 @@ function firstPackageArg(args) {
     return arg;
   }
   return null;
+}
+
+function parsePackageSpec(packageSpec) {
+  if (!packageSpec || typeof packageSpec !== "string") return null;
+  const spec = packageSpec.trim();
+  const match = spec.match(/^(?:(@[^/\s]+\/[^@\s]+)|([a-z0-9._-]+))(?:@([^\s]+))?$/);
+  if (!match) return null;
+  return {
+    name: match[1] ?? match[2],
+    version: match[3]?.toLowerCase() ?? null,
+  };
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function validateTypescriptPackageApi(file, fence) {
@@ -619,6 +654,12 @@ function validateShellExample(file, fence) {
   validateSafeDeploymentEnvValues(file, fence.body, bodyStartLine);
 }
 
+function validatePowershellTextExample(file, fence) {
+  if (fence.lang !== "text") {
+    addFinding(file, fence.line, `expected text fence, got ${fence.lang || "no language"}`);
+  }
+}
+
 function validateClientTextExample(file, fence) {
   const bodyStartLine = fence.line + 1;
   validatePackageScriptReferences(file, fence.body, bodyStartLine);
@@ -639,6 +680,13 @@ function validateDocReferences() {
       validateDistEntrypointReferences(file, snippet.text, snippet.line);
       validateEnvAssignments(file, snippet.text, snippet.line);
     }
+  }
+}
+
+function validateReleaseDocSafety() {
+  for (const [file, text] of docs) {
+    validateMutablePackageLaunchers(file, text, 1);
+    validateMcpLogWildcardRedaction(file, text, 1);
   }
 }
 
@@ -667,16 +715,80 @@ function validatePackageScriptReferences(file, text, startLine) {
 }
 
 function validatePackageNameReferences(file, text, startLine) {
-  for (const match of text.matchAll(/\bnpx\s+(?:-y\s+)?(@[a-z0-9._-]+\/[a-z0-9._-]+)/g)) {
-    const packageName = match[1];
-    if (packageName !== pkg.name) {
+  const npxPackagePattern = /\bnpx\s+(?:-y\s+)?(@[a-z0-9._-]+\/[a-z0-9._-]+(?:@[^\s`"',\]]+)?)/g;
+  for (const match of text.matchAll(npxPackagePattern)) {
+    const packageSpec = match[1];
+    const parsedPackageSpec = parsePackageSpec(packageSpec);
+    if (parsedPackageSpec?.name !== pkg.name) {
       addFinding(
         file,
         startLine + lineOfOffset(text, match.index ?? 0) - 1,
-        `references package ${packageName}, expected ${pkg.name}`,
+        `references package ${packageSpec}, expected ${pkg.name}`,
       );
     }
   }
+}
+
+function validateMutablePackageLaunchers(file, text, startLine) {
+  const lines = text.split(/\r?\n/);
+  lines.forEach((line, index) => {
+    const lineNumber = startLine + index;
+    const specs = packageSpecsInText(line).filter((spec) => spec.name === pkg.name);
+    if (specs.length === 0) return;
+
+    if (isExecutablePackageLine(line) && specs.some((spec) => spec.version === "latest")) {
+      addFinding(file, lineNumber, "must not execute @latest package examples in release docs");
+    }
+
+    if (isGlobalNpmInstallLine(line)) {
+      const mutableSpec = specs.find((spec) => !spec.version || spec.version === "latest");
+      if (mutableSpec) {
+        addFinding(
+          file,
+          lineNumber,
+          "global npm install examples in release docs must pin an explicit version",
+        );
+      }
+    }
+  });
+}
+
+function validateMcpLogWildcardRedaction(file, text, startLine) {
+  const lines = text.split(/\r?\n/);
+  lines.forEach((line, index) => {
+    if (!/\bmcp\*\.log\b/i.test(line)) return;
+    const context = lines
+      .slice(Math.max(0, index - 6), Math.min(lines.length, index + 7))
+      .join("\n")
+      .toLowerCase();
+    if (
+      context.includes("redact") &&
+      /(authorization|credential|secret|token|b2 key)/.test(context)
+    ) {
+      return;
+    }
+    addFinding(
+      file,
+      startLine + index,
+      "broad MCP log wildcard examples require adjacent redact-before-sharing guidance",
+    );
+  });
+}
+
+function isExecutablePackageLine(line) {
+  return /\b(?:npx|npm\s+exec|pnpm\s+dlx)\b/.test(line);
+}
+
+function isGlobalNpmInstallLine(line) {
+  return /\bnpm\s+(?:install|i)\b/.test(line) && /(?:^|\s)(?:-g|--global)(?:\s|$)/.test(line);
+}
+
+function packageSpecsInText(text) {
+  const packageName = escapeRegExp(pkg.name);
+  const packagePattern = new RegExp(`${packageName}(?:@([^\\s\`"',\\]]+))?`, "g");
+  return [...text.matchAll(packagePattern)]
+    .map((match) => parsePackageSpec(match[0]))
+    .filter(Boolean);
 }
 
 function validateCliBinaryReferences(file, text, startLine) {

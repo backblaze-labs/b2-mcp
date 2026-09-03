@@ -123,18 +123,20 @@ you open often, these alternatives reduce startup churn:
 
    ```json
    {
+     "command": "npx",
      "args": ["-y", "@backblaze-labs/b2-mcp@0.2.0"]
    }
    ```
 
-   Replace `0.2.0` with the release you want. Pinning trades automatic updates
-   for reproducible launches; update the version intentionally when you want a
-   newer server.
+   `0.2.0` is an example pinned release; replace it with the version you want.
+   Pinning trades automatic updates for reproducible launches. Use
+   `npm view @backblaze-labs/b2-mcp version` to inspect the latest published
+   version without executing package code.
 
 2. Install globally once and call the binary directly:
 
    ```bash
-   npm install -g @backblaze-labs/b2-mcp
+   npm install -g @backblaze-labs/b2-mcp@0.2.0
    ```
 
    ```json
@@ -143,8 +145,8 @@ you open often, these alternatives reduce startup churn:
    }
    ```
 
-   The package exposes both `b2-mcp` and `b2-mcp-server`; both binaries run the
-   same server entry point.
+   Use `b2-mcp` for new configs. `b2-mcp-server` remains a transition alias for
+   older configs and runs the same server entry point.
 
 3. Watch the MCPB desktop-extension work tracked in
    [#358](https://github.com/backblaze-labs/b2-mcp/issues/358). That path is
@@ -174,16 +176,27 @@ tell is a `server.ready` log line with an older `version` immediately before the
 wrapper exits; b2-mcp started successfully, then npm's cache cleanup failed and
 closed the stdio transport.
 
-Clear the per-package `npx` cache, then fully quit and reopen the MCP client:
+Fully quit the affected MCP client first. If the npm error includes a path like
+`~/.npm/_npx/<hash>/...`, delete only that failing extraction:
+
+```bash
+rm -rf ~/.npm/_npx/<hash-from-error>
+```
+
+Then reopen the client. If the error does not show a hash, or if the targeted
+cleanup does not stick, this broader last-resort cleanup removes all `npx`
+extractions for the current user and forces future `npx` launches to re-fetch:
 
 ```bash
 rm -rf ~/.npm/_npx
 npm cache clean --force
 ```
 
-The second command is optional; use it if the `_npx` cleanup alone does not
-stick. To reduce repeat cache-refresh failures, use a pinned `npx` version or a
-global install from [More robust local install options](#more-robust-local-install-options).
+Do not run the broad cleanup while MCP clients are still starting. The
+`npm cache clean --force` command is optional; use it only if clearing `_npx`
+alone does not resolve the stale or corrupt cache. To reduce repeat
+cache-refresh failures, use a pinned `npx` version or a global install from
+[More robust local install options](#more-robust-local-install-options).
 
 ### How do I confirm which version is actually running?
 
@@ -194,24 +207,29 @@ From a terminal, these commands print the package version that each launcher
 will run:
 
 ```bash
-npx -y @backblaze-labs/b2-mcp@latest --version
+# Latest published version, without executing package code:
+npm view @backblaze-labs/b2-mcp version
+
+# Example pinned release:
 npx -y @backblaze-labs/b2-mcp@0.2.0 --version
+
+# Globally installed binaries:
 b2-mcp --version
-b2-mcp-server --version
+b2-mcp-server --version # transition alias
 ```
 
-Use `@latest` to force npm to resolve the latest published package, or replace
-`0.2.0` with a specific release when you want a reproducible pinned launch.
+Replace `0.2.0` with a specific release when you want to confirm a reproducible
+pinned launch.
 
 ### Why do I get `command not found`?
 
-The npm package exposes two binary names: `b2-mcp` and `b2-mcp-server`. They
-both point to the same `dist/index.js` entry point. The `npx` config does not
-require either binary to be on your `PATH`; a global-install config does. If a
-direct `b2-mcp` command is not found after
-`npm install -g @backblaze-labs/b2-mcp`, check that npm's global bin directory
-is on `PATH`, or switch back to the `npx` or source-checkout config shown in
-[Quick start](#quick-start).
+The canonical binary is `b2-mcp`; `b2-mcp-server` is a transition alias. Both
+currently point to the same `dist/index.js` entry point. The `npx` config does
+not require either binary to be on your `PATH`; a global-install config does. If
+a direct `b2-mcp` command is not found after
+`npm install -g @backblaze-labs/b2-mcp@0.2.0`, check that npm's global bin
+directory is on `PATH`, or switch back to the `npx` or source-checkout config
+shown in [Quick start](#quick-start).
 
 ### Why do auth or capability errors appear?
 
@@ -232,15 +250,26 @@ Claude Desktop writes MCP logs outside the b2-mcp checkout:
 - macOS: `~/Library/Logs/Claude`
 - Windows: `%APPDATA%\Claude\logs`
 
-`mcp.log` contains connection events, and files named
+`mcp.log` contains global connection events, and files named
 `mcp-server-SERVERNAME.log` contain stderr from the configured server. With the
-Quick Start server key, check `mcp-server-backblaze-b2.log`.
+Quick Start server key, check `mcp-server-backblaze-b2.log`. Prefer that
+b2-mcp-specific file over broad patterns such as `mcp*.log`, which can include
+logs from unrelated MCP servers.
 
-Useful commands:
+Before sharing any log excerpt, redact B2 key IDs and secrets, Authorization
+headers, bearer tokens, presigned URLs, webhook secrets, and any other local
+credentials.
+
+macOS:
 
 ```bash
-tail -n 20 -F ~/Library/Logs/Claude/mcp*.log
-type "%APPDATA%\Claude\logs\mcp*.log"
+tail -n 20 -F ~/Library/Logs/Claude/mcp-server-backblaze-b2.log
+```
+
+Windows PowerShell:
+
+```text
+Get-Content -Path "$env:APPDATA\Claude\logs\mcp-server-backblaze-b2.log" -Tail 20 -Wait
 ```
 
 For clients that hide child-process stderr, configure `B2_LOG_FILE` as described
