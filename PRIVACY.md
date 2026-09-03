@@ -116,11 +116,14 @@ system are responsible for that system's privacy, access, and retention policy.
 
 b2-mcp does not include analytics, telemetry, advertising pixels, tracking
 cookies, crash reporting, or phone-home behavior. Routine outbound request
-metadata added by the software is limited to User-Agent metadata sent to
-Backblaze B2: the product token, such as `b2-mcp/<version>` for published
-releases or `b2-mcp/dev` for source and development builds; the active transport
-label, such as `stdio` or `http`; optional S3 tool-surface labels; and, if an
-operator sets `B2_MCP_UA_SUFFIX`, that operator-supplied deployment tag.
+metadata is limited to User-Agent metadata sent to Backblaze B2. The values
+b2-mcp itself adds are the product token, such as `b2-mcp/<version>` for
+published releases or `b2-mcp/dev` for source and development builds; the active
+transport label, such as `stdio` or `http`; optional S3 tool-surface labels;
+and, if an operator sets `B2_MCP_UA_SUFFIX`, that operator-supplied deployment
+tag. b2-mcp contributes those values to the User-Agent headers owned by the
+underlying SDKs, the official Backblaze B2 SDK and the AWS S3 SDK, which also
+include their own standard SDK and runtime version components.
 
 ## Third Parties
 
