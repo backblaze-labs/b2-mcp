@@ -26,7 +26,7 @@ const contract = readJson<{
       fixtures: { modern: string };
     };
   };
-}>("docs/tool-profile-contract.json");
+}>("docs/generated/tool-profile-contract.json");
 const contractToolNames = contract.profiles.full.names;
 const contractCounts = contract.profiles.full.counts;
 const fullModernFixture = readJson<{

@@ -516,7 +516,7 @@ async function runRunner() {
   installRunnerOutboundGuard();
   const helpers = loadContractHelpers();
   const expectedFixture = readJson(EXPECTED_FIXTURE);
-  const toolContract = readJson("docs/tool-profile-contract.json");
+  const toolContract = readJson("docs/generated/tool-profile-contract.json");
   const checks = [];
   let primaryError = null;
   const server = spawn(process.execPath, [scriptPath], {

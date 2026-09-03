@@ -8,11 +8,11 @@ const validator = join(root, "scripts", "validate-pack.mjs");
 
 function copyValidatorFixture(): string {
   const fixtureRoot = mkdtempSync(join(tmpdir(), "b2-mcp-skills-pack-"));
-  mkdirSync(join(fixtureRoot, "docs"), { recursive: true });
+  mkdirSync(join(fixtureRoot, "docs", "generated"), { recursive: true });
   cpSync(join(root, "skills"), join(fixtureRoot, "skills"), { recursive: true });
   cpSync(
-    join(root, "docs", "tool-profile-contract.json"),
-    join(fixtureRoot, "docs", "tool-profile-contract.json"),
+    join(root, "docs", "generated", "tool-profile-contract.json"),
+    join(fixtureRoot, "docs", "generated", "tool-profile-contract.json"),
   );
   writeFileSync(
     join(fixtureRoot, "package.json"),

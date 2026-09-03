@@ -18,8 +18,8 @@ start with [`../README.md`](../README.md).
 | [`../exec-plans/active/typescript-7-migration.md`](../exec-plans/active/typescript-7-migration.md) | Gonza | TypeScript 7 native compiler migration decision and trigger | active | #114 |
 | [`../product-specs/v1-scope.md`](../product-specs/v1-scope.md) | Gonza | Phase 1 product, runtime, release, SDK, and protocol decision record | active | #55, #71, #106 |
 | [`tool-contract.md`](tool-contract.md) | Gonza | Tool/prompt profile contract policy, backing taxonomy, and fixture requirements | frozen for Phase 1 | #49, #59, #166 |
-| [`../TOOL_PROFILES.md`](../TOOL_PROFILES.md) | Gonza | Generated Phase 1 tool and opt-in prompt profile reference | Phase 2 holdover | #49, #166 |
-| [`../tool-profile-contract.json`](../tool-profile-contract.json) | Gonza | Generated tool-profile contract artifact consumed by tests and packaging | Phase 2 holdover | #49, #166 |
+| [`../generated/tool-profiles.md`](../generated/tool-profiles.md) | Gonza | Generated Phase 1 tool and opt-in prompt profile reference | generated | #49, #166, #373 |
+| [`../generated/tool-profile-contract.json`](../generated/tool-profile-contract.json) | Gonza | Generated tool-profile contract artifact consumed by tests and packaging | generated | #49, #166, #373 |
 | [`../TESTING.md`](../TESTING.md) | Sophie / QK | Deterministic PR gates, contract evidence, and live B2 smoke policy | active | #50, #51, #52, #60, #61, #63 |
 | [`../EVALS.md`](../EVALS.md) | Sophie / QK | LLM eval local and CI runbook | active | #251 |
 | [`security-review.md`](security-review.md) | Sophie / QK | Pre-public secret scanning, provenance, and legal review checklist | skeleton | #62, #66, #67 |

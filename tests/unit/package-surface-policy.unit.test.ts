@@ -93,7 +93,7 @@ describe("package surface policy", () => {
   const toolContract = readJson<{
     profiles: Record<string, { fixtures: Record<string, string> }>;
     promptProfiles: Record<string, { fixture: string }>;
-  }>("docs/tool-profile-contract.json");
+  }>("docs/generated/tool-profile-contract.json");
   const skillsPack = readJson<{
     packageFiles: string[];
   }>("skills/pack.json");
@@ -128,7 +128,8 @@ describe("package surface policy", () => {
     expect(files).toContain("docs/deployment/vercel.md");
     expect(files).toContain("docs/references/deployment/security-and-credentials.md");
     expect(files).toContain("docs/references/deployment/vercel.md");
-    expect(files).toContain("docs/tool-profile-contract.json");
+    expect(files).toContain("docs/generated/tool-profile-contract.json");
+    expect(files).toContain("docs/generated/tool-profiles.md");
     expect(pkg.files.filter((file) => file.startsWith("skills/"))).toEqual(skillsPack.packageFiles);
     for (const skillPath of skillsPack.packageFiles) {
       expect(files).toContain(skillPath);

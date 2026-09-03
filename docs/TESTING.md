@@ -331,7 +331,7 @@ credentials, sets `B2_REGISTER_ALL_TOOLS=true` so startup performs no B2
 capability-discovery network call, validates `server/discover`, server
 name/version, instructions, and `tools/list`, then compares the returned surface
 to `tests/fixtures/tool-contract/full.modern.json` and
-`docs/tool-profile-contract.json`.
+`docs/generated/tool-profile-contract.json`.
 
 ```bash
 pnpm run build

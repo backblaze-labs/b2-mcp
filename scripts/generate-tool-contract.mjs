@@ -259,11 +259,11 @@ async function main() {
     promptProfiles,
   };
 
-  const contractPath = join(root, "docs/tool-profile-contract.json");
+  const contractPath = join(root, "docs/generated/tool-profile-contract.json");
   writeJson(contractPath, contract);
   generatedJsonPaths.push(contractPath);
   formatGeneratedJson(generatedJsonPaths);
-  const profileReferencePath = join(root, "docs/TOOL_PROFILES.md");
+  const profileReferencePath = join(root, "docs/generated/tool-profiles.md");
   writeFileSync(profileReferencePath, renderProfileReference(contract));
 }
 

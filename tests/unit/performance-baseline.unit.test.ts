@@ -58,7 +58,7 @@ describe("local performance baseline", () => {
       budgets: Record<string, unknown>;
     }>("performance-baseline.json");
     const contract = readJson<{ profiles: Record<string, unknown> }>(
-      "docs/tool-profile-contract.json",
+      "docs/generated/tool-profile-contract.json",
     );
 
     expect(config.reviewedBaseline.toolProfiles).toEqual(Object.keys(contract.profiles));

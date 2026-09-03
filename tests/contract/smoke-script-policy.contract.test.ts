@@ -101,7 +101,7 @@ describe("smoke script release contract", () => {
   });
 
   it("uses profile-aware tool checks rather than a universal full-surface count", () => {
-    expect(smokeScript).toContain("docs/tool-profile-contract.json");
+    expect(smokeScript).toContain("docs/generated/tool-profile-contract.json");
     expect(smokeScript).toContain("B2_MCP_EXPECTED_TOOL_PROFILE");
     expect(smokeScript).toContain("B2_MCP_ALLOW_ANY_TOOL_PROFILE");
     expect(smokeScript).toContain("liveToolContractSnapshot");

@@ -13,7 +13,7 @@ const liveB2Capabilities = nodeRequire("../../scripts/lib/live-b2-capabilities.c
 const liveB2Contract = nodeRequire("../../scripts/lib/live-b2-contract.cjs") as {
   stableResourceFingerprint(value: string): string;
 };
-const toolContract = nodeRequire("../../docs/tool-profile-contract.json") as {
+const toolContract = nodeRequire("../../docs/generated/tool-profile-contract.json") as {
   profiles: Record<string, { names: string[] }>;
 };
 const evidence = nodeRequire("../../scripts/lib/live-b2-evidence.cjs") as {

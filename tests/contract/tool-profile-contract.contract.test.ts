@@ -43,7 +43,7 @@ import {
   type ToolContractPackageJson,
 } from "../../src/tool-contract";
 
-const contract = readJson<ContractArtifact>("docs/tool-profile-contract.json");
+const contract = readJson<ContractArtifact>("docs/generated/tool-profile-contract.json");
 const packageJson = readJson<ToolContractPackageJson>("package.json");
 const biomeRunner = join(root, "scripts/run-biome.mjs");
 
@@ -582,13 +582,13 @@ describe("Tool backing category contract", () => {
 describe("Tool profile reference drift", () => {
   it("keeps the human-readable profile reference generated from the JSON artifact", () => {
     const expected = renderProfileReference(contract);
-    const actual = readFileSync(join(root, "docs/TOOL_PROFILES.md"), "utf8");
+    const actual = readFileSync(join(root, "docs/generated/tool-profiles.md"), "utf8");
     expect(actual).toBe(expected);
   });
 
   it("keeps generated JSON artifacts in Biome format", () => {
     const files = [
-      "docs/tool-profile-contract.json",
+      "docs/generated/tool-profile-contract.json",
       ...profileNames.flatMap((profile) => Object.values(contract.profiles[profile].fixtures)),
       ...promptProfileNames.map((profile) => contract.promptProfiles[profile].fixture),
     ].sort();

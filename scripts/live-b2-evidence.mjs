@@ -70,7 +70,7 @@ function parseArgs(argv) {
 }
 
 function toolContract() {
-  return JSON.parse(readFileSync(join(root, "docs/tool-profile-contract.json"), "utf8"));
+  return JSON.parse(readFileSync(join(root, "docs/generated/tool-profile-contract.json"), "utf8"));
 }
 
 function namesHash(names) {

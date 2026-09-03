@@ -230,7 +230,7 @@ jobs:
         with:
           name: mcp-contract-node-22.23.1
           path: |
-            docs/tool-profile-contract.json
+            docs/generated/tool-profile-contract.json
             tests/fixtures/tool-contract/*.json
             reports/junit/contract.xml
             reports/vitest/contract.json

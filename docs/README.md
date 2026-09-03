@@ -19,8 +19,8 @@ New documents inside taxonomy subdirectories use lowercase kebab-case. Existing
 root-level and top-level `docs/` entrypoints keep their uppercase names because
 they are stable public paths; the Phase 1 compatibility aliases under
 [`CLIENTS.md`](CLIENTS.md) and [`deployment/`](deployment/) are intentionally
-temporary. Generated tool-profile artifacts keep their current names until the
-Phase 2 generated-docs move.
+temporary. Machine-generated, verified references live under
+[`generated/`](generated/).
 
 ## System Of Record
 
@@ -36,8 +36,7 @@ Phase 2 generated-docs move.
 - [`references/deployment/security-and-credentials.md`](references/deployment/security-and-credentials.md) - shared hosted security contract.
 - [`references/harness-engineering.md`](references/harness-engineering.md) - taxonomy reference note.
 
-## Phase 2 Holdovers
+## Generated References
 
-Generated tool-profile artifacts stay at [`TOOL_PROFILES.md`](TOOL_PROFILES.md)
-and [`tool-profile-contract.json`](tool-profile-contract.json) until the Phase
-2 generated-docs move.
+- [`generated/tool-profiles.md`](generated/tool-profiles.md) - generated tool and opt-in prompt profile reference.
+- [`generated/tool-profile-contract.json`](generated/tool-profile-contract.json) - generated machine-readable contract consumed by tests, packaging, smoke scripts, and evals.

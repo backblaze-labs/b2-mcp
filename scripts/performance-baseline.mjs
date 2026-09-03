@@ -557,7 +557,7 @@ async function runMeasurements(config) {
     throw error;
   }
   assertBuiltArtifacts();
-  const contract = readJson(path.join(root, "docs/tool-profile-contract.json"));
+  const contract = readJson(path.join(root, "docs/generated/tool-profile-contract.json"));
   const mcpRevision = contract.mcpRevision;
   const modules = loadDistModules();
   const measurements = [];

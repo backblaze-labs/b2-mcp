@@ -153,7 +153,7 @@ async function runWorker() {
 
   const helpers = loadContractHelpers();
   const expectedFixture = readJson(EXPECTED_FIXTURE);
-  const toolContract = readJson("docs/tool-profile-contract.json");
+  const toolContract = readJson("docs/generated/tool-profile-contract.json");
   const { arraysEqual, evaluateProfileContract } = require(
     join(root, "scripts/lib/smoke-contract.cjs"),
   );

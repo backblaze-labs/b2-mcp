@@ -196,7 +196,7 @@ exercise the guard.
 
 The guard checks that:
 
-- Every full-profile tool in [`tool-profile-contract.json`](tool-profile-contract.json)
+- Every full-profile tool in [`tool-profile-contract.json`](generated/tool-profile-contract.json)
   has at least one eval case.
 - Eval cases do not reference tools outside the full profile.
 - Each case is bound to exactly one expected tool and all required arguments.
