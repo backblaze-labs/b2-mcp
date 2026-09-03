@@ -209,7 +209,7 @@ function withFixture(run: (fixtureRoot: string) => void): void {
           server: {
             type: "node",
             entry_point: "npx",
-            mcp_config: { command: "npx", args: ["-y", "@backblaze-labs/b2-mcp"] },
+            mcp_config: { command: "npx", args: ["-y", "@backblaze-labs/b2-mcp@0.1.0"] },
           },
         },
         null,

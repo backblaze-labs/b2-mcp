@@ -48,6 +48,8 @@ jobs:
       tarball-integrity: ${{ steps.pack.outputs.tarball_integrity }}
       sbom-name: ${{ steps.sbom.outputs.sbom_name }}
       sbom-sha256: ${{ steps.sbom.outputs.sbom_sha256 }}
+      mcpb-name: ${{ steps.mcpb.outputs.mcpb_name }}
+      mcpb-sha256: ${{ steps.mcpb.outputs.mcpb_sha256 }}
       checksums-name: ${{ steps.checksums.outputs.checksums_name }}
       checksums-sha256: ${{ steps.checksums.outputs.checksums_sha256 }}
       release-notes-name: ${{ steps.notes.outputs.release_notes_name }}
@@ -278,6 +280,21 @@ jobs:
             --access public \
             --ignore-scripts \
             --tag "${npm_tag}"
+      - name: Build MCPB desktop-extension bundle
+        id: mcpb
+        env:
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_RUNTIME_URL: ""
+        run: |
+          set -euo pipefail
+          mkdir -p publish-package
+          pnpm run build:mcpb
+          cp dist-mcpb/b2-mcp.mcpb publish-package/b2-mcp.mcpb
+          mcpb_sha256="$(sha256sum publish-package/b2-mcp.mcpb | awk '{print $1}')"
+          echo "mcpb_name=b2-mcp.mcpb" >> "$GITHUB_OUTPUT"
+          echo "mcpb_sha256=${mcpb_sha256}" >> "$GITHUB_OUTPUT"
       - name: Write artifact checksums
         id: checksums
         env:
@@ -288,7 +305,7 @@ jobs:
         run: |
           set -euo pipefail
           cd publish-package
-          sha256sum *.tgz *.cdx.json release-notes.md npm-pack.json > SHA256SUMS
+          sha256sum *.tgz *.cdx.json *.mcpb release-notes.md npm-pack.json > SHA256SUMS
           checksums_sha256="$(sha256sum SHA256SUMS | awk '{print $1}')"
           echo "checksums_name=SHA256SUMS" >> "$GITHUB_OUTPUT"
           echo "checksums_sha256=${checksums_sha256}" >> "$GITHUB_OUTPUT"
@@ -327,6 +344,7 @@ jobs:
           path: |
             publish-package/*.tgz
             publish-package/*.cdx.json
+            publish-package/*.mcpb
             publish-package/SHA256SUMS
             publish-package/release-notes.md
             publish-package/npm-pack.json
@@ -722,12 +740,15 @@ jobs:
           EXPECTED_CHECKSUMS_SHA256: ${{ needs.prepare.outputs.checksums-sha256 }}
           EXPECTED_RELEASE_NOTES_NAME: ${{ needs.prepare.outputs.release-notes-name }}
           EXPECTED_RELEASE_NOTES_SHA256: ${{ needs.prepare.outputs.release-notes-sha256 }}
+          EXPECTED_MCPB_NAME: ${{ needs.prepare.outputs.mcpb-name }}
+          EXPECTED_MCPB_SHA256: ${{ needs.prepare.outputs.mcpb-sha256 }}
         run: |
           set -euo pipefail
           tarball="./publish-package/${EXPECTED_TARBALL_NAME}"
           sbom="publish-package/${EXPECTED_SBOM_NAME}"
           checksums="publish-package/${EXPECTED_CHECKSUMS_NAME}"
           notes="publish-package/${EXPECTED_RELEASE_NOTES_NAME}"
+          mcpb="publish-package/${EXPECTED_MCPB_NAME}"
           if [[ ! -f "$tarball" ]]; then
             echo "::error::Expected release tarball ${tarball} is missing"
             exit 1
@@ -742,6 +763,10 @@ jobs:
           fi
           if [[ ! -f "$notes" ]]; then
             echo "::error::Expected release notes ${notes} are missing"
+            exit 1
+          fi
+          if [[ ! -f "$mcpb" ]]; then
+            echo "::error::Expected MCPB bundle ${mcpb} is missing"
             exit 1
           fi
           actual_tarball_sha="$(sha256sum "$tarball" | awk '{print $1}')"
@@ -766,6 +791,13 @@ jobs:
             echo "::error::Release notes SHA-256 mismatch"
             exit 1
           fi
+          actual_mcpb_sha="$(sha256sum "$mcpb" | awk '{print $1}')"
+          if [[ "$actual_mcpb_sha" != "$EXPECTED_MCPB_SHA256" ]]; then
+            echo "::error::MCPB bundle SHA-256 mismatch"
+            echo "expected=${EXPECTED_MCPB_SHA256}"
+            echo "actual=${actual_mcpb_sha}"
+            exit 1
+          fi
           (cd publish-package && sha256sum --check "${EXPECTED_CHECKSUMS_NAME}")
       - name: Create GitHub release from verified artifact
         env:
@@ -774,6 +806,7 @@ jobs:
           EXPECTED_SBOM_NAME: ${{ needs.prepare.outputs.sbom-name }}
           EXPECTED_CHECKSUMS_NAME: ${{ needs.prepare.outputs.checksums-name }}
           EXPECTED_RELEASE_NOTES_NAME: ${{ needs.prepare.outputs.release-notes-name }}
+          EXPECTED_MCPB_NAME: ${{ needs.prepare.outputs.mcpb-name }}
           PUBLISH_TAG: ${{ needs.prepare.outputs.publish-tag }}
         run: |
           set -euo pipefail
@@ -801,6 +834,7 @@ jobs:
           gh release upload "${PUBLISH_TAG}" \
             "publish-package/${EXPECTED_TARBALL_NAME}" \
             "publish-package/${EXPECTED_SBOM_NAME}" \
+            "publish-package/${EXPECTED_MCPB_NAME}" \
             "publish-package/${EXPECTED_RELEASE_NOTES_NAME}" \
             "publish-package/npm-pack.json" \
             "publish-package/${EXPECTED_CHECKSUMS_NAME}" \

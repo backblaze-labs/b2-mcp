@@ -83,6 +83,17 @@ export function verifyReleaseInput(root, tag) {
     packageJsonPath: path.join(root, "package.json"),
     expectedVersion: pkg.version,
   });
+  const mcpbManifest = readJson(root, "mcpb/manifest.json");
+  assert(
+    mcpbManifest.version === pkg.version,
+    `mcpb/manifest.json version ${mcpbManifest.version} does not match package version ${pkg.version}`,
+  );
+  assert(mcpbManifest.name === "b2-mcp", `unexpected mcpb/manifest.json name ${mcpbManifest.name}`);
+  const mcpbArgs = mcpbManifest.server?.mcp_config?.args ?? [];
+  assert(
+    mcpbArgs.includes(`${canonicalPackageName}@${pkg.version}`),
+    `mcpb/manifest.json npx launcher is not pinned to ${canonicalPackageName}@${pkg.version}`,
+  );
   assert(
     pkg.engines?.node === runtimePolicy.engineRange,
     `package engine range must be ${runtimePolicy.engineRange}`,
