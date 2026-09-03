@@ -31,21 +31,29 @@ b2-mcp uses Backblaze B2 application keys and, for Partner API tools only,
 optional master keys to authenticate to Backblaze B2 on your behalf.
 
 - In local stdio mode, credentials are supplied by your MCP client configuration
-  or process environment and stay on your machine.
+  or process environment. Credential custody stays on your machine except when
+  the server sends them to Backblaze B2 to authorize or perform requested B2
+  operations.
 - In HTTP `headers` mode, credentials arrive in request headers, are consumed by
   the credential resolver, and are stripped before the request crosses into the
-  MCP SDK handler boundary.
+  MCP SDK handler boundary. The running process may keep them in a cached
+  credential and authorization manager until cache eviction, TTL expiry, or
+  process exit.
 - In HTTP `server` mode, credentials come from the operator-managed server
-  environment or secret store.
+  environment or secret store and stay inside the operator's deployment except
+  for outbound calls to Backblaze B2.
 - In HTTP `principal` mode, verified caller identity is mapped to
-  operator-managed B2 credentials.
+  operator-managed B2 credentials, which stay inside the operator's deployment
+  except for outbound calls to Backblaze B2.
 
-Credentials are not persisted by b2-mcp in HTTP mode. The HTTP transport keeps
-only bounded, TTL-limited in-memory capability and authorization state for the
-running process, keyed and logged with non-secret fingerprints rather than raw
-credential values. B2 credentials are sent only to Backblaze B2 API endpoints
-needed to perform the requested operation. They are never collected, sold, or
-transmitted to the publisher.
+Credentials are not written to disk by b2-mcp in HTTP mode. The HTTP transport
+keeps bounded, TTL-limited in-memory credential managers, B2 authorization
+state, and capability state for the running process. Raw credential values can
+therefore remain in process memory after a request until cache eviction, TTL
+expiry, or process exit, but cache keys and logs use non-secret fingerprints
+rather than raw credential values. B2 credentials are sent only to Backblaze B2
+API endpoints needed to authorize or perform the requested operation. They are
+never collected, sold, or transmitted to the publisher.
 
 ## Object Data
 

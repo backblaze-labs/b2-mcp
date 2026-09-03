@@ -37,23 +37,23 @@ describe("privacy page generator", () => {
       "<h2 id="b2-credentials">B2 Credentials</h2>
       <p>b2-mcp uses Backblaze B2 application keys and, for Partner API tools only, optional master keys to authenticate to Backblaze B2 on your behalf.</p>
       <ul>
-      <li>In local stdio mode, credentials are supplied by your MCP client configuration or process environment and stay on your machine.</li>
-      <li>In HTTP <code>headers</code> mode, credentials arrive in request headers, are consumed by the credential resolver, and are stripped before the request crosses into the MCP SDK handler boundary.</li>
-      <li>In HTTP <code>server</code> mode, credentials come from the operator-managed server environment or secret store.</li>
-      <li>In HTTP <code>principal</code> mode, verified caller identity is mapped to operator-managed B2 credentials.</li>
+      <li>In local stdio mode, credentials are supplied by your MCP client configuration or process environment. Credential custody stays on your machine except when the server sends them to Backblaze B2 to authorize or perform requested B2 operations.</li>
+      <li>In HTTP <code>headers</code> mode, credentials arrive in request headers, are consumed by the credential resolver, and are stripped before the request crosses into the MCP SDK handler boundary. The running process may keep them in a cached credential and authorization manager until cache eviction, TTL expiry, or process exit.</li>
+      <li>In HTTP <code>server</code> mode, credentials come from the operator-managed server environment or secret store and stay inside the operator's deployment except for outbound calls to Backblaze B2.</li>
+      <li>In HTTP <code>principal</code> mode, verified caller identity is mapped to operator-managed B2 credentials, which stay inside the operator's deployment except for outbound calls to Backblaze B2.</li>
       </ul>
-      <p>Credentials are not persisted by b2-mcp in HTTP mode. The HTTP transport keeps only bounded, TTL-limited in-memory capability and authorization state for the running process, keyed and logged with non-secret fingerprints rather than raw credential values. B2 credentials are sent only to Backblaze B2 API endpoints needed to perform the requested operation. They are never collected, sold, or transmitted to the publisher.</p>
+      <p>Credentials are not written to disk by b2-mcp in HTTP mode. The HTTP transport keeps bounded, TTL-limited in-memory credential managers, B2 authorization state, and capability state for the running process. Raw credential values can therefore remain in process memory after a request until cache eviction, TTL expiry, or process exit, but cache keys and logs use non-secret fingerprints rather than raw credential values. B2 credentials are sent only to Backblaze B2 API endpoints needed to authorize or perform the requested operation. They are never collected, sold, or transmitted to the publisher.</p>
       "
     `);
     expect(list).not.toContain("<p>");
     expect(credentialsSection).toContain(
-      "<li>In local stdio mode, credentials are supplied by your MCP client configuration or process environment and stay on your machine.</li>",
+      "Credential custody stays on your machine except when the server sends them to Backblaze B2",
     );
     expect(credentialsSection).toContain(
-      "and are stripped before the request crosses into the MCP SDK handler boundary.</li>",
+      "may keep them in a cached credential and authorization manager until cache eviction, TTL expiry, or process exit.</li>",
     );
     expect(credentialsSection).toContain(
-      "verified caller identity is mapped to operator-managed B2 credentials.</li>",
+      "Raw credential values can therefore remain in process memory after a request",
     );
     expect(credentialsSection).not.toContain(
       "<li>In local stdio mode, credentials are supplied by your MCP client configuration</li>",
