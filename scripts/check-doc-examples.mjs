@@ -46,14 +46,20 @@ const validatedFenceManifest = [
   ["README.md", 1, "client-json", "Claude Desktop JSON config"],
   ["README.md", 2, "json", "fallback region env JSON"],
   ["README.md", 3, "shell", "source install commands"],
-  ["README.md", 4, "shell", "skills validation command"],
-  ["README.md", 5, "shell", "HTTP container command"],
-  ["README.md", 6, "shell", "stdio container command"],
-  ["README.md", 7, "typescript-package-api", "supported package import API"],
-  ["README.md", 8, "cli-help", "checked-in CLI help text"],
-  ["README.md", 9, "shell", "CLI examples"],
-  ["README.md", 10, "json-text", "JSON output example"],
-  ["README.md", 12, "shell", "local verification commands"],
+  ["README.md", 4, "json", "pinned npx client args"],
+  ["README.md", 5, "shell", "global package install command"],
+  ["README.md", 6, "json", "global binary client command"],
+  ["README.md", 7, "shell", "npx cache cleanup commands"],
+  ["README.md", 8, "shell", "launcher version commands"],
+  ["README.md", 9, "shell", "Claude Desktop log commands"],
+  ["README.md", 10, "shell", "skills validation command"],
+  ["README.md", 11, "shell", "HTTP container command"],
+  ["README.md", 12, "shell", "stdio container command"],
+  ["README.md", 13, "typescript-package-api", "supported package import API"],
+  ["README.md", 14, "cli-help", "checked-in CLI help text"],
+  ["README.md", 15, "shell", "CLI examples"],
+  ["README.md", 16, "json-text", "JSON output example"],
+  ["README.md", 18, "shell", "local verification commands"],
   ["deploy/vercel/README.md", 2, "shell", "Vercel smoke commands"],
   ["deploy/customer-hosted/README.md", 1, "shell", "customer-hosted build commands"],
   ["deploy/customer-hosted/README.md", 2, "shell", "customer-hosted update commands"],
@@ -103,7 +109,7 @@ const validatedFenceManifest = [
 ];
 
 const illustrativeFenceManifest = [
-  ["README.md", 11, "toon output example"],
+  ["README.md", 17, "toon output example"],
   ["deploy/vercel/README.md", 1, "architecture diagram"],
   ["deploy/customer-hosted/README.md", 4, "base-image inspection command with placeholder"],
   ["docs/AUTHENTICATION.md", 1, "stdio credential-flow diagram"],
@@ -152,7 +158,7 @@ const requiredServerModeEnv = [
 
 const requiredSafeEnvByFence = new Map(
   [
-    ["README.md", 5],
+    ["README.md", 11],
     ["docs/references/deployment/security-and-credentials.md", 2],
     ["docs/references/deployment/vercel.md", 2],
   ].map(([file, fence]) => [manifestKey(file, fence), requiredServerModeEnv]),
@@ -170,6 +176,7 @@ const safeDeploymentEnvValues = {
 const packageManagerNativeCommands = new Set([
   "add",
   "audit",
+  "cache",
   "ci",
   "config",
   "create",

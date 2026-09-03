@@ -113,6 +113,44 @@ Then set `"command": "node"` and `"args": ["/ABSOLUTE/PATH/TO/b2-mcp/dist/index.
 
 </details>
 
+### More robust local install options
+
+Floating `npx -y @backblaze-labs/b2-mcp` is convenient, but `npx` can
+re-resolve and refresh its cache on every client launch. For desktop clients
+you open often, these alternatives reduce startup churn:
+
+1. Pin the package version in the client config:
+
+   ```json
+   {
+     "args": ["-y", "@backblaze-labs/b2-mcp@0.2.0"]
+   }
+   ```
+
+   Replace `0.2.0` with the release you want. Pinning trades automatic updates
+   for reproducible launches; update the version intentionally when you want a
+   newer server.
+
+2. Install globally once and call the binary directly:
+
+   ```bash
+   npm install -g @backblaze-labs/b2-mcp
+   ```
+
+   ```json
+   {
+     "command": "b2-mcp"
+   }
+   ```
+
+   The package exposes both `b2-mcp` and `b2-mcp-server`; both binaries run the
+   same server entry point.
+
+3. Watch the MCPB desktop-extension work tracked in
+   [#358](https://github.com/backblaze-labs/b2-mcp/issues/358). That path is
+   intended to become the one-click, `npx`-free desktop install once it is
+   ready.
+
 **Then just ask:**
 
 > _"List the buckets this key can access."_ · _"Upload `./data.csv` to `reports/may-2026.csv`."_ · _"Give me a 1-hour download link for `backups/latest.tar.gz`."_ · _"List files under `logs/2026/`."_
@@ -124,6 +162,91 @@ sink paths because this implementation does not enforce owner-only ACLs there,
 so use `B2_SECRET_SINK=off` or explicit local `inline` mode on Windows. For
 hosted HTTP deployments, create and rotate keys outside the MCP flow unless you
 have deliberately configured a reviewed secret sink.
+
+## Troubleshooting / FAQ
+
+### Claude Desktop says "Server disconnected" and the log shows `ENOTEMPTY`
+
+If startup fails with npm output mentioning `code ENOTEMPTY`, `syscall rmdir`,
+or a path under `~/.npm/_npx/<hash>`, the failure is
+usually a corrupt or stale `npx` cache, not a b2-mcp runtime crash. One common
+tell is a `server.ready` log line with an older `version` immediately before the
+wrapper exits; b2-mcp started successfully, then npm's cache cleanup failed and
+closed the stdio transport.
+
+Clear the per-package `npx` cache, then fully quit and reopen the MCP client:
+
+```bash
+rm -rf ~/.npm/_npx
+npm cache clean --force
+```
+
+The second command is optional; use it if the `_npx` cleanup alone does not
+stick. To reduce repeat cache-refresh failures, use a pinned `npx` version or a
+global install from [More robust local install options](#more-robust-local-install-options).
+
+### How do I confirm which version is actually running?
+
+b2-mcp logs a `server.ready` JSON line at startup with a `version` field. Look
+for it in Claude Desktop's MCP logs or in your configured `B2_LOG_FILE`.
+
+From a terminal, these commands print the package version that each launcher
+will run:
+
+```bash
+npx -y @backblaze-labs/b2-mcp@latest --version
+npx -y @backblaze-labs/b2-mcp@0.2.0 --version
+b2-mcp --version
+b2-mcp-server --version
+```
+
+Use `@latest` to force npm to resolve the latest published package, or replace
+`0.2.0` with a specific release when you want a reproducible pinned launch.
+
+### Why do I get `command not found`?
+
+The npm package exposes two binary names: `b2-mcp` and `b2-mcp-server`. They
+both point to the same `dist/index.js` entry point. The `npx` config does not
+require either binary to be on your `PATH`; a global-install config does. If a
+direct `b2-mcp` command is not found after
+`npm install -g @backblaze-labs/b2-mcp`, check that npm's global bin directory
+is on `PATH`, or switch back to the `npx` or source-checkout config shown in
+[Quick start](#quick-start).
+
+### Why do auth or capability errors appear?
+
+For normal storage work, set `B2_APPLICATION_KEY_ID` and `B2_APPLICATION_KEY` to
+a non-master B2 application key. That one key covers native B2, S3-compatible,
+and key-management tools. `bad_auth_token` usually means the key ID/secret pair
+is wrong, expired, revoked, or copied with extra whitespace. Missing-capability
+messages mean the key does not grant the operation you asked for, and
+capability-aware registration may hide tools that key cannot use. Partner/Groups
+tools are the exception: they require `B2_MASTER_KEY_ID` / `B2_MASTER_KEY` on a
+Partner-entitled account. See [Configuration](#configuration) and
+[Security & self-hosting](#security--self-hosting) for the full credential model.
+
+### Where are Claude Desktop MCP logs?
+
+Claude Desktop writes MCP logs outside the b2-mcp checkout:
+
+- macOS: `~/Library/Logs/Claude`
+- Windows: `%APPDATA%\Claude\logs`
+
+`mcp.log` contains connection events, and files named
+`mcp-server-SERVERNAME.log` contain stderr from the configured server. With the
+Quick Start server key, check `mcp-server-backblaze-b2.log`.
+
+Useful commands:
+
+```bash
+tail -n 20 -F ~/Library/Logs/Claude/mcp*.log
+type "%APPDATA%\Claude\logs\mcp*.log"
+```
+
+For clients that hide child-process stderr, configure `B2_LOG_FILE` as described
+in [Logging](#logging). The MCP project's
+[debugging guide](https://modelcontextprotocol.io/docs/2026-07-28/tools/debugging)
+has broader client-side troubleshooting notes.
 
 ## B2 Skills pack
 
