@@ -510,6 +510,9 @@ function validatePackageCommand(file, line, commandConfig, expectedPackage) {
       `${command} client config executes ${packageSpec ?? "no package"}, expected ${expectedPackage}`,
     );
   }
+  if (parsedPackageSpec?.version && !isExactPackageVersion(parsedPackageSpec.version)) {
+    addFinding(file, line, `${command} client config package version must be exact semver`);
+  }
 }
 
 function validateDirectClientCommand(file, line, commandConfig) {
@@ -754,7 +757,6 @@ function validateMutablePackageLaunchers(file, text, startLine) {
           );
         }
       }
-      return;
     }
 
     const specs = packageSpecsInText(line).filter((spec) => spec.name === pkg.name);
@@ -769,7 +771,7 @@ function validateMutablePackageLaunchers(file, text, startLine) {
 function validateMcpLogWildcardRedaction(file, text, startLine) {
   const lines = text.split(/\r?\n/);
   lines.forEach((line, index) => {
-    if (!/\bmcp\*\.log\b/i.test(line)) return;
+    if (!hasBroadMcpLogWildcard(line)) return;
     const context = lines
       .slice(Math.max(0, index - 6), Math.min(lines.length, index + 7))
       .join("\n")
@@ -796,6 +798,10 @@ function isGlobalNpmInstallLine(line) {
   return /\bnpm\s+(?:install|i)\b/.test(line) && /(?:^|\s)(?:-g|--global)(?:\s|$)/.test(line);
 }
 
+function hasBroadMcpLogWildcard(line) {
+  return /(?:^|[\\/ \t"'`])mcp[^\\/ \t"'`]*\*[^\\/ \t"'`]*\.log\b/i.test(line);
+}
+
 function packageSpecsInText(text) {
   const packageName = escapeRegExp(pkg.name);
   const packagePattern = new RegExp(`${packageName}(?:@([^\\s\`"',\\]]+))?`, "g");
@@ -808,8 +814,13 @@ function globalNpmInstallPackageSpecs(line) {
   const match = line.match(/\bnpm\s+(?:install|i)\b(?<args>[^`\n]*)/);
   const args = match?.groups?.args;
   if (!args) return [];
-  return [...args.matchAll(/@[a-z0-9._-]+\/[a-z0-9._-]+(?:@[^\s`"',\]]+)?/g)]
-    .map((match) => parsePackageSpec(match[0]))
+
+  const commandArgs = args.split(/\s+(?:&&|\|\||[;|])\s+/, 1)[0] ?? "";
+  return commandArgs
+    .split(/\s+/)
+    .map((arg) => arg.replace(/^[`'"]+|[`'",\]]+$/g, ""))
+    .filter((arg) => arg && !arg.startsWith("-"))
+    .map((arg) => parsePackageSpec(arg))
     .filter(Boolean);
 }
 

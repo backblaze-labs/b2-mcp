@@ -89,7 +89,12 @@ If you need an explicit fallback region before authorization, include `B2_REGION
 }
 ```
 
-Restart Claude Desktop and the B2 tools appear. To persist local stdio logs from clients that do not expose child-process stderr, add `"B2_LOG_FILE"` to the same `env` block, set to an OS-appropriate absolute path (for example `/var/log/b2-mcp.log` on macOS/Linux or `C:\\logs\\b2-mcp.log` on Windows).
+Restart Claude Desktop and the B2 tools appear. On POSIX systems, persist local
+stdio logs from clients that do not expose child-process stderr by adding
+`"B2_LOG_FILE"` to the same `env` block, set to an absolute path such as
+`/var/log/b2-mcp.log`. On Windows, use the Claude Desktop MCP logs described in
+[Troubleshooting / FAQ](#troubleshooting--faq); `B2_LOG_FILE` is currently
+POSIX-only.
 
 > **One non-master application key covers normal storage work:** B2 native, S3, and key management. SDK-backed Partner/Groups tools require `B2_MASTER_KEY_ID` / `B2_MASTER_KEY` on an account authorized for the Partner API. B2's S3 endpoint rejects master keys, which is why the application key remains the primary credential. See [Configuration](#configuration) for the full list.
 >

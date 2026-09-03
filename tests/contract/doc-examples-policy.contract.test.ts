@@ -55,6 +55,19 @@ describe("documentation example validator policy", () => {
     expect(result.stderr).toContain("@attacker/b2-mcp@0.2.0");
   });
 
+  it("rejects mutable client JSON package versions", () => {
+    const readme = read("README.md").replace(
+      '"args": ["-y", "@backblaze-labs/b2-mcp@0.2.0"]',
+      '"args": ["-y", "@backblaze-labs/b2-mcp@^0.2.0"]',
+    );
+    const expectedLine = lineOf(readme, '```json\n   {\n     "command": "npx",');
+    const result = runDocExamplesWithOverrides({ "README.md": readme });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(`README.md:${expectedLine}`);
+    expect(result.stderr).toContain("client config package version must be exact semver");
+  });
+
   it("rejects direct client commands that are not package binaries", () => {
     const readme = read("README.md").replace('"command": "b2-mcp"', '"command": "b2-mcp-old"');
     const expectedLine = lineOf(readme, '```json\n   {\n     "command": "b2-mcp-old"');
@@ -78,6 +91,21 @@ describe("documentation example validator policy", () => {
     expect(result.stderr).toContain("must not execute @latest");
   });
 
+  it("rejects executable @latest after global npm install on the same line", () => {
+    const command =
+      "npm install -g @backblaze-labs/b2-mcp@0.2.0 && npx -y @backblaze-labs/b2-mcp@latest --version";
+    const readme = read("README.md").replace(
+      "npm install -g @backblaze-labs/b2-mcp@0.2.0",
+      command,
+    );
+    const expectedLine = lineOf(readme, command);
+    const result = runDocExamplesWithOverrides({ "README.md": readme });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(`README.md:${expectedLine}`);
+    expect(result.stderr).toContain("must not execute @latest");
+  });
+
   it("rejects unpinned global npm installs in release docs", () => {
     const readme = read("README.md").replace(
       "npm install -g @backblaze-labs/b2-mcp@0.2.0",
@@ -89,6 +117,19 @@ describe("documentation example validator policy", () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain(`README.md:${expectedLine}`);
     expect(result.stderr).toContain("global npm install examples");
+  });
+
+  it("rejects unscoped global npm install package operands", () => {
+    const readme = read("README.md").replace(
+      "npm install -g @backblaze-labs/b2-mcp@0.2.0",
+      "npm install -g b2-mcp@0.2.0",
+    );
+    const expectedLine = lineOf(readme, "npm install -g b2-mcp@0.2.0");
+    const result = runDocExamplesWithOverrides({ "README.md": readme });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(`README.md:${expectedLine}`);
+    expect(result.stderr).toContain("global npm install examples must install");
   });
 
   it("rejects global npm installs that drift to another package", () => {
@@ -121,24 +162,27 @@ describe("documentation example validator policy", () => {
     },
   );
 
-  it("rejects broad MCP log wildcards without adjacent redaction guidance", () => {
-    const redactionText =
-      "Before sharing any log excerpt, redact B2 key IDs and secrets, Authorization\n" +
-      "headers, bearer tokens, presigned URLs, webhook secrets, and any other local\n" +
-      "credentials.\n\n";
-    const readme = read("README.md")
-      .replace(redactionText, "")
-      .replace(
-        "tail -n 20 -F ~/Library/Logs/Claude/mcp-server-backblaze-b2.log",
-        "tail -n 20 -F ~/Library/Logs/Claude/mcp*.log",
-      );
-    const expectedLine = lineOf(readme, "tail -n 20 -F ~/Library/Logs/Claude/mcp*.log");
-    const result = runDocExamplesWithOverrides({ "README.md": readme });
+  it.each(["mcp*.log", "mcp-server-*.log"])(
+    "rejects broad MCP log wildcard %s without adjacent redaction guidance",
+    (pattern) => {
+      const redactionText =
+        "Before sharing any log excerpt, redact B2 key IDs and secrets, Authorization\n" +
+        "headers, bearer tokens, presigned URLs, webhook secrets, and any other local\n" +
+        "credentials.\n\n";
+      const readme = read("README.md")
+        .replace(redactionText, "")
+        .replace(
+          "tail -n 20 -F ~/Library/Logs/Claude/mcp-server-backblaze-b2.log",
+          `tail -n 20 -F ~/Library/Logs/Claude/${pattern}`,
+        );
+      const expectedLine = lineOf(readme, `tail -n 20 -F ~/Library/Logs/Claude/${pattern}`);
+      const result = runDocExamplesWithOverrides({ "README.md": readme });
 
-    expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain(`README.md:${expectedLine}`);
-    expect(result.stderr).toContain("broad MCP log wildcard examples");
-  });
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(`README.md:${expectedLine}`);
+      expect(result.stderr).toContain("broad MCP log wildcard examples");
+    },
+  );
 
   it.each([
     ["B2_HTTP_CREDENTIAL_MODE", "headers"],
