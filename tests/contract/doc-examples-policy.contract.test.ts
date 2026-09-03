@@ -180,6 +180,36 @@ describe("documentation example validator policy", () => {
     expect(result.stderr).toContain("global npm install examples must install");
   });
 
+  it("rejects an npx launcher whose separated option value precedes a drift", () => {
+    const readme = read("README.md").replace(
+      "npx -y @backblaze-labs/b2-mcp@0.2.0 --version",
+      "npx --cache /tmp @attacker/b2-mcp@0.2.0 --version",
+    );
+    const expectedLine = lineOf(readme, "npx --cache /tmp @attacker/b2-mcp@0.2.0 --version");
+    const result = runDocExamplesWithOverrides({ "README.md": readme });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(`README.md:${expectedLine}`);
+    expect(result.stderr).toContain("references package @attacker/b2-mcp@0.2.0");
+  });
+
+  it.each(["--location=global", "--location global"])(
+    "rejects a global npm install using %s",
+    (locationFlag) => {
+      const command = `npm install ${locationFlag} @attacker/b2-mcp@latest`;
+      const readme = read("README.md").replace(
+        "npm install -g @backblaze-labs/b2-mcp@0.2.0",
+        command,
+      );
+      const expectedLine = lineOf(readme, command);
+      const result = runDocExamplesWithOverrides({ "README.md": readme });
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(`README.md:${expectedLine}`);
+      expect(result.stderr).toContain("global npm install examples must install");
+    },
+  );
+
   it("rejects an npx --yes long-form launcher that drifts to another package", () => {
     const readme = read("README.md").replace(
       "npx -y @backblaze-labs/b2-mcp@0.2.0 --version",

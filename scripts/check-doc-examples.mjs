@@ -206,6 +206,8 @@ const packageManagerNativeCommands = new Set([
 
 // Bare `npm install` options that consume a following token as their value, so
 // that value is not misread as a package operand when validating global installs.
+// `--location` is included so its `global`/`user` value is skipped; global-mode
+// detection reads that value separately.
 const npmInstallValueOptions = new Set([
   "-C",
   "--prefix",
@@ -218,13 +220,16 @@ const npmInstallValueOptions = new Set([
   "--otp",
   "--omit",
   "--include",
+  "--location",
   "-w",
   "--workspace",
 ]);
 
 // npx options that consume the following token as their value, so it is not
-// misread as the package operand (e.g. `npx --call "cmd" @scope/pkg`).
-const npxValueOptions = new Set(["-c", "--call"]);
+// misread as the package operand. npx forwards npm config flags, so it inherits
+// every `npm install` value option (e.g. `--cache /tmp`, `--registry <url>`,
+// `--userconfig <path>`) plus npx's own `--call`.
+const npxValueOptions = new Set([...npmInstallValueOptions, "-c", "--call"]);
 
 const findings = [];
 const docs = new Map(releaseDocs.map((file) => [file, read(file)]));
@@ -981,8 +986,8 @@ function npmInstallInvocation(segment) {
   // Skip options (and any value they consume) that precede the subcommand, so a
   // global flag written before `install` is still recognized.
   while (index < tokens.length && tokens[index].startsWith("-")) {
+    if (isGlobalModeOption(tokens[index], tokens[index + 1])) isGlobal = true;
     const option = tokens[index];
-    if (option === "-g" || option === "--global") isGlobal = true;
     if (!option.includes("=") && npmInstallValueOptions.has(option)) index += 1;
     index += 1;
   }
@@ -993,7 +998,7 @@ function npmInstallInvocation(segment) {
   for (; index < tokens.length; index += 1) {
     const token = tokens[index];
     if (token.startsWith("-")) {
-      if (token === "-g" || token === "--global") isGlobal = true;
+      if (isGlobalModeOption(token, tokens[index + 1])) isGlobal = true;
       // A bare value-taking option (e.g. `--prefix /path`) consumes the next
       // token, which must not be mistaken for a package operand.
       if (!token.includes("=") && npmInstallValueOptions.has(token)) index += 1;
@@ -1002,6 +1007,17 @@ function npmInstallInvocation(segment) {
     operands.push(token);
   }
   return { isGlobal, operands };
+}
+
+// Recognize every npm global-mode spelling: `-g`, `--global`, and the
+// `--location` config in both `--location=global` and separated
+// `--location global` forms. Missing the location forms let a global install be
+// treated as local and skip every package-name/version check.
+function isGlobalModeOption(option, nextToken) {
+  if (option === "-g" || option === "--global") return true;
+  if (option === "--location=global") return true;
+  if (option === "--location" && nextToken === "global") return true;
+  return false;
 }
 
 function npmInstallSegmentSpecs(line) {
