@@ -7,6 +7,13 @@ import { HtmlRenderer, Parser } from "commonmark";
 // reference CommonMark parser, which leaves relative destinations untouched.
 const REPO_BLOB_URL = "https://github.com/backblaze-labs/b2-mcp/blob/main/";
 
+// Private-use sentinel delimiters wrapping a masked code span's index. Escaped
+// HTML output can never contain them, and they are neither whitespace nor
+// digits, so the whitespace collapse leaves them intact and the restore step
+// cannot collide with numbers in real prose.
+const CODE_MASK_OPEN = "\uE000";
+const CODE_MASK_CLOSE = "\uE001";
+
 /**
  * Render Markdown with the reference CommonMark implementation. This is the
  * oracle: canonical CommonMark output the constrained renderer is measured
@@ -25,28 +32,43 @@ export function renderReferenceHtml(markdown: string): string {
  * Only intentional, safe differences are normalized away, and each is scoped to
  * where it legitimately occurs so a genuine divergence is not masked into a
  * false `matches`:
- * - heading anchor `id`s only — the slug is stripped from `<h1>`–`<h6>` opening
+ * - heading anchor `id`s only: the slug is stripped from `<h1>`-`<h6>` opening
  *   tags (the hosted renderer adds them; the reference omits them). An `id` on
  *   any other element survives and forces a mismatch.
- * - the relative→`REPO_BLOB_URL` href rewrite only — the blob-URL prefix is
- *   removed solely when it opens an `href="…"` destination value (the hosted
+ * - the relative-to-`REPO_BLOB_URL` href rewrite only: the blob-URL prefix is
+ *   removed solely when it opens an `href="..."` destination value (the hosted
  *   renderer rewrites relative links to their repository blob URL; the
- *   reference keeps them relative). The blob URL appearing anywhere else — as
- *   literal text, or prepended to a non-relative destination — survives.
- * - insignificant whitespace (a softbreak `\n` vs a joined space, indentation).
+ *   reference keeps them relative). The blob URL appearing anywhere else, as
+ *   literal text or prepended to a non-relative destination, survives.
+ * - insignificant whitespace (a softbreak newline vs a joined space,
+ *   indentation) OUTSIDE `<code>` spans. Whitespace inside a code span is
+ *   significant: CommonMark strips a single boundary space the constrained
+ *   renderer keeps, so code-span content is masked before the collapse and
+ *   restored verbatim, letting such a divergence surface instead of being
+ *   normalized into a match.
  *
- * Anything semantic — a dropped `<br>`, a construct emitted as literal text
- * instead of markup, emphasis, an entity rendered as source — survives and
- * forces a mismatch, which is exactly the drift the oracle must catch.
+ * Anything semantic (a dropped `<br>`, a construct emitted as literal text
+ * instead of markup, emphasis, an entity rendered as source, mismatched
+ * code-span whitespace) survives and forces a mismatch, which is exactly the
+ * drift the oracle must catch.
  */
 export function canonicalizeHtml(html: string): string {
-  return html
+  const codeSpans: string[] = [];
+  const masked = html.replace(/<code>[\s\S]*?<\/code>/g, (span) => {
+    codeSpans.push(span);
+    return `${CODE_MASK_OPEN}${codeSpans.length - 1}${CODE_MASK_CLOSE}`;
+  });
+  return masked
     .replace(/(<h[1-6])\s+id="[^"]*"/g, "$1")
     .split(`href="${REPO_BLOB_URL}`)
     .join('href="')
     .replace(/>\s+</g, "><")
     .replace(/\s+/g, " ")
-    .trim();
+    .trim()
+    .replace(
+      new RegExp(`${CODE_MASK_OPEN}(\\d+)${CODE_MASK_CLOSE}`, "g"),
+      (_, index) => codeSpans[Number(index)],
+    );
 }
 
 /**
@@ -54,7 +76,7 @@ export function canonicalizeHtml(html: string): string {
  * - `rejected`: the constrained renderer refused the input (fail-closed, safe).
  * - `matches`: the constrained output is canonically equal to CommonMark.
  * - `diverges`: the constrained renderer accepted input it renders differently
- *   from CommonMark — a drift bug the hosted page must never ship.
+ *   from CommonMark, a drift bug the hosted page must never ship.
  */
 export type CommonMarkComparison =
   | { kind: "rejected"; error: Error }
@@ -98,8 +120,8 @@ export function expectMatchesCommonMark(comparison: CommonMarkComparison): void 
 
 /**
  * Assert the constrained renderer refused the input (fail-closed) rather than
- * silently mis-rendering it. `diverges` — accepted but rendered differently
- * from CommonMark — is the drift bug this must never allow.
+ * silently mis-rendering it. `diverges`, accepted but rendered differently from
+ * CommonMark, is the drift bug this must never allow.
  */
 export function expectRejectedByOracle(comparison: CommonMarkComparison): void {
   expect(comparison.kind).not.toBe("diverges");
