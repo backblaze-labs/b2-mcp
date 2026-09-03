@@ -22,10 +22,18 @@ export function renderReferenceHtml(markdown: string): string {
  * canonical form so the constrained renderer's output can be compared against
  * the reference CommonMark output for equivalence on the supported subset.
  *
- * Only intentional, safe differences are normalized away:
- * - heading `id` slugs (the hosted renderer adds anchor ids the reference omits)
- * - the `REPO_BLOB_URL` rewrite the hosted renderer applies to relative links
- * - insignificant whitespace (a softbreak `\n` vs a joined space, indentation)
+ * Only intentional, safe differences are normalized away, and each is scoped to
+ * where it legitimately occurs so a genuine divergence is not masked into a
+ * false `matches`:
+ * - heading anchor `id`s only — the slug is stripped from `<h1>`–`<h6>` opening
+ *   tags (the hosted renderer adds them; the reference omits them). An `id` on
+ *   any other element survives and forces a mismatch.
+ * - the relative→`REPO_BLOB_URL` href rewrite only — the blob-URL prefix is
+ *   removed solely when it opens an `href="…"` destination value (the hosted
+ *   renderer rewrites relative links to their repository blob URL; the
+ *   reference keeps them relative). The blob URL appearing anywhere else — as
+ *   literal text, or prepended to a non-relative destination — survives.
+ * - insignificant whitespace (a softbreak `\n` vs a joined space, indentation).
  *
  * Anything semantic — a dropped `<br>`, a construct emitted as literal text
  * instead of markup, emphasis, an entity rendered as source — survives and
@@ -33,9 +41,9 @@ export function renderReferenceHtml(markdown: string): string {
  */
 export function canonicalizeHtml(html: string): string {
   return html
-    .replace(/\sid="[^"]*"/g, "")
-    .split(REPO_BLOB_URL)
-    .join("")
+    .replace(/(<h[1-6])\s+id="[^"]*"/g, "$1")
+    .split(`href="${REPO_BLOB_URL}`)
+    .join('href="')
     .replace(/>\s+</g, "><")
     .replace(/\s+/g, " ")
     .trim();
@@ -73,4 +81,27 @@ export function compareToCommonMark(
   return constrained === reference
     ? { kind: "matches" }
     : { kind: "diverges", constrained, reference };
+}
+
+/**
+ * Assert the constrained renderer produced output equal to reference
+ * CommonMark. On a `diverges` result the canonical HTML strings are compared
+ * first so the failure surfaces a readable diff rather than a bare enum
+ * mismatch; `matches` is then the real assertion.
+ */
+export function expectMatchesCommonMark(comparison: CommonMarkComparison): void {
+  if (comparison.kind === "diverges") {
+    expect(comparison.constrained).toBe(comparison.reference);
+  }
+  expect(comparison.kind).toBe("matches");
+}
+
+/**
+ * Assert the constrained renderer refused the input (fail-closed) rather than
+ * silently mis-rendering it. `diverges` — accepted but rendered differently
+ * from CommonMark — is the drift bug this must never allow.
+ */
+export function expectRejectedByOracle(comparison: CommonMarkComparison): void {
+  expect(comparison.kind).not.toBe("diverges");
+  expect(comparison.kind).toBe("rejected");
 }

@@ -2,7 +2,11 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { readJson, root } from "../contract/support";
-import { compareToCommonMark } from "../support/commonmark-oracle";
+import {
+  compareToCommonMark,
+  expectMatchesCommonMark,
+  expectRejectedByOracle,
+} from "../support/commonmark-oracle";
 
 type PrivacyPageModule = {
   HOSTED_PRIVACY_URL: string;
@@ -200,11 +204,7 @@ describe("privacy page differential CommonMark oracle", () => {
   it("renders the shipped PRIVACY.md identically to reference CommonMark", async () => {
     const { renderMarkdown } = await privacyPageModule();
 
-    const comparison = compareToCommonMark(read("PRIVACY.md"), renderMarkdown);
-    if (comparison.kind === "diverges") {
-      expect(comparison.constrained).toBe(comparison.reference);
-    }
-    expect(comparison.kind).toBe("matches");
+    expectMatchesCommonMark(compareToCommonMark(read("PRIVACY.md"), renderMarkdown));
   });
 
   it.each(SUPPORTED_MARKDOWN_SAMPLES)(
@@ -212,11 +212,9 @@ describe("privacy page differential CommonMark oracle", () => {
     async (_name, markdown) => {
       const { renderMarkdown } = await privacyPageModule();
 
-      const comparison = compareToCommonMark(`# Privacy Policy\n\n${markdown}\n`, renderMarkdown);
-      if (comparison.kind === "diverges") {
-        expect(comparison.constrained).toBe(comparison.reference);
-      }
-      expect(comparison.kind).toBe("matches");
+      expectMatchesCommonMark(
+        compareToCommonMark(`# Privacy Policy\n\n${markdown}\n`, renderMarkdown),
+      );
     },
   );
 
@@ -228,9 +226,9 @@ describe("privacy page differential CommonMark oracle", () => {
       // Fail-closed invariant: the renderer either rejects the construct or
       // renders it exactly as CommonMark. A `diverges` outcome — accepted but
       // rendered differently — is the drift bug this whole class must prevent.
-      const comparison = compareToCommonMark(`# Privacy Policy\n\n${markdown}\n`, renderMarkdown);
-      expect(comparison.kind).not.toBe("diverges");
-      expect(comparison.kind).toBe("rejected");
+      expectRejectedByOracle(
+        compareToCommonMark(`# Privacy Policy\n\n${markdown}\n`, renderMarkdown),
+      );
     },
   );
 });
