@@ -93,6 +93,10 @@ describe("privacy page generator", () => {
     ["HTML entity reference", "Copyright &copy; 2026"],
     ["ATX closing hash sequence", "## Contact ##"],
     ["tab after list marker", "-\titem"],
+    ["backslash escape in link destination", "[Policy](docs\\*terms.md)"],
+    ["entity reference in link label", "[Policy &copy;](https://example.com)"],
+    ["backslash escape in link label", "[Policy\\!](https://example.com)"],
+    ["entity reference in link title", '[Policy](https://example.com "legal &copy;")'],
   ])("rejects unsupported Markdown: %s", async (_name, markdown) => {
     const { renderMarkdown } = await privacyPageModule();
 
