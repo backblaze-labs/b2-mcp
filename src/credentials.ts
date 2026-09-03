@@ -294,6 +294,39 @@ function envMaterial(prefix = "B2"): CredentialMaterial {
   };
 }
 
+let warnedRemovedCredentialEnvAliases = false;
+
+// Retired credential env names, checked only to warn that they are ignored — not
+// read as configuration. Kept as string data (not `process.env.NAME` reads) so
+// they are not classified as documented runtime configuration.
+const REMOVED_CREDENTIAL_ENV_ALIASES = ["B2_APP_KEY_ID", "B2_APP_KEY"] as const;
+
+/**
+ * Warn once at startup when a removed credential alias env var is still set.
+ *
+ * @remarks
+ * `B2_APP_KEY_ID` / `B2_APP_KEY` are no longer read (issue #386). Without this
+ * signal an operator whose deploy manifest still exports them gets a silent
+ * behavior change: the legacy separate-S3-key override is dropped and the
+ * application key signs S3 directly. The guard fires once so HTTP request paths
+ * do not spam logs.
+ */
+export function warnRemovedCredentialEnvAliases(): void {
+  if (warnedRemovedCredentialEnvAliases) return;
+  warnedRemovedCredentialEnvAliases = true;
+  const stillSet = REMOVED_CREDENTIAL_ENV_ALIASES.some((name) => process.env[name] !== undefined);
+  if (stillSet) {
+    logger.warn(
+      "config.removed_alias: B2_APP_KEY_ID/B2_APP_KEY are no longer read and are ignored. Use a non-master B2_APPLICATION_KEY_ID/B2_APPLICATION_KEY; the separate-S3-key override has been removed.",
+    );
+  }
+}
+
+/** Reset the one-time removed-alias warning guard. Test-only. */
+export function _resetRemovedCredentialEnvAliasWarning(): void {
+  warnedRemovedCredentialEnvAliases = false;
+}
+
 function valueFromHeader(
   headers: http.IncomingHttpHeaders,
   names: readonly string[],
@@ -386,6 +419,7 @@ export class StdioEnvCredentialProvider implements CredentialProvider {
    * @throws CredentialResolutionError when required credentials are missing.
    */
   resolve(): CredentialResolution {
+    warnRemovedCredentialEnvAliases();
     const config = configFromMaterial(envMaterial(), {
       transport: "stdio",
       allowLocalFiles: process.env.B2_ALLOW_LOCAL_FILES !== "false",
@@ -710,6 +744,7 @@ export function validateHttpCredentialConfiguration(
  * @throws Error when output format, secret sink, or credential mode is invalid.
  */
 export function validateHttpStartupConfiguration(): void {
+  warnRemovedCredentialEnvAliases();
   resolveOutputFormat();
   resolveSecretSinkConfig({ transport: "http", preflight: true });
   getHttpCredentialMode();

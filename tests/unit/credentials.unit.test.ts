@@ -1,4 +1,5 @@
 import {
+  _resetRemovedCredentialEnvAliasWarning,
   CredentialResolutionError,
   fingerprintConfig,
   getHttpCredentialMode,
@@ -11,7 +12,9 @@ import {
   validateHttpCredentialConfiguration,
   validateHttpStartupConfiguration,
   verificationFingerprintConfig,
+  warnRemovedCredentialEnvAliases,
 } from "../../src/credentials";
+import { logger } from "../../src/utils/logger";
 import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -514,5 +517,37 @@ describe("credential fingerprints and header detection", () => {
     expect(hasCredentialHeaders({ "x-b2-key-id": "k" })).toBe(false);
     expect(hasCredentialHeaders({ "x-b2-app-key-id": "k" })).toBe(false);
     expect(hasCredentialHeaders({ authorization: "Bearer t" })).toBe(false);
+  });
+});
+
+describe("removed credential env alias warning", () => {
+  beforeEach(() => {
+    _resetRemovedCredentialEnvAliasWarning();
+  });
+
+  it("warns once when a removed B2_APP_KEY_* env var is still set", () => {
+    process.env.B2_APP_KEY_ID = "still-exported-id";
+    process.env.B2_APP_KEY = "still-exported-secret";
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+
+    warnRemovedCredentialEnvAliases();
+    warnRemovedCredentialEnvAliases();
+
+    const removedAliasWarnings = warn.mock.calls.filter((call) =>
+      String(call[0]).includes("B2_APP_KEY_ID/B2_APP_KEY"),
+    );
+    expect(removedAliasWarnings).toHaveLength(1);
+    warn.mockRestore();
+  });
+
+  it("does not warn when no removed alias env var is present", () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+
+    warnRemovedCredentialEnvAliases();
+
+    expect(
+      warn.mock.calls.some((call) => String(call[0]).includes("removed_alias")),
+    ).toBe(false);
+    warn.mockRestore();
   });
 });

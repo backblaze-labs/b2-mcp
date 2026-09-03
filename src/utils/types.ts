@@ -47,9 +47,14 @@ export interface B2Config {
   applicationKeyId: string;
   /** Secret application key paired with {@link B2Config.applicationKeyId}. */
   applicationKey: string;
-  /** Deprecated legacy alias. Tool-serving S3 clients use applicationKeyId/applicationKey. */
+  /**
+   * S3-signing key id. Always an exact mirror of {@link B2Config.applicationKeyId}:
+   * the separate-S3-key override was removed (issue #386), so this can no longer
+   * diverge from the application key. Retained as the S3 signer's input; a future
+   * cleanup may inline it into `applicationKeyId`.
+   */
   appKeyId: string;
-  /** Deprecated legacy key secret paired with {@link B2Config.appKeyId}. */
+  /** S3-signing key secret. Always an exact mirror of {@link B2Config.applicationKey}. */
   appKey: string;
   /**
    * Optional master application key, used ONLY by the Partner API

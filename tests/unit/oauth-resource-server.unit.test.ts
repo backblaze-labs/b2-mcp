@@ -2438,6 +2438,35 @@ describe("OAuth resource metadata", () => {
     }
   });
 
+  it("warns and ignores a removed introspection-cache alias env var", () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+    // A tuned legacy alias must not silently revert cache behavior to defaults.
+    const config = loadOAuthResourceServerConfig({
+      B2_OAUTH_DANGEROUSLY_ALLOW_INSECURE_ISSUER_URL: "true",
+      B2_MCP_PUBLIC_URL: baseConfig.publicUrl,
+      B2_OAUTH_ISSUER: baseConfig.issuer,
+      B2_OAUTH_AUTHORIZATION_ENDPOINT: baseConfig.authorizationEndpoint,
+      B2_OAUTH_TOKEN_ENDPOINT: baseConfig.tokenEndpoint,
+      B2_OAUTH_INTROSPECTION_ENDPOINT: baseConfig.introspectionEndpoint,
+      B2_OAUTH_INTROSPECTION_CLIENT_ID: baseConfig.introspectionClientId,
+      B2_OAUTH_INTROSPECTION_CLIENT_SECRET: baseConfig.introspectionClientSecret,
+      B2_OAUTH_RESOURCE: baseConfig.resource,
+      B2_OAUTH_AUDIENCE: baseConfig.audience,
+      B2_OAUTH_INTROSPECTION_CACHE_TTL_SECONDS: "120",
+    });
+
+    // The removed alias is ignored: TTL falls back to the default, not 120.
+    expect(config.tokenCacheTtlSeconds).not.toBe(120);
+    expect(
+      warn.mock.calls.some((call) =>
+        String(call[0]).includes(
+          "B2_OAUTH_INTROSPECTION_CACHE_TTL_SECONDS is no longer read",
+        ),
+      ),
+    ).toBe(true);
+    warn.mockRestore();
+  });
+
   it("loads JWKS-only static configuration without introspection credentials", () => {
     const config = loadOAuthResourceServerConfig({
       B2_OAUTH_DANGEROUSLY_ALLOW_INSECURE_ISSUER_URL: "true",

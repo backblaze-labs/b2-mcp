@@ -72,6 +72,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `X-B2-Master-Key-Id`, `X-B2-Master-Key`) are gone → use the canonical
     `X-B2-MCP-*` form (`X-B2-MCP-Key-Id`, `X-B2-MCP-Key`,
     `X-B2-MCP-Master-Key-Id`, `X-B2-MCP-Master-Key`).
+  - **Rollout:** migrate clients to `X-B2-MCP-*` before deploying. During a
+    rolling deploy, old replicas still accept the short headers while new
+    replicas reject them, so legacy-header requests can intermittently fail for
+    the duration of the rollout. On startup the server now logs a `warn`-level
+    `config.removed_alias` message when a removed alias env var
+    (`B2_APP_KEY_ID` / `B2_APP_KEY`, `B2_OAUTH_INTROSPECTION_CACHE_*`) is still
+    set, naming the canonical replacement. Log-redaction sets still scrub the
+    retired header/env names for the migration window so a still-in-flight
+    legacy secret is never written to logs in cleartext.
 
 ## [0.2.0] - 2026-09-01
 

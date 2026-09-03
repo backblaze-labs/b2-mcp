@@ -393,9 +393,37 @@ function ensureFiniteNonNegative(value: number, label: string): void {
  * const verifier = new OAuthBearerTokenVerifier({ config });
  * ```
  */
+const REMOVED_INTROSPECTION_CACHE_ALIASES: ReadonlyArray<readonly [string, string]> = [
+  ["B2_OAUTH_INTROSPECTION_CACHE_MAX_ENTRIES", "B2_OAUTH_TOKEN_CACHE_MAX_ENTRIES"],
+  ["B2_OAUTH_INTROSPECTION_CACHE_TTL_SECONDS", "B2_OAUTH_TOKEN_CACHE_TTL_SECONDS"],
+  ["B2_OAUTH_INTROSPECTION_CACHE_SKEW_SECONDS", "B2_OAUTH_TOKEN_CACHE_SKEW_SECONDS"],
+];
+
+/**
+ * Warn when a removed OAuth introspection-cache alias env var is still set.
+ *
+ * @remarks
+ * These aliases are no longer read (issue #386). Without a warning an operator
+ * whose deploy manifest still tunes them silently reverts to the token-cache
+ * defaults, changing introspection call volume and cache pressure in
+ * production. The message names the canonical replacement.
+ *
+ * @param env - Environment to inspect.
+ */
+function warnRemovedIntrospectionCacheAliases(env: NodeJS.ProcessEnv): void {
+  for (const [removed, canonical] of REMOVED_INTROSPECTION_CACHE_ALIASES) {
+    if (env[removed] !== undefined) {
+      logger.warn(
+        `config.removed_alias: ${removed} is no longer read and is ignored. Use ${canonical} instead.`,
+      );
+    }
+  }
+}
+
 export function loadOAuthResourceServerConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): OAuthResourceServerConfig {
+  warnRemovedIntrospectionCacheAliases(env);
   const dangerouslyAllowInsecureIssuerUrl =
     env[OAUTH_ENV.dangerouslyAllowInsecureIssuerUrl] === "true";
   const dangerouslyAllowUnauthenticatedIntrospection =
