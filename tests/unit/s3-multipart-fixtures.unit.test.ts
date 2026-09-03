@@ -31,6 +31,7 @@ describe("s3 multipart tools with deterministic S3 fake", () => {
   it("captures create, presign, complete, list, and copy-part requests", async () => {
     s3.respond("listMultipartUploads", {
       uploads: [{ Key: "large.bin", UploadId: "upload-1" }],
+      commonPrefixes: [{ Prefix: "group/" }],
       isTruncated: true,
       nextKeyMarker: "large.bin",
       nextUploadIdMarker: "upload-1",
@@ -94,6 +95,7 @@ describe("s3 multipart tools with deterministic S3 fake", () => {
       ),
     ).toMatchObject({
       uploads: [{ Key: "large.bin", UploadId: "upload-1" }],
+      commonPrefixes: [{ Prefix: "group/" }],
       isTruncated: true,
       nextKeyMarker: "large.bin",
     });

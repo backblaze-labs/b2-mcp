@@ -19,16 +19,16 @@ import type { B2S3PeerClient } from "./aws-sdk-adapter.js";
  * omitted for this reason.
  */
 const PUT_OBJECT_CONFIRM_DESC =
-  "Confirm minting a PutObject presigned URL bearer capability that can create or overwrite object data. Required when operation is PutObject and the server destructive policy is 'confirm' (the default).";
+  "Fallback confirmation for minting a PutObject presigned URL bearer capability when the effective server destructive policy is 'confirm' and MCP elicitation cannot run.";
 
 function operationDescription(allowGetObjectUrl: boolean, allowPutObjectUrl: boolean): string {
   if (allowGetObjectUrl && allowPutObjectUrl) {
-    return "Generate a short-lived presigned URL bearer capability for one B2 object — GetObject (download) or PutObject (upload). The response includes the URL, operation, expiresIn, and expiresAt; treat the URL as sensitive until it expires. This is the preferred path for moving real object data: bytes flow directly between the client/worker and B2 and never pass through the MCP server. Note: presigned POST (browser form uploads) is NOT supported by B2; use a PutObject URL instead.";
+    return "Generate a short-lived presigned URL bearer capability for one B2 object — GetObject (download) or PutObject (upload). Prefer this for single-object transfers; use s3_create_multipart_upload and s3_presign_upload_part for multipart uploads. The response includes the URL, operation, expiresIn, and expiresAt; treat the URL as sensitive until it expires. This is the preferred path for moving real object data: bytes flow directly between the client/worker and B2 and never pass through the MCP server. Note: presigned POST (browser form uploads) is NOT supported by B2; use a PutObject URL instead.";
   }
   if (allowPutObjectUrl) {
-    return "Generate a short-lived PutObject presigned URL bearer capability for uploading one B2 object. The response includes the URL, operation, expiresIn, and expiresAt; treat the URL as sensitive until it expires. This is the preferred upload path for real object data because bytes flow directly between the client/worker and B2 and never pass through the MCP server.";
+    return "Generate a short-lived PutObject presigned URL bearer capability for uploading one B2 object. Prefer this for single-object uploads; use s3_create_multipart_upload and s3_presign_upload_part for multipart uploads. The response includes the URL, operation, expiresIn, and expiresAt; treat the URL as sensitive until it expires. This is the preferred upload path for real object data because bytes flow directly between the client/worker and B2 and never pass through the MCP server.";
   }
-  return "Generate a short-lived GetObject presigned URL bearer capability for downloading one B2 object. The response includes the URL, operation, expiresIn, and expiresAt; treat the URL as sensitive until it expires. Read-only profiles expose download URLs only.";
+  return "Generate a short-lived GetObject presigned URL bearer capability for downloading one B2 object. Prefer this for single-object downloads; multipart uploads use s3_create_multipart_upload and s3_presign_upload_part. The response includes the URL, operation, expiresIn, and expiresAt; treat the URL as sensitive until it expires. Read-only profiles expose download URLs only.";
 }
 
 function operationSchema(allowGetObjectUrl: boolean, allowPutObjectUrl: boolean) {

@@ -317,4 +317,26 @@ describe("B2S3PeerClient object data-plane behavior", () => {
     });
     s3.destroy();
   });
+
+  it("normalizes multipart upload common prefixes", async () => {
+    const s3 = clientWithHandler(vi.fn());
+    vi.spyOn(s3 as any, "sendCommand").mockResolvedValueOnce({
+      Uploads: [{ Key: "folder/file.bin", UploadId: "upload-1" }],
+      CommonPrefixes: [{ Prefix: "folder/" }, {}],
+      IsTruncated: true,
+      NextKeyMarker: "folder/file.bin",
+      NextUploadIdMarker: "upload-1",
+    });
+
+    await expect(
+      s3.listMultipartUploads({ bucket: "b", maxUploads: 1000, delimiter: "/" }),
+    ).resolves.toEqual({
+      uploads: [{ Key: "folder/file.bin", UploadId: "upload-1" }],
+      commonPrefixes: [{ Prefix: "folder/" }],
+      isTruncated: true,
+      nextKeyMarker: "folder/file.bin",
+      nextUploadIdMarker: "upload-1",
+    });
+    s3.destroy();
+  });
 });

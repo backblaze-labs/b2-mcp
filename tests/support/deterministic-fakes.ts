@@ -20,9 +20,9 @@ import type {
   B2S3LifecycleRule,
   B2S3ListObjectsV2Options,
   B2S3ListObjectsV2Result,
+  B2S3ListMultipartUploadsResult,
   B2S3ListObjectVersionsOptions,
   B2S3ListObjectVersionsResult,
-  B2S3MultipartUploadSummary,
   B2S3PartSummary,
   B2S3PeerClient,
   B2S3PresignObjectUrlOptions,
@@ -423,14 +423,10 @@ export class DeterministicS3ClientFake implements DeterministicS3PeerClient {
     maxUploads: number;
     keyMarker?: string;
     uploadIdMarker?: string;
-  }): Promise<{
-    uploads: B2S3MultipartUploadSummary[];
-    isTruncated?: boolean;
-    nextKeyMarker?: string;
-    nextUploadIdMarker?: string;
-  }> {
+  }): Promise<B2S3ListMultipartUploadsResult> {
     return this.next("listMultipartUploads", input, {
       uploads: [],
+      commonPrefixes: [],
       isTruncated: false,
     });
   }

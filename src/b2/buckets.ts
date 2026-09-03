@@ -3,10 +3,15 @@
  *
  * @packageDocumentation
  */
-import type { ToolRegistrar } from "../mcp.js";
+
 import * as dns from "node:dns/promises";
 import { isIP } from "node:net";
 import { z } from "zod";
+import type { ToolRegistrar } from "../mcp.js";
+import { checkDestructive } from "../utils/destructive-gate.js";
+import { badRequest, badRequestError, toolError, toolJson } from "../utils/errors.js";
+import { isTestRuntime } from "../utils/runtime.js";
+import { B2Config } from "../utils/types.js";
 import {
   B2Client,
   type BucketFilters,
@@ -16,10 +21,6 @@ import {
   type ServerSideEncryptionInput,
   type UpdateBucketOptions,
 } from "./client.js";
-import { B2Config } from "../utils/types.js";
-import { badRequest, badRequestError, toolJson, toolError } from "../utils/errors.js";
-import { checkDestructive } from "../utils/destructive-gate.js";
-import { isTestRuntime } from "../utils/runtime.js";
 
 type NotificationCustomHeaders = EventNotificationRuleInput["targetConfiguration"]["customHeaders"];
 
@@ -123,8 +124,10 @@ const BUCKET_INFO_MAX_PAIRS = 10;
 const BUCKET_INFO_KEY_MAX_BYTES = 50;
 const BUCKET_INFO_VALUES_MAX_BYTES = 10_000;
 const BUCKET_INFO_KEY_PATTERN = /^[A-Za-z0-9._`~!#$%^&*'|+-]+$/;
-const BUCKET_INFO_DESCRIPTION =
+const BUCKET_INFO_BASE_DESCRIPTION =
   "Custom metadata: <=10 pairs. Keys: 1-50 UTF-8 bytes, chars A-Z a-z 0-9 . _ ` ~ ! # $ % ^ & * ' | + -, no b2- prefix. Values total <=10,000 UTF-8 bytes.";
+const CREATE_BUCKET_INFO_DESCRIPTION = `${BUCKET_INFO_BASE_DESCRIPTION} Omit to create the bucket without custom metadata.`;
+const UPDATE_BUCKET_INFO_DESCRIPTION = `${BUCKET_INFO_BASE_DESCRIPTION} Omit to leave current metadata unchanged.`;
 
 const CORS_RULES_MAX_COUNT = 100;
 const CORS_RULE_MAX_BYTES = 1_000;
@@ -132,8 +135,10 @@ const CORS_FIELD_MAX_ITEMS = 100;
 const CORS_STRING_MAX_CHARS = CORS_RULE_MAX_BYTES - 1;
 const CORS_RULE_NAME_PATTERN = /^[A-Za-z0-9-]+$/;
 const CORS_RULE_NAME_DESCRIPTION = "Unique name: 6-63 letters, digits, hyphens; no b2- prefix.";
-const CORS_RULES_DESCRIPTION =
+const CORS_RULES_BASE_DESCRIPTION =
   "CORS rules: <=100. allowedOrigins/allowedOperations require 1-100 non-empty strings; allowedHeaders/exposeHeaders allow <=100. Strings <=999 chars. Per-rule UTF-8 total <1,000. Names unique.";
+const CREATE_CORS_RULES_DESCRIPTION = `${CORS_RULES_BASE_DESCRIPTION} Omit to create the bucket without CORS rules.`;
+const UPDATE_CORS_RULES_DESCRIPTION = `${CORS_RULES_BASE_DESCRIPTION} On update, provided rules replace the existing set; omit to leave unchanged.`;
 
 const bucketInfoKeySchema = z
   .string()
@@ -145,13 +150,18 @@ const bucketInfoKeySchema = z
   });
 const bucketInfoValueSchema = z.string().max(BUCKET_INFO_VALUES_MAX_BYTES);
 
-const bucketInfoSchema = z
-  .record(bucketInfoKeySchema, bucketInfoValueSchema)
-  .superRefine((value, ctx) => {
-    const message = bucketInfoInputError(value);
-    if (message) ctx.addIssue({ code: "custom", message });
-  })
-  .describe(BUCKET_INFO_DESCRIPTION);
+function bucketInfoSchema(description: string) {
+  return z
+    .record(bucketInfoKeySchema, bucketInfoValueSchema)
+    .superRefine((value, ctx) => {
+      const message = bucketInfoInputError(value);
+      if (message) ctx.addIssue({ code: "custom", message });
+    })
+    .describe(description);
+}
+
+const createBucketInfoSchema = bucketInfoSchema(CREATE_BUCKET_INFO_DESCRIPTION);
+const updateBucketInfoSchema = bucketInfoSchema(UPDATE_BUCKET_INFO_DESCRIPTION);
 
 const corsRuleNameSchema = z
   .string()
@@ -176,14 +186,73 @@ const corsRuleSchema = z.object({
   maxAgeSeconds: z.number(),
 });
 
-const corsRulesSchema = z
-  .array(corsRuleSchema)
-  .max(CORS_RULES_MAX_COUNT)
-  .superRefine((value, ctx) => {
-    const message = corsRulesInputError(value);
-    if (message) ctx.addIssue({ code: "custom", message });
-  })
-  .describe(CORS_RULES_DESCRIPTION);
+function corsRulesSchema(description: string) {
+  return z
+    .array(corsRuleSchema)
+    .max(CORS_RULES_MAX_COUNT)
+    .superRefine((value, ctx) => {
+      const message = corsRulesInputError(value);
+      if (message) ctx.addIssue({ code: "custom", message });
+    })
+    .describe(description);
+}
+
+const createCorsRulesSchema = corsRulesSchema(CREATE_CORS_RULES_DESCRIPTION);
+const updateCorsRulesSchema = corsRulesSchema(UPDATE_CORS_RULES_DESCRIPTION);
+
+const lifecycleRuleSchema = z.object({
+  fileNamePrefix: z
+    .string()
+    .describe("Object-key prefix this rule matches; use an empty string to match the bucket."),
+  daysFromHidingToDeleting: z
+    .number()
+    .optional()
+    .describe("Optional days after a file is hidden before B2 permanently deletes it; minimum 1."),
+  daysFromUploadingToHiding: z
+    .number()
+    .optional()
+    .describe("Optional days after upload before B2 hides the current file version; minimum 1."),
+  daysFromStartingToCancelingUnfinishedLargeFiles: z
+    .number()
+    .optional()
+    .describe("Optional days before B2 cancels unfinished large-file uploads; minimum 1."),
+});
+
+const createLifecycleRulesSchema = z
+  .array(lifecycleRuleSchema)
+  .optional()
+  .describe(
+    "Optional B2 lifecycle rules applied after creation. Use for automatic hiding, deletion of hidden versions, or cancellation of unfinished large-file uploads; use s3_put_bucket_lifecycle only when you need the S3 lifecycle API shape.",
+  );
+
+const updateLifecycleRulesSchema = z
+  .array(lifecycleRuleSchema)
+  .optional()
+  .describe(
+    "When provided, replaces the bucket's B2 lifecycle rule set; omit to leave unchanged. Rules that delete hidden versions are destructive in effect and are governed by the configured destructive policy.",
+  );
+
+function defaultServerSideEncryptionSchema(description: string, modeDescription: string) {
+  return z
+    .object({
+      mode: z.enum(["none", "SSE-B2"]).describe(modeDescription),
+      algorithm: z
+        .string()
+        .optional()
+        .describe("Encryption algorithm. B2 supports AES256 for SSE-B2."),
+    })
+    .optional()
+    .describe(description);
+}
+
+const createDefaultServerSideEncryptionSchema = defaultServerSideEncryptionSchema(
+  "Optional default server-side encryption for new files in this bucket. Omit to create the bucket without a bucket default encryption setting.",
+  "Use SSE-B2 to make AES256 the bucket default; use none for no bucket default encryption.",
+);
+const updateDefaultServerSideEncryptionSchema = defaultServerSideEncryptionSchema(
+  "Default server-side encryption for new files in this bucket. Omit on update to leave unchanged.",
+  "Use SSE-B2 to make AES256 the bucket default; use none to clear the bucket default.",
+);
 
 /** DNS resolver signature used by bucket webhook target validation. */
 type WebhookDnsLookup = (host: string) => Promise<Array<{ address: string }>>;
@@ -656,34 +725,22 @@ export function registerBucketTools(
     "b2_create_bucket",
     {
       description:
-        "Create a new B2 bucket. Bucket names must be globally unique, 6-63 characters, and contain letters, digits, hyphens, and periods (names are not case-sensitive and cannot start with 'b2-').",
+        "Create a persistent B2 bucket with optional metadata, CORS, lifecycle, default encryption, and Object Lock enablement. Use for initial provisioning with a key that has writeBuckets; use b2_update_bucket for later settings changes and s3_head_bucket to check S3 reachability. Bucket names are globally unique, case-insensitive, 6-63 characters, letters/digits/hyphens/periods, and cannot start with 'b2-', begin/end with a period, contain '..', or look like an IPv4 address.",
       inputSchema: {
-        bucketName: z.string().describe("The name for the new bucket. Must be globally unique."),
+        bucketName: z
+          .string()
+          .describe(
+            "Globally unique bucket name: 6-63 characters, letters/digits/hyphens/periods, case-insensitive, no b2- prefix, no leading/trailing period, no '..', and not an IPv4 address.",
+          ),
         bucketType: z
           .enum(["allPublic", "allPrivate"])
           .describe(
-            "allPublic allows unauthenticated downloads; allPrivate requires authorization.",
+            "Visibility for file downloads: allPrivate requires authorization; allPublic makes objects world-readable by URL.",
           ),
-        bucketInfo: bucketInfoSchema.optional(),
-        corsRules: corsRulesSchema.optional(),
-        lifecycleRules: z
-          .array(
-            z.object({
-              fileNamePrefix: z.string(),
-              daysFromHidingToDeleting: z.number().optional(),
-              daysFromUploadingToHiding: z.number().optional(),
-              daysFromStartingToCancelingUnfinishedLargeFiles: z.number().optional(),
-            }),
-          )
-          .optional()
-          .describe("Lifecycle rules for automatic file management."),
-        defaultServerSideEncryption: z
-          .object({
-            mode: z.enum(["none", "SSE-B2"]),
-            algorithm: z.string().optional(),
-          })
-          .optional()
-          .describe("Default server-side encryption for new files in this bucket."),
+        bucketInfo: createBucketInfoSchema.optional(),
+        corsRules: createCorsRulesSchema.optional(),
+        lifecycleRules: createLifecycleRulesSchema,
+        defaultServerSideEncryption: createDefaultServerSideEncryptionSchema,
         fileLockEnabled: z
           .boolean()
           .optional()
@@ -730,7 +787,7 @@ export function registerBucketTools(
           .boolean()
           .optional()
           .describe(
-            "Confirm this destructive/irreversible operation. Required when the server destructive policy is 'confirm' (the default).",
+            "Fallback confirmation for this destructive/irreversible operation when the effective server destructive policy is 'confirm' and MCP elicitation cannot run.",
           ),
       },
     },
@@ -751,52 +808,60 @@ export function registerBucketTools(
     "b2_update_bucket",
     {
       description:
-        "Update the settings of an existing B2 bucket, including type, CORS rules, lifecycle rules, encryption, and replication configuration.",
+        "Update persistent settings on an existing B2 bucket: visibility, metadata, CORS, lifecycle, default encryption, replication, Object Lock, and default retention. Requires the writeBuckets capability. Use b2_list_buckets first to inspect the current bucketId/revision and use ifRevisionIs for safer retries; use s3_put_bucket_lifecycle only when you specifically need the S3 lifecycle API shape. Gated cases: bucketType allPublic, fileLockEnabled false, defaultRetention.mode null, lifecycleRules with daysFromHidingToDeleting, and any replicationConfiguration update.",
       inputSchema: {
-        bucketId: z.string().describe("The ID of the bucket to update."),
-        bucketType: z.enum(["allPublic", "allPrivate"]).optional(),
-        bucketInfo: bucketInfoSchema.optional(),
-        corsRules: corsRulesSchema.optional(),
-        lifecycleRules: z
-          .array(
-            z.object({
-              fileNamePrefix: z.string(),
-              daysFromHidingToDeleting: z.number().optional(),
-              daysFromUploadingToHiding: z.number().optional(),
-              daysFromStartingToCancelingUnfinishedLargeFiles: z.number().optional(),
-            }),
-          )
-          .optional(),
-        defaultServerSideEncryption: z
-          .object({
-            mode: z.enum(["none", "SSE-B2"]),
-            algorithm: z.string().optional(),
-          })
-          .optional(),
+        bucketId: z.string().describe("The exact bucket ID to update, not the bucket name."),
+        bucketType: z
+          .enum(["allPublic", "allPrivate"])
+          .optional()
+          .describe(
+            "Optional visibility change. allPublic makes objects world-readable by URL and is governed by the configured destructive policy; omit to leave unchanged.",
+          ),
+        bucketInfo: updateBucketInfoSchema.optional(),
+        corsRules: updateCorsRulesSchema.optional(),
+        lifecycleRules: updateLifecycleRulesSchema,
+        defaultServerSideEncryption: updateDefaultServerSideEncryptionSchema,
         replicationConfiguration: z
           .object({
             asReplicationSource: z
               .object({
                 replicationRules: z.array(
                   z.object({
-                    replicationRuleName: z.string(),
-                    destinationBucketId: z.string(),
-                    fileNamePrefix: z.string().optional(),
-                    includeExistingFiles: z.boolean().optional(),
-                    isEnabled: z.boolean(),
-                    priority: z.number(),
+                    replicationRuleName: z.string().describe("Unique name for this rule."),
+                    destinationBucketId: z
+                      .string()
+                      .describe("Destination bucket ID that receives replicated objects."),
+                    fileNamePrefix: z
+                      .string()
+                      .optional()
+                      .describe("Optional object-key prefix to replicate; omit for all objects."),
+                    includeExistingFiles: z
+                      .boolean()
+                      .optional()
+                      .describe("If true, B2 also queues existing matching files for replication."),
+                    isEnabled: z.boolean().describe("Whether this replication rule is active."),
+                    priority: z.number().describe("Rule priority used by B2 when rules overlap."),
                   }),
                 ),
-                sourceApplicationKeyId: z.string(),
+                sourceApplicationKeyId: z
+                  .string()
+                  .describe("Application key ID B2 uses as the replication source credential."),
               })
+              .describe("Source replication settings. Provided rules replace the source config.")
               .optional(),
             asReplicationDestination: z
               .object({
-                sourceToDestinationKeyMapping: z.record(z.string(), z.string()),
+                sourceToDestinationKeyMapping: z
+                  .record(z.string(), z.string())
+                  .describe("Mapping from source key IDs to destination key IDs."),
               })
+              .describe("Destination replication settings for buckets receiving replicated data.")
               .optional(),
           })
-          .optional(),
+          .optional()
+          .describe(
+            "Optional replication configuration. Omit to leave unchanged; any provided value changes persistent copy behavior and is confirmation-gated.",
+          ),
         fileLockEnabled: z
           .boolean()
           .optional()
@@ -834,7 +899,7 @@ export function registerBucketTools(
           .boolean()
           .optional()
           .describe(
-            "Confirm a destructive change (making the bucket public, weakening Object Lock/lifecycle, or changing replication). Required when the server destructive policy is 'confirm' (the default); non-destructive updates do not need it.",
+            "Fallback confirmation for a gated bucket update when the effective server destructive policy is 'confirm' and MCP elicitation cannot run. Gated cases: bucketType allPublic, fileLockEnabled false, defaultRetention.mode null, lifecycleRules with daysFromHidingToDeleting, or any replicationConfiguration. Non-gated updates do not need it.",
           ),
       },
     },
@@ -874,9 +939,10 @@ export function registerBucketTools(
   server.registerTool(
     "b2_get_bucket_notification_rules",
     {
-      description: "Get the event notification rules (webhooks) configured for a B2 bucket.",
+      description:
+        "Read the B2 event-notification webhook rules for a bucket. Use before b2_set_bucket_notification_rules to diff or preserve existing rules, because set replaces the complete rule set. Requires readBucketNotifications or writeBucketNotifications, has no side effects, and redacts webhook URL host/path/query, HMAC secrets, and custom-header values in the MCP response.",
       inputSchema: {
-        bucketId: z.string().describe("The bucket ID to get notification rules for."),
+        bucketId: z.string().describe("Exact bucket ID whose notification rules should be read."),
       },
     },
     async (args) => {
@@ -894,41 +960,65 @@ export function registerBucketTools(
     "b2_set_bucket_notification_rules",
     {
       description:
-        "Set event notification rules (webhooks) for a B2 bucket. Replaces any existing rules.",
+        "Replace the complete B2 event-notification webhook rule set for a bucket. Use b2_get_bucket_notification_rules first and submit the full desired rule set; this is not a patch or append API. Requires writeBucketNotifications and destructive confirmation by policy. Each webhook URL must be a public HTTPS endpoint, and echoed URL details, HMAC secrets, and custom-header values are redacted from the response.",
       inputSchema: {
-        bucketId: z.string().describe("The bucket ID to set notification rules for."),
-        eventNotificationRules: z.array(
-          z.object({
-            name: z.string().describe("A name for this notification rule."),
-            objectNamePrefix: z
-              .string()
-              .optional()
-              .default("")
-              .describe(
-                "Only objects whose names start with this prefix trigger the rule. Empty string ('') matches all objects. Required by B2 on every rule.",
-              ),
-            eventTypes: z
-              .array(z.string())
-              .describe(
-                "Event types to trigger notification, e.g. b2:ObjectCreated:*, b2:ObjectDeleted:*.",
-              ),
-            targetConfiguration: z.object({
-              targetType: z.literal("webhook"),
-              url: z.string().describe("The HTTPS URL to deliver notifications to."),
-              hmacSha256SigningSecret: z
+        bucketId: z
+          .string()
+          .describe("Exact bucket ID whose notification rules should be replaced."),
+        eventNotificationRules: z
+          .array(
+            z.object({
+              name: z
+                .string()
+                .describe("Name for this notification rule; must be unique per bucket."),
+              objectNamePrefix: z
                 .string()
                 .optional()
-                .describe("Optional secret for HMAC-SHA256 request signing."),
-              customHeaders: z.array(z.object({ name: z.string(), value: z.string() })).optional(),
+                .default("")
+                .describe(
+                  "Object-key prefix that triggers the rule. Defaults to empty string, which matches every object in the bucket.",
+                ),
+              eventTypes: z
+                .array(z.string())
+                .describe(
+                  "B2 event types that trigger delivery, for example b2:ObjectCreated:* or b2:ObjectDeleted:*.",
+                ),
+              targetConfiguration: z.object({
+                targetType: z.literal("webhook").describe("Only webhook targets are supported."),
+                url: z
+                  .string()
+                  .describe(
+                    "Public https:// webhook URL. localhost, credentials in URLs, private IPs, and non-public DNS targets are rejected before B2 is called.",
+                  ),
+                hmacSha256SigningSecret: z
+                  .string()
+                  .optional()
+                  .describe(
+                    "Optional HMAC-SHA256 signing secret. Treated as sensitive input and redacted from outputs/logs.",
+                  ),
+                customHeaders: z
+                  .array(
+                    z.object({
+                      name: z.string().describe("Custom header name sent with webhook deliveries."),
+                      value: z
+                        .string()
+                        .describe("Custom header value; treated as sensitive and redacted."),
+                    }),
+                  )
+                  .optional()
+                  .describe("Optional custom headers sent with webhook deliveries."),
+              }),
+              isEnabled: z.boolean().describe("Whether B2 should deliver events for this rule."),
             }),
-            isEnabled: z.boolean().describe("Whether this rule is active."),
-          }),
-        ),
+          )
+          .describe(
+            "Complete replacement rule set for the bucket. Include every rule that should remain; omitted existing rules are removed.",
+          ),
         confirm: z
           .boolean()
           .optional()
           .describe(
-            "Confirm replacing persistent outbound webhook notification rules. Required when the server destructive policy is 'confirm' (the default).",
+            "Fallback confirmation for replacing persistent outbound webhook notification rules when the effective server destructive policy is 'confirm' and MCP elicitation cannot run.",
           ),
       },
     },

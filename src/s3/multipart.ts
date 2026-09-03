@@ -10,6 +10,11 @@ import { toolJson, toolError, toolSuccess } from "../utils/errors.js";
 import { B2Config } from "../utils/types.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
 
+function multipartPartNumberSchema(description?: string) {
+  const schema = z.number().int().min(1).max(10000);
+  return description ? schema.describe(description) : schema;
+}
+
 /**
  * Register S3-compatible multipart upload tools.
  *
@@ -83,13 +88,13 @@ export function registerS3MultipartTools(
     "s3_presign_upload_part",
     {
       description:
-        "Generate short-lived presigned PUT URL bearer capabilities for parts of an S3-compatible multipart upload, so the client/worker uploads each part DIRECTLY to B2. The response includes expiresIn/expiresAt; treat each URL as sensitive until it expires. Flow: s3_create_multipart_upload → s3_presign_upload_part → PUT each part to its URL (capture the ETag from each response header) → s3_complete_multipart_upload with those ETags. Parts except the last must be ≥5 MiB.",
+        "Generate short-lived presigned PUT URL bearer capabilities for parts of an S3-compatible multipart upload, so the client/worker uploads each part DIRECTLY to B2. Prefer this over s3_get_presigned_url for multipart uploads; use s3_get_presigned_url for single-object PUT/GET transfers. The response includes expiresIn/expiresAt; treat each URL as sensitive until it expires. Flow: s3_create_multipart_upload → s3_presign_upload_part → PUT each part to its URL (capture the ETag from each response header) → s3_complete_multipart_upload with those ETags. Parts except the last must be ≥5 MiB.",
       inputSchema: {
         bucket: z.string().describe("The bucket name."),
         key: z.string().describe("The object key."),
         uploadId: z.string().describe("The UploadId from s3_create_multipart_upload."),
         partNumbers: z
-          .array(z.number().int().min(1).max(10000))
+          .array(multipartPartNumberSchema())
           .min(1)
           .max(10000)
           .describe(
@@ -137,15 +142,20 @@ export function registerS3MultipartTools(
     "s3_complete_multipart_upload",
     {
       description:
-        "Finalize an S3-compatible multipart upload. Provide the ETags of all uploaded parts in order.",
+        "Finalize an S3-compatible multipart upload in B2 by assembling uploaded parts. Use only after s3_create_multipart_upload and s3_presign_upload_part (or s3_upload_part_copy) have produced every required part; use s3_list_parts to verify uploaded parts before retrying. Requires writeFiles. Completion is idempotent only when B2 already committed the exact same part list; if the response is lost, reconcile with s3_head_object or s3_list_object_versions before retrying.",
       inputSchema: {
-        bucket: z.string().describe("The bucket name."),
-        key: z.string().describe("The object key."),
-        uploadId: z.string().describe("The UploadId."),
+        bucket: z.string().describe("Destination bucket name used to create the multipart upload."),
+        key: z.string().describe("Destination object key used to create the multipart upload."),
+        uploadId: z.string().describe("UploadId returned by s3_create_multipart_upload."),
         parts: z
           .array(
             z.object({
-              partNumber: z.number().int().describe("The part number."),
+              partNumber: z
+                .number()
+                .int()
+                .describe(
+                  "Provider-valid multipart part number from 1-10000 for this ETag; provide each uploaded part once.",
+                ),
               etag: z
                 .string()
                 .describe(
@@ -153,7 +163,9 @@ export function registerS3MultipartTools(
                 ),
             }),
           )
-          .describe("All uploaded parts in ascending part number order."),
+          .describe(
+            "Complete ordered part manifest. Include every part in ascending partNumber order (part numbers are 1-10000); missing or stale ETags fail the completion call.",
+          ),
       },
     },
     async (args) => {
@@ -189,7 +201,7 @@ export function registerS3MultipartTools(
           .boolean()
           .optional()
           .describe(
-            "Confirm this destructive/irreversible operation. Required when the server destructive policy is 'confirm' (the default).",
+            "Fallback confirmation for this destructive/irreversible operation when the effective server destructive policy is 'confirm' and MCP elicitation cannot run.",
           ),
       },
     },
@@ -214,14 +226,36 @@ export function registerS3MultipartTools(
   server.registerTool(
     "s3_list_multipart_uploads",
     {
-      description: "List all in-progress S3-compatible multipart uploads for a bucket.",
+      description:
+        "List in-progress S3-compatible multipart uploads for a B2 bucket. Use to resume or audit unfinished uploads before s3_presign_upload_part, s3_complete_multipart_upload, or s3_abort_multipart_upload; use b2_unfinished_uploads when you need storage-cost analysis across bounded listings. Requires listFiles. Results are paginated with maxUploads (default 100, range 1-1000) and key/upload markers; delimiter responses include commonPrefixes.",
       inputSchema: {
-        bucket: z.string().describe("The bucket name."),
-        prefix: z.string().optional().describe("Only list uploads for keys with this prefix."),
-        delimiter: z.string().optional(),
-        maxUploads: z.number().int().min(1).max(1000).optional().default(100),
-        keyMarker: z.string().optional().describe("Pagination cursor."),
-        uploadIdMarker: z.string().optional().describe("Pagination cursor."),
+        bucket: z.string().describe("Bucket name whose in-progress multipart uploads to list."),
+        prefix: z
+          .string()
+          .optional()
+          .describe("Only return multipart uploads whose object keys start with this prefix."),
+        delimiter: z
+          .string()
+          .optional()
+          .describe("Optional delimiter, usually '/', to group common key prefixes."),
+        maxUploads: z
+          .number()
+          .int()
+          .min(1)
+          .max(1000)
+          .optional()
+          .default(100)
+          .describe("Maximum uploads to return (default 100, range 1-1000)."),
+        keyMarker: z
+          .string()
+          .optional()
+          .describe("Pagination cursor: nextKeyMarker from a previous response."),
+        uploadIdMarker: z
+          .string()
+          .optional()
+          .describe(
+            "Pagination cursor paired with keyMarker: nextUploadIdMarker from a previous response.",
+          ),
       },
     },
     async (args) => {
@@ -236,6 +270,7 @@ export function registerS3MultipartTools(
         });
         return toolJson({
           uploads: result.uploads,
+          commonPrefixes: result.commonPrefixes ?? [],
           isTruncated: result.isTruncated,
           nextKeyMarker: result.nextKeyMarker,
           nextUploadIdMarker: result.nextUploadIdMarker,
@@ -288,7 +323,7 @@ export function registerS3MultipartTools(
         bucket: z.string().describe("The destination bucket name."),
         key: z.string().describe("The destination object key."),
         uploadId: z.string().describe("The UploadId from s3_create_multipart_upload."),
-        partNumber: z.number().int().min(1).max(10000).describe("The part number (1–10000)."),
+        partNumber: multipartPartNumberSchema("The part number (1-10000)."),
         copySource: z
           .string()
           .describe(

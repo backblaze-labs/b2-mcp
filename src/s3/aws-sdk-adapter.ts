@@ -542,6 +542,8 @@ export interface B2S3ListMultipartUploadsOptions {
 export interface B2S3ListMultipartUploadsResult {
   /** Multipart uploads returned on this page. */
   uploads: B2S3MultipartUploadSummary[];
+  /** Common prefixes returned for delimiter-based listing, when present. */
+  commonPrefixes?: B2S3CommonPrefix[];
   /** Whether more uploads are available. */
   isTruncated?: boolean;
   /** Key marker for the next page, when present. */
@@ -1330,6 +1332,7 @@ export class B2S3PeerClient {
     );
     return {
       uploads: result.Uploads ?? [],
+      commonPrefixes: compactMap(result.CommonPrefixes, mapCommonPrefix),
       isTruncated: result.IsTruncated,
       nextKeyMarker: result.NextKeyMarker,
       nextUploadIdMarker: result.NextUploadIdMarker,

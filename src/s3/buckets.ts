@@ -101,7 +101,7 @@ export function registerS3BucketTools(
           .boolean()
           .optional()
           .describe(
-            "Required under 'confirm' when rules is [] or rules expire objects. Not needed for abort-incomplete-upload-only rules.",
+            "Fallback confirmation under 'confirm' when rules is [] or rules expire objects and MCP elicitation cannot run. Not needed for abort-incomplete-upload-only rules.",
           ),
       },
     },

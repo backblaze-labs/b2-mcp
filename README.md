@@ -426,14 +426,14 @@ The server exposes **40 tools** (registration is capability-aware, so a given ke
 
 - `b2_authorize_account` — Verify credentials and return account info
 - `b2_list_buckets` — List buckets (optional filters)
-- `b2_create_bucket` — Create a bucket
+- `b2_create_bucket` — Create a persistent bucket with initial policy settings
 - `b2_delete_bucket` — Delete an empty bucket
-- `b2_update_bucket` — Update type, CORS, lifecycle, encryption, replication, Object Lock
-- `b2_get_bucket_notification_rules` — Get webhook notification rules
-- `b2_set_bucket_notification_rules` — Set webhook notification rules
+- `b2_update_bucket` — Update persistent bucket settings; risky changes are gated
+- `b2_get_bucket_notification_rules` — Read webhook notification rules with secrets redacted
+- `b2_set_bucket_notification_rules` — Replace webhook notification rules; public HTTPS targets only
 - `b2_list_keys` — List application keys
-- `b2_delete_key` — Delete an application key
-- `b2_create_key` — Create an application key (one-time secret written to the configured sink)
+- `b2_delete_key` — Irreversibly revoke an application key
+- `b2_create_key` — Create a scoped application key through the configured secret sink
 - `b2_update_file_legal_hold` — Set/clear legal hold on an object
 - `b2_update_file_retention` — Set/clear retention on an object
 - `b2_list_groups` — List partner groups (Partner API credential)
@@ -446,18 +446,18 @@ The server exposes **40 tools** (registration is capability-aware, so a given ke
 
 - `s3_put_object` — Inline upload of a small (≤1 MiB) control-plane object
 - `s3_get_object` — Inline download of a small (≤1 MiB) control-plane object
-- `s3_delete_object` — Delete an object
+- `s3_delete_object` — Delete current object or exact version; destructive gate applies
 - `s3_delete_objects` — Bulk-delete objects
 - `s3_head_object` — Object metadata
 - `s3_copy_object` — Server-side copy
 - `s3_list_objects_v2` — List objects
-- `s3_list_object_versions` — List object versions
+- `s3_list_object_versions` — List object versions and delete markers (paginated)
 - `s3_create_multipart_upload` — Begin a multipart upload
 - `s3_presign_upload_part` — Mint a presigned PUT URL for a part
-- `s3_complete_multipart_upload` — Finish a multipart upload
+- `s3_complete_multipart_upload` — Complete multipart upload from ordered part ETags
 - `s3_abort_multipart_upload` — Abort a multipart upload
 - `s3_list_parts` — List uploaded parts
-- `s3_list_multipart_uploads` — List in-progress multipart uploads
+- `s3_list_multipart_uploads` — List in-progress multipart uploads (paginated)
 - `s3_upload_part_copy` — Server-side copy of a part
 - `s3_get_presigned_url` — Short-lived presigned PUT/GET bearer URL
 - `s3_head_bucket` — Check a bucket is reachable on the S3 endpoint
@@ -489,7 +489,7 @@ prompt fixtures are referenced from `docs/tool-profile-contract.json`.
 
 ### Tool details and availability
 
-**40 total — 17 Native B2 SDK + 19 AWS S3 SDK + 4 Neither SDK/custom MCP tools.** Prefix counts remain 21 native `b2_*` names + 19 data-plane `s3_*` names. Availability is orthogonal to backing: `b2_create_key` and `b2_create_group_member` are available when `B2_SECRET_SINK=file` or `inline`; `b2_reserve_trial_create_account` is available only with explicit `inline` mode because Reserve Trial has no provider-side recovery path after a file sink write failure. These names are non-secret compatibility stubs when unavailable. The inherited `s3_*` aliases use the AWS S3 SDK against B2's S3-compatible endpoint, with configuration derived from the official B2 SDK `/s3` helper. Under stdio's default `confirm` policy, fifteen destructive, durable-secret-producing, or protection-weakening tool names require `confirm: true` or MCP form elicitation before execution: the explicit deletes (`s3_delete_object`, `s3_delete_objects`, `s3_abort_multipart_upload`, `b2_delete_bucket`, `b2_delete_key`), durable key creation (`b2_create_key`), PutObject presigning (`s3_get_presigned_url` with `operation: "PutObject"`), Partner group membership changes (`b2_eject_group_member`, `b2_create_group_member`), trial-account reservation (`b2_reserve_trial_create_account`), persistent outbound webhook replacement (`b2_set_bucket_notification_rules`), and the protection-removal or copy/delete policy paths (`b2_update_file_retention` when clearing/bypassing, `b2_update_file_legal_hold` when set off, `b2_update_bucket` when it makes a bucket public or weakens Object Lock/lifecycle/replication, and `s3_put_bucket_lifecycle` when a rule schedules deletion). HTTP defaults to `block`, so the same calls are refused unless the operator explicitly selects `confirm` or `allow`.
+**40 total — 17 Native B2 SDK + 19 AWS S3 SDK + 4 Neither SDK/custom MCP tools.** Prefix counts remain 21 native `b2_*` names + 19 data-plane `s3_*` names. Availability is orthogonal to backing: `b2_create_key` and `b2_create_group_member` are available when `B2_SECRET_SINK=file` or `inline`; `b2_reserve_trial_create_account` is available only with explicit `inline` mode because Reserve Trial has no provider-side recovery path after a file sink write failure. These names are non-secret compatibility stubs when unavailable. The inherited `s3_*` aliases use the AWS S3 SDK against B2's S3-compatible endpoint, with configuration derived from the official B2 SDK `/s3` helper. Under stdio's default `confirm` policy, fifteen destructive, durable-secret-producing, or protection-weakening tool names require `confirm: true` or MCP form elicitation before execution: the explicit deletes (`s3_delete_object`, `s3_delete_objects`, `s3_abort_multipart_upload`, `b2_delete_bucket`, `b2_delete_key`), durable key creation (`b2_create_key`), PutObject presigning (`s3_get_presigned_url` with `operation: "PutObject"`), Partner group membership changes (`b2_eject_group_member`, `b2_create_group_member`), trial-account reservation (`b2_reserve_trial_create_account`), persistent outbound webhook replacement (`b2_set_bucket_notification_rules`), and the protection-removal or copy/delete policy paths (`b2_update_file_retention` when clearing/bypassing, `b2_update_file_legal_hold` when set off, `b2_update_bucket` for bucketType allPublic, fileLockEnabled false, defaultRetention.mode null, lifecycleRules with daysFromHidingToDeleting, or any replicationConfiguration update, and `s3_put_bucket_lifecycle` when a rule schedules deletion). HTTP defaults to `block`, so the same calls are refused unless the operator explicitly selects `confirm` or `allow`.
 
 <details>
 <summary><b>Category 1 — Native B2 SDK (17)</b></summary>
@@ -498,14 +498,14 @@ prompt fixtures are referenced from `docs/tool-profile-contract.json`.
 | ---------------------------------- | ------------------------------------- | ------------------------------------------------------------------ |
 | `b2_authorize_account`             | Available                             | Verify credentials and return account info                         |
 | `b2_list_buckets`                  | Available                             | List buckets (optional filters)                                    |
-| `b2_create_bucket`                 | Available                             | Create a bucket                                                    |
+| `b2_create_bucket`                 | Available                             | Create a persistent bucket with initial policy settings            |
 | `b2_delete_bucket`                 | Available                             | Delete an empty bucket                                             |
-| `b2_update_bucket`                 | Available                             | Update type, CORS, lifecycle, encryption, replication, Object Lock |
-| `b2_get_bucket_notification_rules` | Available                             | Get webhook notification rules                                     |
-| `b2_set_bucket_notification_rules` | Available                             | Set webhook notification rules                                     |
+| `b2_update_bucket`                 | Available                             | Update persistent bucket settings; risky changes are gated         |
+| `b2_get_bucket_notification_rules` | Available                             | Read webhook notification rules with secrets redacted              |
+| `b2_set_bucket_notification_rules` | Available                             | Replace webhook notification rules; public HTTPS targets only      |
 | `b2_list_keys`                     | Available                             | List application keys                                              |
-| `b2_delete_key`                    | Available                             | Delete an application key                                          |
-| `b2_create_key`                    | Sink-backed; HTTP default stub        | Create an application key; file mode writes the one-time secret out of band |
+| `b2_delete_key`                    | Available                             | Irreversibly revoke an application key                             |
+| `b2_create_key`                    | Sink-backed; HTTP default stub        | Create a scoped application key through the configured secret sink |
 | `b2_update_file_legal_hold`        | Available                             | Set/clear legal hold on an object                                  |
 | `b2_update_file_retention`         | Available                             | Set/clear retention on an object                                   |
 | `b2_list_groups`                   | Available with Partner API credential | List partner groups through the official B2 SDK                    |
@@ -545,12 +545,12 @@ configured and the account is authorized for the Partner API.
 | Tool                                                                                     | Availability | Description                                                                                      |
 | ---------------------------------------------------------------------------------------- | ------------ | ------------------------------------------------------------------------------------------------ |
 | `s3_put_object` / `s3_get_object`                                                        | Available    | Inline upload / download of small (<=1 MiB) control-plane objects; bulk data uses a presigned URL |
-| `s3_delete_object` / `s3_delete_objects`                                                 | Available    | Delete one / bulk-delete objects                                                                 |
+| `s3_delete_object` / `s3_delete_objects`                                                 | Available    | Delete current objects or exact versions; destructive gate applies                                |
 | `s3_head_object`                                                                         | Available    | Object metadata                                                                                  |
 | `s3_copy_object`                                                                         | Available    | Server-side copy; `acl` is a no-op compatibility hint because B2 access follows bucket policy    |
-| `s3_list_objects_v2` / `s3_list_object_versions`                                         | Available    | List objects / versions                                                                          |
-| `s3_create_multipart_upload` / `s3_presign_upload_part` / `s3_complete_multipart_upload` | Available    | Multipart upload flow (large files); parts use short-lived presigned bearer URLs                 |
-| `s3_abort_multipart_upload` / `s3_list_parts` / `s3_list_multipart_uploads`              | Available    | Manage multipart uploads                                                                         |
+| `s3_list_objects_v2` / `s3_list_object_versions`                                         | Available    | List current objects / paginated versions and delete markers                                      |
+| `s3_create_multipart_upload` / `s3_presign_upload_part` / `s3_complete_multipart_upload` | Available    | Multipart upload flow; complete with ordered part ETags after direct-to-B2 part uploads          |
+| `s3_abort_multipart_upload` / `s3_list_parts` / `s3_list_multipart_uploads`              | Available    | Manage and page through in-progress multipart uploads                                             |
 | `s3_upload_part_copy`                                                                    | Available    | Server-side copy of a part                                                                       |
 | `s3_get_presigned_url`                                                                   | Available    | Short-lived presigned PUT/GET bearer URL (browser/CORS handoff)                                  |
 | `s3_head_bucket`                                                                         | Available    | Check bucket exists/reachable on the S3 endpoint                                                 |

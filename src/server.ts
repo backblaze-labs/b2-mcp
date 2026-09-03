@@ -89,7 +89,7 @@ import { isDestructiveTool } from "./utils/destructive-gate.js";
 import { registerB2WorkflowPrompts } from "./prompts.js";
 
 const COMPATIBILITY_STUB_CONFIRM_DESC =
-  "Confirm this destructive/irreversible compatibility stub. Required if this tool is re-enabled with a real handler under the default destructive policy.";
+  "Confirm this destructive/irreversible compatibility stub. It performs no B2 call while unavailable; a real handler is still governed by the configured destructive policy.";
 /** Opening instruction shown to MCP clients during server discovery. */
 export const SERVER_INSTRUCTION_OPENING = "Backblaze B2 operational flow.";
 /** Credential-safety instruction embedded in the MCP server instructions. */
@@ -153,7 +153,7 @@ function registerDurableSecretCompatibilityStubs(
       name,
       {
         description:
-          "Compatibility stub for a durable-secret-producing B2 operation that is unavailable because the secret sink is off.",
+          "Unavailable compatibility stub for a durable-secret-producing B2 operation such as b2_create_key. It performs no B2 call and returns tool_unavailable; read that error for the operation-specific sink requirement or missing configuration.",
         inputSchema,
         availability: "unavailable",
         force: true,

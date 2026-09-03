@@ -3,21 +3,22 @@
  *
  * @packageDocumentation
  */
-import type { ToolRegistrar } from "../mcp.js";
-import { z } from "zod";
+
+import type { ReadableStream as WebReadableStream } from "node:stream/web";
 import * as fs from "fs";
 import * as path from "path";
 import { Readable, Transform } from "stream";
 import { pipeline } from "stream/promises";
-import type { ReadableStream as WebReadableStream } from "node:stream/web";
-import { badRequestError, codedError, toolJson, toolError, toolSuccess } from "../utils/errors.js";
-import { resolveLocalPath } from "../utils/fs-guard.js";
-import type { B2Config } from "../utils/types.js";
-import { checkDestructive } from "../utils/destructive-gate.js";
-import { withS3Circuit, withS3LongCircuit } from "../utils/circuit-breaker.js";
+import { z } from "zod";
+import type { ToolRegistrar } from "../mcp.js";
 import { currentMcpRequestSignal } from "../request-context.js";
-import type { B2S3FileVersionBinding, B2S3VersionGuard } from "../utils/types.js";
+import { withS3Circuit, withS3LongCircuit } from "../utils/circuit-breaker.js";
+import { checkDestructive } from "../utils/destructive-gate.js";
+import { badRequestError, codedError, toolError, toolJson, toolSuccess } from "../utils/errors.js";
+import { resolveLocalPath } from "../utils/fs-guard.js";
 import { logger } from "../utils/logger.js";
+import { timeoutError } from "../utils/named-error.js";
+import type { B2Config, B2S3FileVersionBinding, B2S3VersionGuard } from "../utils/types.js";
 import type {
   B2S3DeleteObjectsResult,
   B2S3HeadObjectResult,
@@ -25,10 +26,9 @@ import type {
   B2S3PeerClient,
 } from "./aws-sdk-adapter.js";
 import { assertSafeObjectContentType, b2S3DeleteErrorEntry } from "./aws-sdk-adapter.js";
-import { timeoutError } from "../utils/named-error.js";
 
 const CONFIRM_DESC =
-  "Confirm this destructive/irreversible operation. Required when the server destructive policy is 'confirm' (the default).";
+  "Fallback confirmation for this destructive/irreversible operation when the effective server destructive policy is 'confirm' and MCP elicitation cannot run.";
 
 interface DeleteObjectEntry {
   key: string;
@@ -482,7 +482,12 @@ export function registerS3ObjectTools(
     versionId: z.string().optional().describe("Specific version of the object to retrieve."),
   };
   const deleteVersionIdInput: z.ZodRawShape = {
-    versionId: z.string().optional().describe("Version ID of the specific version to delete."),
+    versionId: z
+      .string()
+      .optional()
+      .describe(
+        "Exact version ID to delete. Omit to delete the current object by S3 semantics, which may create a delete marker for versioned buckets.",
+      ),
   };
   const headVersionIdInput: z.ZodRawShape = {
     versionId: z.string().optional().describe("Specific version of the object."),
@@ -666,10 +671,10 @@ export function registerS3ObjectTools(
     "s3_delete_object",
     {
       description:
-        "Delete an object from a B2 bucket. Optionally specify a version ID to delete a specific version.",
+        "Delete one B2 object through the S3-compatible API. Use s3_list_object_versions first when you need to target a specific version or delete marker; use s3_delete_objects for batches up to 1000. Requires deleteFiles and destructive confirmation by policy; targeting a specific versionId additionally requires readFiles, because native B2 version binding is verified first. Omitting versionId applies normal S3 delete semantics and can create a delete marker in versioned buckets; providing versionId permanently removes that version after that binding check.",
       inputSchema: {
-        bucket: z.string().describe("The bucket name."),
-        key: z.string().describe("The object key to delete."),
+        bucket: z.string().describe("Bucket name containing the object to delete."),
+        key: z.string().describe("Exact object key to delete."),
         ...deleteVersionIdInput,
         confirm: z.boolean().optional().describe(CONFIRM_DESC),
       },
@@ -953,20 +958,35 @@ export function registerS3ObjectTools(
     "s3_list_object_versions",
     {
       description:
-        "List all versions of objects in a versioned B2 bucket, including delete markers.",
+        "List object versions and delete markers in a B2 bucket using the S3-compatible API. Use before version-targeted s3_get_object, s3_head_object, s3_copy_object, or s3_delete_object calls; use s3_list_objects_v2 when current live objects are enough. Requires listFiles. Results are paginated with maxKeys (default 1000, max 1000) and paired key/version markers.",
       inputSchema: {
-        bucket: z.string().describe("The bucket name."),
-        prefix: z.string().optional().describe("Only list versions for objects with this prefix."),
-        delimiter: z.string().optional(),
-        maxKeys: z.number().int().min(1).max(1000).optional().default(1000),
+        bucket: z.string().describe("Bucket name whose object versions should be listed."),
+        prefix: z
+          .string()
+          .optional()
+          .describe("Only list versions and delete markers for keys that start with this prefix."),
+        delimiter: z
+          .string()
+          .optional()
+          .describe("Optional delimiter, usually '/', to group common key prefixes."),
+        maxKeys: z
+          .number()
+          .int()
+          .min(1)
+          .max(1000)
+          .optional()
+          .default(1000)
+          .describe("Maximum versions/delete markers to return (default 1000, range 1-1000)."),
         keyMarker: z
           .string()
           .optional()
-          .describe("Pagination cursor — key from a previous response."),
+          .describe("Pagination cursor: nextKeyMarker from a previous response."),
         versionIdMarker: z
           .string()
           .optional()
-          .describe("Pagination cursor — version ID from a previous response."),
+          .describe(
+            "Pagination cursor paired with keyMarker: nextVersionIdMarker from a previous response.",
+          ),
       },
     },
     async (args) => {

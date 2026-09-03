@@ -11,7 +11,7 @@ import { B2Config } from "../utils/types.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
 
 const CONFIRM_DESC =
-  "Confirm this irreversible/protection-removing operation. Required when the server destructive policy is 'confirm' (the default).";
+  "Fallback confirmation for this irreversible/protection-removing operation when the effective server destructive policy is 'confirm' and MCP elicitation cannot run.";
 
 /**
  * Object Lock tools for the B2 Native API.
