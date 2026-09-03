@@ -176,22 +176,39 @@ if (manifestVersion !== packageVersion) {
 // artifact. Capture (rather than inherit) the packer's chatty output so its
 // misleading digest cannot be mistaken for the release checksum, and surface it
 // only if the pack fails.
+// Pack to a temporary file rather than the documented `outFile`, so the
+// non-normalized packer output never occupies the published path. `outFile` is
+// written only from the normalized bytes below, keeping the `.mcpb` extension
+// the packer expects on its output argument.
+const packFile = path.join(outDir, "b2-mcp.unnormalized.mcpb");
+rmSync(packFile, { force: true });
 try {
-  execFileSync("pnpm", ["exec", "mcpb", "pack", "mcpb", outFile], {
+  execFileSync("pnpm", ["exec", "mcpb", "pack", "mcpb", packFile], {
     cwd: root,
     stdio: ["ignore", "pipe", "pipe"],
   });
 } catch (error) {
   if (error.stdout) process.stderr.write(error.stdout);
   if (error.stderr) process.stderr.write(error.stderr);
+  rmSync(packFile, { force: true });
   throw error;
 }
 
-// Normalize host/time metadata in place so the release artifact is reproducible,
-// then emit the authoritative post-normalization SHA-256 that the release
-// `SHA256SUMS` records.
-const normalized = normalizeZipMetadata(readFileSync(outFile));
-writeFileSync(outFile, normalized);
+// Normalize host/time metadata so the release artifact is reproducible, then
+// emit the authoritative post-normalization SHA-256 that the release
+// `SHA256SUMS` records. If normalization or the write fails, remove any partial
+// `outFile` so a stale, unverified bundle can never be left at the documented
+// path for an accidental upload — matching the stale-artifact guard above.
+let normalized;
+try {
+  normalized = normalizeZipMetadata(readFileSync(packFile));
+  writeFileSync(outFile, normalized);
+} catch (error) {
+  rmSync(outFile, { force: true });
+  throw error;
+} finally {
+  rmSync(packFile, { force: true });
+}
 const sha256 = createHash("sha256").update(normalized).digest("hex");
 
 console.log(`build-mcpb: packed ${outFile} (b2-mcp@${packageVersion})`);
