@@ -24,7 +24,7 @@ Phase 2 generated-docs move.
 
 ## System Of Record
 
-- [`design-docs/index.md`](design-docs/index.md) - design document catalog with owners and status.
+- [`design-docs/index.md`](design-docs/index.md) - public contract register with owners and status.
 - [`design-docs/tool-contract.md`](design-docs/tool-contract.md) - tool and prompt contract policy.
 - [`design-docs/sdk-adoption-contract.md`](design-docs/sdk-adoption-contract.md) - SDK adoption and backing taxonomy.
 - [`design-docs/security-review.md`](design-docs/security-review.md) - pre-public security and provenance review.

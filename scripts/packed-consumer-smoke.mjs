@@ -720,7 +720,7 @@ try {
         `if (meta.engines.node !== ${JSON.stringify(runtimePolicy.engineRange)}) throw new Error("wrong package engine");`,
         'if (meta.bin["b2-mcp"] !== "dist/index.js") throw new Error("wrong b2-mcp bin");',
         'if (meta.bin["b2-mcp-server"] !== "dist/index.js") throw new Error("wrong b2-mcp-server bin");',
-        'for (const requiredDoc of ["docs/CLIENTS.md", "docs/product-specs/clients.md", "docs/DEPLOY.md", "docs/deployment/security-and-credentials.md"]) {',
+        'for (const requiredDoc of ["docs/CLIENTS.md", "docs/product-specs/clients.md", "docs/DEPLOY.md", "docs/deployment/security-and-credentials.md", "docs/references/deployment/security-and-credentials.md"]) {',
         "  if (!fs.existsSync(path.join(packageRoot, requiredDoc))) throw new Error(`${requiredDoc} should be published`);",
         "}",
         'for (const repoOnlyFile of ["runtime-policy.json", "audit-policy.json", "package-budget.json"]) {',

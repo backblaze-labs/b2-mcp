@@ -426,6 +426,8 @@ describe("package surface policy", () => {
         '  fs.writeFileSync(path.join(packageRoot, "docs", "CLIENTS.md"), "# Clients\\n");',
         '  fs.mkdirSync(path.join(packageRoot, "docs", "deployment"), { recursive: true });',
         '  fs.writeFileSync(path.join(packageRoot, "docs", "deployment", "security-and-credentials.md"), "# Security\\n");',
+        '  fs.mkdirSync(path.join(packageRoot, "docs", "references", "deployment"), { recursive: true });',
+        '  fs.writeFileSync(path.join(packageRoot, "docs", "references", "deployment", "security-and-credentials.md"), "# Security\\n");',
         '  fs.mkdirSync(path.join(packageRoot, "docs", "product-specs"), { recursive: true });',
         '  fs.writeFileSync(path.join(packageRoot, "docs", "product-specs", "clients.md"), "# Clients\\n");',
         '  fs.writeFileSync(path.join(packageRoot, "docs", "DEPLOY.md"), "# Deploy\\n");',

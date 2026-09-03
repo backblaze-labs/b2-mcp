@@ -79,6 +79,7 @@ function withFixture(run: (fixtureRoot: string) => void): void {
             "docs/product-specs/clients.md",
             "docs/DEPLOY.md",
             "docs/deployment/*.md",
+            "docs/references/deployment/*.md",
             "docs/tool-profile-contract.json",
             "docs/TOOL_PROFILES.md",
             "README.md",

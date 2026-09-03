@@ -662,7 +662,7 @@ committed lockfile and a sanitized temporary environment.
 - [`docs/DEPLOY.md`](docs/DEPLOY.md) — deployment matrix and supported-host links
 - [`docs/references/deployment/security-and-credentials.md`](docs/references/deployment/security-and-credentials.md) — shared hosted security contract
 - [`docs/references/deployment/vercel.md`](docs/references/deployment/vercel.md), [`docs/references/deployment/cloudflare-workers.md`](docs/references/deployment/cloudflare-workers.md), [`docs/references/deployment/cloudflare-containers.md`](docs/references/deployment/cloudflare-containers.md), [`docs/references/deployment/docker.md`](docs/references/deployment/docker.md), [`docs/references/deployment/google-cloud-run.md`](docs/references/deployment/google-cloud-run.md), [`docs/references/deployment/aws.md`](docs/references/deployment/aws.md), [`docs/references/deployment/azure-container-apps.md`](docs/references/deployment/azure-container-apps.md), [`docs/references/deployment/render.md`](docs/references/deployment/render.md), [`docs/references/deployment/railway.md`](docs/references/deployment/railway.md), [`docs/references/deployment/fly-io.md`](docs/references/deployment/fly-io.md) — provider deployment guides
-- [`docs/design-docs/index.md`](docs/design-docs/index.md) — design document ownership and status
+- [`docs/design-docs/index.md`](docs/design-docs/index.md) — public contract register with owners and status
 - [`docs/design-docs/tool-contract.md`](docs/design-docs/tool-contract.md) — Phase 1 tool-contract policy
 - [`docs/TOOL_PROFILES.md`](docs/TOOL_PROFILES.md) — generated tool-profile reference
 - [`docs/TESTING.md`](docs/TESTING.md) — deterministic and live-test gate skeleton
