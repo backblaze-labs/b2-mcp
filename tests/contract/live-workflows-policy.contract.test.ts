@@ -130,6 +130,7 @@ const liveToolCapabilities: Record<string, readonly string[]> = {
   s3_list_object_versions: ["listFiles", "readFileLegalHolds", "readFileRetentions"],
   s3_list_objects_v2: ["listFiles"],
   s3_presign_upload_part: ["writeFiles"],
+  s3_put_bucket_lifecycle: ["writeBucketLifecycleRules"],
   s3_put_object: ["readFileLegalHolds", "readFileRetentions", "writeFiles"],
 };
 

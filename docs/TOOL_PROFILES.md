@@ -98,6 +98,7 @@ Profile hash: `d775e5b1f3bf192beb7939e971aa1083bf2c6c20c82921b390ab069852c388ef`
 - `readFileRetentions`
 - `readFiles`
 - `writeBucketEncryption`
+- `writeBucketLifecycleRules`
 - `writeBucketNotifications`
 - `writeBucketRetentions`
 - `writeBuckets`
@@ -174,6 +175,7 @@ Profile hash: `63b404465a6d30fbb7f43d4dc09625ee30b31e66c1685ebcc465df36cfad7598`
 - `readBucketLifecycleRules`
 - `readBucketNotifications`
 - `readFiles`
+- `writeBucketLifecycleRules`
 - `writeBucketNotifications`
 - `writeBuckets`
 - `writeFileLegalHolds`
@@ -288,7 +290,7 @@ The `full` prompt profile enables an inline dummy secret sink so sink-dependent 
 
 | Profile | Prompts | Hash prefix |
 | --- | ---: | --- |
-| `full` | 5 | `3d072734f7ac` |
+| `full` | 5 | `244b02a929ee` |
 | `live-b2-contract` | 4 | `7378ab9a0c3e` |
 | `phase1-default` | 3 | `0257b2a65d29` |
 | `read-only` | 2 | `686610d7c5bf` |
@@ -297,7 +299,7 @@ The `full` prompt profile enables an inline dummy secret sink so sink-dependent 
 
 Complete guided-workflow prompt surface: every B2 workflow launcher is advertised, including the write- and admin-capable prompts, for contract review and regression detection.
 
-Prompt profile hash: `3d072734f7ac53e3c47b9e9f1b5a7d41bce7ab3584c6ff29f2d57d31492ab812`
+Prompt profile hash: `244b02a929ee14d2b58e84b5174cf52c9bde7f6b0acd1dc1a174eda6b6066233`
 
 ### MCP Prompts
 

@@ -62,7 +62,7 @@ export const TOOL_CAPABILITIES: Record<string, string[]> = {
   s3_head_bucket: ["listBuckets"],
   s3_get_bucket_lifecycle: ["readBucketLifecycleRules"],
   s3_get_bucket_location: ["listBuckets"],
-  s3_put_bucket_lifecycle: ["writeBuckets"],
+  s3_put_bucket_lifecycle: ["writeBucketLifecycleRules"],
 };
 
 /** MCP tool annotations derived from capability and destructive-policy metadata. */

@@ -519,10 +519,10 @@ For the integration and request-shape contract suites, use the
   `listFiles`, `listKeys`, `readBucketEncryption`,
   `readBucketLifecycleRules`, `readBucketRetentions`, `readBuckets`,
   `readFileLegalHolds`, `readFileRetentions`, `readFiles`,
-  `writeBucketEncryption`, `writeBucketNotifications`, `writeBucketRetentions`,
-  `writeBuckets`, `writeFileLegalHolds`, `writeFileRetentions`, and
-  `writeFiles`. Do not grant `writeKeys`, `deleteKeys`, master-key access, or
-  account-admin capabilities.
+  `writeBucketEncryption`, `writeBucketLifecycleRules`,
+  `writeBucketNotifications`, `writeBucketRetentions`, `writeBuckets`,
+  `writeFileLegalHolds`, `writeFileRetentions`, and `writeFiles`. Do not grant
+  `writeKeys`, `deleteKeys`, master-key access, or account-admin capabilities.
 - Secrets: `LIVE_B2_KEY_ID` and `LIVE_B2_KEY` (mapped to `B2_APPLICATION_KEY_ID`
   and `B2_APPLICATION_KEY`), plus `LIVE_B2_MASTER_KEY_ID` and `LIVE_B2_MASTER_KEY`
   (mapped to `B2_MASTER_KEY_ID`/`B2_MASTER_KEY`) for the Partner read paths, all

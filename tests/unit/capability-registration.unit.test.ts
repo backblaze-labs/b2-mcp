@@ -142,6 +142,11 @@ describe("capability-aware registration", () => {
     expect(toolNames(["listBuckets"])).not.toContain("s3_get_bucket_lifecycle");
   });
 
+  it("gates S3 lifecycle writes on writeBucketLifecycleRules", () => {
+    expect(toolNames(["writeBucketLifecycleRules"])).toContain("s3_put_bucket_lifecycle");
+    expect(toolNames(["writeBuckets"])).not.toContain("s3_put_bucket_lifecycle");
+  });
+
   it("keeps file-mode durable-secret names callable when filters omit handlers", () => {
     const names = toolNames(["listBuckets", "listFiles", "readFiles", "listKeys"], {
       ...baseConfig,
@@ -160,6 +165,7 @@ describe("capability-aware registration", () => {
       "readFiles",
       "writeFiles",
       "writeBuckets",
+      "writeBucketLifecycleRules",
     ]);
     expect(names).toContain("s3_put_object");
     expect(names).toContain("s3_create_multipart_upload");

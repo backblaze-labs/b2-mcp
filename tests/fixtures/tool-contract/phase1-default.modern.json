@@ -21,6 +21,7 @@
     "readBucketLifecycleRules",
     "readBucketNotifications",
     "readFiles",
+    "writeBucketLifecycleRules",
     "writeBucketNotifications",
     "writeBuckets",
     "writeFileLegalHolds",

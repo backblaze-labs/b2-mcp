@@ -123,7 +123,7 @@ describe("B2 Bucket and key tools", () => {
 });
 
 describe("S3-compatible bucket and object tools", () => {
-  liveIt("S3 bucket metadata reads target the run-owned bucket", async () => {
+  liveIt("S3 bucket metadata and lifecycle tools target the run-owned bucket", async () => {
     expectLiveSuccess(
       await callTool(server, "s3_head_bucket", { bucket: bucketName() }),
       "s3_head_bucket",
@@ -138,6 +138,20 @@ describe("S3-compatible bucket and object tools", () => {
     });
     expectLiveSuccess(lifecycleResult, "s3_get_bucket_lifecycle");
     expect(Array.isArray(parseResult(lifecycleResult).rules)).toBe(true);
+
+    expectLiveSuccess(
+      await callTool(server, "s3_put_bucket_lifecycle", {
+        bucket: bucketName(),
+        rules: [
+          {
+            id: "abort-incomplete-uploads",
+            status: "Enabled",
+            abortIncompleteMultipartUpload: { daysAfterInitiation: 1 },
+          },
+        ],
+      }),
+      "s3_put_bucket_lifecycle",
+    );
   });
 
   liveIt("uploads, downloads, copies, paginates, and deletes run-owned objects", async () => {

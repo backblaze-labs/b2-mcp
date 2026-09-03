@@ -431,6 +431,7 @@ export type B2Capability =
   | "readBucketRetentions"
   | "writeBucketRetentions"
   | "readBucketLifecycleRules"
+  | "writeBucketLifecycleRules"
   | "readFileRetentions"
   | "writeFileRetentions"
   | "bypassGovernance"
@@ -458,6 +459,7 @@ export const ALL_CAPABILITIES: B2Capability[] = [
   "readBucketRetentions",
   "writeBucketRetentions",
   "readBucketLifecycleRules",
+  "writeBucketLifecycleRules",
   "readFileRetentions",
   "writeFileRetentions",
   "bypassGovernance",

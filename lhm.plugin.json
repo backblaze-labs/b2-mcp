@@ -261,6 +261,7 @@
                 "readBucketRetentions",
                 "writeBucketRetentions",
                 "readBucketLifecycleRules",
+                "writeBucketLifecycleRules",
                 "readFileRetentions",
                 "writeFileRetentions",
                 "bypassGovernance",

@@ -61,7 +61,10 @@ describe("tool annotation policy", () => {
     const writeTools = Object.entries(TOOL_CAPABILITIES)
       .filter(([, capabilities]) =>
         capabilities.some(
-          (capability) => capability === "writeFiles" || capability === "writeBuckets",
+          (capability) =>
+            capability === "writeFiles" ||
+            capability === "writeBuckets" ||
+            capability === "writeBucketLifecycleRules",
         ),
       )
       .map(([name]) => name)

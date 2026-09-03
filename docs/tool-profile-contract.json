@@ -230,6 +230,7 @@
         "readFileRetentions",
         "readFiles",
         "writeBucketEncryption",
+        "writeBucketLifecycleRules",
         "writeBucketNotifications",
         "writeBucketRetentions",
         "writeBuckets",
@@ -382,6 +383,7 @@
         "readBucketLifecycleRules",
         "readBucketNotifications",
         "readFiles",
+        "writeBucketLifecycleRules",
         "writeBucketNotifications",
         "writeBuckets",
         "writeFileLegalHolds",
@@ -631,7 +633,7 @@
         "b2_review_bucket_notifications": [],
         "b2_rotate_application_key": []
       },
-      "hash": "3d072734f7ac53e3c47b9e9f1b5a7d41bce7ab3584c6ff29f2d57d31492ab812",
+      "hash": "244b02a929ee14d2b58e84b5174cf52c9bde7f6b0acd1dc1a174eda6b6066233",
       "fixture": "tests/fixtures/prompt-contract/full.json"
     },
     "live-b2-contract": {
@@ -651,6 +653,7 @@
         "readFileRetentions",
         "readFiles",
         "writeBucketEncryption",
+        "writeBucketLifecycleRules",
         "writeBucketNotifications",
         "writeBucketRetentions",
         "writeBuckets",
@@ -694,6 +697,7 @@
         "readBucketLifecycleRules",
         "readBucketNotifications",
         "readFiles",
+        "writeBucketLifecycleRules",
         "writeBucketNotifications",
         "writeBuckets",
         "writeFileLegalHolds",

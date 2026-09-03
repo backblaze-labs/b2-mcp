@@ -26,6 +26,7 @@
     "readFileRetentions",
     "readFiles",
     "writeBucketEncryption",
+    "writeBucketLifecycleRules",
     "writeBucketNotifications",
     "writeBucketRetentions",
     "writeBuckets",
