@@ -68,6 +68,19 @@ describe("documentation example validator policy", () => {
     expect(result.stderr).toContain("client config package version must be exact semver");
   });
 
+  it("rejects the pinned client JSON config when its version is removed", () => {
+    const readme = read("README.md").replace(
+      '"args": ["-y", "@backblaze-labs/b2-mcp@0.2.0"]',
+      '"args": ["-y", "@backblaze-labs/b2-mcp"]',
+    );
+    const expectedLine = lineOf(readme, '```json\n   {\n     "command": "npx",');
+    const result = runDocExamplesWithOverrides({ "README.md": readme });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(`README.md:${expectedLine}`);
+    expect(result.stderr).toContain("must pin an exact package version");
+  });
+
   it("rejects direct client commands that are not package binaries", () => {
     const readme = read("README.md").replace('"command": "b2-mcp"', '"command": "b2-mcp-old"');
     const expectedLine = lineOf(readme, '```json\n   {\n     "command": "b2-mcp-old"');
@@ -78,18 +91,22 @@ describe("documentation example validator policy", () => {
     expect(result.stderr).toContain("direct client command b2-mcp-old");
   });
 
-  it("rejects executable @latest package examples in release docs", () => {
-    const readme = read("README.md").replace(
-      "npx -y @backblaze-labs/b2-mcp@0.2.0 --version",
-      "npx -y @backblaze-labs/b2-mcp@latest --version",
-    );
-    const expectedLine = lineOf(readme, "npx -y @backblaze-labs/b2-mcp@latest --version");
-    const result = runDocExamplesWithOverrides({ "README.md": readme });
+  it.each(["latest", "next", "^0.2.0", "0.x"])(
+    "rejects executable mutable spec @%s in release docs",
+    (version) => {
+      const command = `npx -y @backblaze-labs/b2-mcp@${version} --version`;
+      const readme = read("README.md").replace(
+        "npx -y @backblaze-labs/b2-mcp@0.2.0 --version",
+        command,
+      );
+      const expectedLine = lineOf(readme, command);
+      const result = runDocExamplesWithOverrides({ "README.md": readme });
 
-    expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain(`README.md:${expectedLine}`);
-    expect(result.stderr).toContain("must not execute @latest");
-  });
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(`README.md:${expectedLine}`);
+      expect(result.stderr).toContain("must not execute mutable-versioned package examples");
+    },
+  );
 
   it("rejects executable @latest after global npm install on the same line", () => {
     const command =
@@ -103,7 +120,7 @@ describe("documentation example validator policy", () => {
 
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain(`README.md:${expectedLine}`);
-    expect(result.stderr).toContain("must not execute @latest");
+    expect(result.stderr).toContain("must not execute mutable-versioned package examples");
   });
 
   it("rejects unpinned global npm installs in release docs", () => {

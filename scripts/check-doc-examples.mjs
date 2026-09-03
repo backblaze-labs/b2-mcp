@@ -47,7 +47,7 @@ const validatedFenceManifest = [
   ["README.md", 1, "client-json", "Claude Desktop JSON config"],
   ["README.md", 2, "json", "fallback region env JSON"],
   ["README.md", 3, "shell", "source install commands"],
-  ["README.md", 4, "client-json", "pinned npx client command"],
+  ["README.md", 4, "pinned-client-json", "pinned npx client command"],
   ["README.md", 5, "shell", "global package install command"],
   ["README.md", 6, "client-json", "global binary client command"],
   ["README.md", 7, "shell", "targeted npx cache cleanup command"],
@@ -402,6 +402,13 @@ function validateFence(file, number, fence, entry) {
     parseJsonExample(file, fence, { expectedCommandPackage: pkg.name });
     return;
   }
+  if (entry.check === "pinned-client-json") {
+    parseJsonExample(file, fence, {
+      expectedCommandPackage: pkg.name,
+      requireExactVersion: true,
+    });
+    return;
+  }
   if (entry.check === "hosted-client-json") {
     parseJsonExample(file, fence, { expectedCommandPackage: "mcp-remote" });
     return;
@@ -446,7 +453,9 @@ function parseJsonExample(file, fence, options = {}) {
   try {
     const parsed = JSON.parse(fence.body);
     if (options.expectedCommandPackage) {
-      validateJsonCommandConfigs(file, fence, parsed, options.expectedCommandPackage);
+      validateJsonCommandConfigs(file, fence, parsed, options.expectedCommandPackage, {
+        requireExactVersion: options.requireExactVersion === true,
+      });
     }
   } catch (error) {
     addFinding(file, fence.line, `contains invalid JSON: ${error.message}`);
@@ -461,9 +470,9 @@ function parseJsoncFragment(file, fence) {
   }
 }
 
-function validateJsonCommandConfigs(file, fence, value, expectedPackage) {
+function validateJsonCommandConfigs(file, fence, value, expectedPackage, options = {}) {
   for (const commandConfig of findCommandConfigs(value)) {
-    validatePackageCommand(file, fence.line, commandConfig, expectedPackage);
+    validatePackageCommand(file, fence.line, commandConfig, expectedPackage, options);
     validateDirectClientCommand(file, fence.line, commandConfig);
   }
 }
@@ -492,7 +501,7 @@ function findCommandConfigs(value) {
   return configs;
 }
 
-function validatePackageCommand(file, line, commandConfig, expectedPackage) {
+function validatePackageCommand(file, line, commandConfig, expectedPackage, options = {}) {
   const command = commandConfig.command.trim();
   if (!["npx", "npm", "pnpm"].includes(command)) return;
   const args = commandConfig.args;
@@ -512,6 +521,9 @@ function validatePackageCommand(file, line, commandConfig, expectedPackage) {
   }
   if (parsedPackageSpec?.version && !isExactPackageVersion(parsedPackageSpec.version)) {
     addFinding(file, line, `${command} client config package version must be exact semver`);
+  }
+  if (options.requireExactVersion && !isExactPackageVersion(parsedPackageSpec?.version)) {
+    addFinding(file, line, `${command} client config must pin an exact package version`);
   }
 }
 
@@ -762,8 +774,15 @@ function validateMutablePackageLaunchers(file, text, startLine) {
     const specs = packageSpecsInText(line).filter((spec) => spec.name === pkg.name);
     if (specs.length === 0) return;
 
-    if (isExecutablePackageLine(line) && specs.some((spec) => spec.version === "latest")) {
-      addFinding(file, lineNumber, "must not execute @latest package examples in release docs");
+    if (
+      isExecutablePackageLine(line) &&
+      specs.some((spec) => spec.version !== null && !isExactPackageVersion(spec.version))
+    ) {
+      addFinding(
+        file,
+        lineNumber,
+        "must not execute mutable-versioned package examples in release docs",
+      );
     }
   });
 }
