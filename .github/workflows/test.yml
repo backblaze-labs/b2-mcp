@@ -677,6 +677,22 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
       - run: pnpm run test:cross-platform
+      # Record this OS's MCPB bundle digest so the aggregation job can prove the
+      # bytes match across operating systems, not just across repeated builds on
+      # one runner. Compute it in Node (not a shell redirect) so no OS-specific
+      # shell encoding (e.g. pwsh UTF-16 `>`) corrupts the recorded digest.
+      - name: Record MCPB bundle digest
+        run: |
+          pnpm run build:mcpb
+          node -e "const{createHash}=require('node:crypto');const{readFileSync,writeFileSync}=require('node:fs');writeFileSync('mcpb-digest.txt',createHash('sha256').update(readFileSync('dist-mcpb/b2-mcp.mcpb')).digest('hex')+'\n')"
+      # actions/upload-artifact v7, reviewed 2026-08-25.
+      - name: Upload MCPB bundle digest
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: mcpb-digest-${{ matrix.os }}
+          path: mcpb-digest.txt
+          if-no-files-found: error
+          retention-days: 7
 
   cross-platform-minimum:
     name: cross-platform minimum
@@ -691,6 +707,28 @@ jobs:
             echo "::error::cross-platform minimum matrix result was ${{ needs.cross-platform-minimum-matrix.result }}"
             exit 1
           fi
+      # actions/download-artifact v6, reviewed 2026-08-25.
+      - name: Download per-OS MCPB bundle digests
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          pattern: mcpb-digest-*
+          path: mcpb-digests
+      # The matrix proves each OS reproduces its own bytes; this proves all three
+      # OSes produce the SAME bytes, so the release SHA-256 is OS-independent.
+      - name: Compare MCPB bundle digests across operating systems
+        run: |
+          mapfile -t files < <(find mcpb-digests -name mcpb-digest.txt | sort)
+          if [[ "${#files[@]}" -ne 3 ]]; then
+            echo "::error::expected 3 per-OS MCPB digests, found ${#files[@]}"
+            exit 1
+          fi
+          for f in "${files[@]}"; do printf '%s: %s\n' "$f" "$(cat "$f")"; done
+          unique=$(cat "${files[@]}" | sort -u | wc -l | tr -d ' ')
+          if [[ "$unique" -ne 1 ]]; then
+            echo "::error::MCPB bundle digests differ across operating systems (not byte-reproducible)"
+            exit 1
+          fi
+          echo "MCPB bundle is byte-identical across ubuntu, windows, and macos."
 
   conformance-summary:
     name: conformance summary

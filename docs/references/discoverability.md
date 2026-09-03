@@ -30,7 +30,7 @@ directories de-duplicate community forks under the official entry.
 | `smithery.yaml` | Smithery | stdio one-click config; credential fields masked as `password`. |
 | `glama.json` | Glama | `maintainers` list gates the org claim. Read from the default branch. |
 | `lhm.plugin.json` | LobeHub | Owner declaration used by `lhm plugin update`; regenerate on release. |
-| `mcpb/manifest.json` | Smithery (Local/MCPB) | MCPB 0.3 manifest with `privacy_policies`; packed to a `.mcpb` bundle (`pnpm run build:mcpb`) and uploaded via Smithery's Local publish tab. |
+| `mcpb/manifest.json` | Smithery (Local/MCPB) | MCPB 0.3 manifest with `privacy_policies`; packed to a reproducible `.mcpb` bundle (`pnpm run build:mcpb`), attached to every GitHub Release (checksummed in `SHA256SUMS`), and uploaded via Smithery's Local publish tab. |
 
 The canonical registry description lives in
 `scripts/lib/mcp-registry-manifest.mjs` (`mcpRegistryDescription`) and is
@@ -177,12 +177,25 @@ tabs. The **URL** tab is for a remote server you host at a public HTTPS endpoint
 (Streamable HTTP + OAuth) — not us, since b2-mcp runs locally per user with the
 user's own B2 keys. Use the **Local (MCPB Bundle)** tab instead.
 
-1. Build the bundle: `pnpm run build:mcpb` → `dist-mcpb/b2-mcp.mcpb` (packs
-   `mcpb/manifest.json`, which runs `npx -y @backblaze-labs/b2-mcp@<version>`
-   and prompts for the B2 credentials). Both the manifest version and the pinned
-   npx launcher version are kept in lockstep with `package.json` by
-   `scripts/update-server-json-version.mjs`, so the advertised bundle is
+1. Grab the bundle from the GitHub Release. `Publish Package` builds
+   `dist-mcpb/b2-mcp.mcpb` (`pnpm run build:mcpb`), records its SHA-256 in the
+   release `SHA256SUMS`, and attaches it to the release assets on every release,
+   so no manual build is needed — download `b2-mcp.mcpb` from the release. (To
+   rebuild locally for inspection, run `pnpm run build:mcpb`.) The bundle packs
+   `mcpb/manifest.json`, which runs `npx -y @backblaze-labs/b2-mcp@<version>` and
+   prompts for the B2 credentials. Both the manifest version and the pinned npx
+   launcher version are kept in lockstep with `package.json` by
+   `scripts/update-server-json-version.mjs`, and `scripts/build-mcpb.mjs`
+   normalizes the archive timestamps, so the advertised bundle is byte-for-byte
    reproducible.
+
+   > **Scope of the `.mcpb` checksum.** The bundle contains only
+   > `mcpb/manifest.json` — a launcher that runs `npx -y @backblaze-labs/b2-mcp@<version>`.
+   > The reproducible SHA-256 therefore attests to the *launcher manifest*, not
+   > to the server code, which npx resolves from npm at runtime by version tag
+   > (no integrity/provenance pin). It is not an end-to-end supply-chain
+   > guarantee over the executed code; assurance for the npm package itself comes
+   > from the npm publish pipeline (`publish.yml`), not from this digest.
 2. On [smithery.ai/new](https://smithery.ai/new), pick the **Local (MCPB
    Bundle)** tab, namespace `backblaze-labs`, server id `b2-mcp`, and upload the
    `.mcpb`. (The legacy `smithery.yaml` is retained for older tooling.)
@@ -191,7 +204,9 @@ user's own B2 keys. Use the **Local (MCPB Bundle)** tab instead.
 
 1. Bump + `scripts/update-server-json-version.mjs` (syncs `server.json`,
    `lhm.plugin.json`, and `mcpb/manifest.json` versions).
-2. `pnpm run build:mcpb` and upload/publish the `.mcpb` to Smithery.
+2. `Publish Package` builds `b2-mcp.mcpb`, checksums it into `SHA256SUMS`, and
+   attaches it to the GitHub Release automatically. Download that asset and
+   upload/publish it to Smithery (no local `pnpm run build:mcpb` required).
 3. Regenerate `lhm.plugin.json` and `lhm plugin update`.
 4. Cut a new Glama release (rerun the Dockerfile deploy → Make Release).
 5. Confirm the registry badge shows the new version.

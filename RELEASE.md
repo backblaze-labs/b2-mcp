@@ -89,8 +89,11 @@ Before publishing `v0.1.0`:
     the protected live B2 contract workflow as a pre-release gate, verify the
     tarball SHA-256, publish the staged package directory only after its
     repacked tarball matches the scanned artifact, verify registry metadata with
-    bounded retry, publish and verify the GHCR image, and attach the SBOM to the
-    GitHub Release only after npm publish and GHCR publishing succeed.
+    bounded retry, publish and verify the GHCR image, and attach the SBOM and
+    the reproducible MCPB desktop-extension bundle (`b2-mcp.mcpb`) to the GitHub
+    Release only after npm publish and GHCR publishing succeed. The `.mcpb` is
+    built with `pnpm run build:mcpb`, its SHA-256 is recorded in `SHA256SUMS`,
+    and the release job re-verifies the bundle digest before upload.
 13. Confirm the release tag ruleset only allows release owners to create
     `v*` tags and does not allow force-updating or deleting release tags.
 14. Confirm `refs/heads/ci-green` is treated as an owned protected marker:
@@ -238,10 +241,11 @@ exists. For the first public package only:
    ```
 7. After npm/GHCR/GitHub Release succeed, run the per-release directory actions
    in [`docs/references/discoverability.md`](docs/references/discoverability.md) ("On every release"):
-   build and upload the `.mcpb` bundle (`pnpm run build:mcpb`) through Smithery's
-   Local publish tab, refresh the LobeHub listing (`lhm plugin update`), and cut
-   a new Glama release. These are manual and are not part of `Publish Package`,
-   so skipping them leaves the directory listings advertising the prior version.
+   submit the `.mcpb` bundle — already built and attached to the GitHub Release
+   by `Publish Package` — through Smithery's Local publish tab, refresh the
+   LobeHub listing (`lhm plugin update`), and cut a new Glama release. These are
+   manual and are not part of `Publish Package`, so skipping them leaves the
+   directory listings advertising the prior version.
 
 ## Build Version and Release Channel
 

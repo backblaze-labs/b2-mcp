@@ -11,6 +11,10 @@ const testFiles = [
   "tests/unit/http-server.unit.test.ts",
   "tests/unit/http-transport.unit.test.ts",
   "tests/contract/tools-schema.contract.test.ts",
+  // Packs and parses the MCPB bundle so host-specific launcher/ZIP-metadata
+  // regressions (the `.cmd`-shim launch path, the byte-reproducibility
+  // normalization) are caught on the Windows/macOS matrix, not just Linux.
+  "tests/contract/mcpb-bundle.contract.test.ts",
   "tests/protocol/stdio.modern-protocol.test.ts",
   "tests/protocol/stdio.transport.modern-protocol.test.ts",
   "tests/protocol/stdio.transport.legacy-protocol.test.ts",

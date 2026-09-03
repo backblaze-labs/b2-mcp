@@ -83,6 +83,30 @@ export function verifyReleaseInput(root, tag) {
     packageJsonPath: path.join(root, "package.json"),
     expectedVersion: pkg.version,
   });
+  const mcpbManifest = readJson(root, "mcpb/manifest.json");
+  assert(
+    mcpbManifest.version === pkg.version,
+    `mcpb/manifest.json version ${mcpbManifest.version} does not match package version ${pkg.version}`,
+  );
+  assert(mcpbManifest.name === "b2-mcp", `unexpected mcpb/manifest.json name ${mcpbManifest.name}`);
+  const mcpbConfig = mcpbManifest.server?.mcp_config ?? {};
+  assert(
+    mcpbConfig.command === "npx",
+    `mcpb/manifest.json launcher command must be npx, got ${mcpbConfig.command}`,
+  );
+  // Fail closed with an exact allowlist rather than parsing arbitrary npx options:
+  // the only supported launcher is `npx -y <pinnedSpec>`. Any extra flag (e.g.
+  // --package=, --call=, --registry) could change what npx executes or where it
+  // resolves it, so require the exact argument array.
+  const pinnedSpec = `${canonicalPackageName}@${pkg.version}`;
+  const expectedArgs = ["-y", pinnedSpec];
+  const mcpbArgs = mcpbConfig.args ?? [];
+  assert(
+    Array.isArray(mcpbArgs) &&
+      mcpbArgs.length === expectedArgs.length &&
+      mcpbArgs.every((arg, index) => arg === expectedArgs[index]),
+    `mcpb/manifest.json npx launcher args must be exactly ${JSON.stringify(expectedArgs)}, got ${JSON.stringify(mcpbArgs)}`,
+  );
   assert(
     pkg.engines?.node === runtimePolicy.engineRange,
     `package engine range must be ${runtimePolicy.engineRange}`,
