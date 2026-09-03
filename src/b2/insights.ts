@@ -1118,7 +1118,7 @@ export function registerInsightTools(
   auth: B2AuthManager,
   reportClient: ReportObjectClient = new B2ReportClient(auth),
 ): void {
-  // ── b2_report_usage_growth ───────────────────────────────────────────────────────
+  // ── b2_report_usage_growth ─────────────────────────────────────────────────
   server.registerTool(
     "b2_report_usage_growth",
     {
@@ -1217,7 +1217,7 @@ export function registerInsightTools(
     },
   );
 
-  // ── b2_rank_egress_leaders ─────────────────────────────────────────────────────
+  // ── b2_rank_egress_leaders ─────────────────────────────────────────────────
   server.registerTool(
     "b2_rank_egress_leaders",
     {
@@ -1300,7 +1300,7 @@ export function registerInsightTools(
     },
   );
 
-  // ── b2_list_largest_files ──────────────────────────────────────────────────────
+  // ── b2_list_largest_files ──────────────────────────────────────────────────
   server.registerTool(
     "b2_list_largest_files",
     {
@@ -1427,7 +1427,7 @@ export function registerInsightTools(
     },
   );
 
-  // ── b2_unfinished_uploads ─────────────────────────────────────────────────
+  // ── b2_unfinished_uploads ──────────────────────────────────────────────────
   server.registerTool(
     "b2_unfinished_uploads",
     {
