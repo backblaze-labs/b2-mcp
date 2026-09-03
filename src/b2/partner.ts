@@ -554,14 +554,14 @@ export function registerPartnerTools(
       "b2_reserve_trial_create_account",
       {
         description:
-          "Reserve a B2 trial account through the Partner API. Available only in explicit inline mode because Reserve Trial has no provider-side recovery path if a file sink write fails after account creation.",
+          "Reserve and create a B2 Reserve trial account through the Partner API, returning a durable application key for the new account. Requires a Partner-entitled master key, and is a billable, irreversible account creation governed by the destructive-operation gate. Available only in explicit inline secret-sink mode because Reserve Trial has no provider-side recovery path if a file-sink write fails after account creation; the minted key is shown once, so capture it. Reuse the same idempotencyKey only to retry the identical request — a new key value creates another account. Use b2_create_group_member to add an account to an existing Partner group instead of provisioning a standalone trial.",
         inputSchema: {
           email: z.string().email().describe("Email address for the new B2 Reserve trial account."),
           region: z
             .enum(REGION_VALUES)
             .nullable()
             .optional()
-            .describe("Optional data region for the new account."),
+            .describe("Optional data region for the new account; omit to use the Partner default."),
           term: z.number().int().min(7).max(30).describe("Trial duration in days (7-30)."),
           storage: z.number().int().min(1).max(50).describe("Trial storage amount in TB (1-50)."),
           idempotencyKey: z

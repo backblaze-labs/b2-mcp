@@ -144,7 +144,7 @@
     },
     {
       "name": "b2_create_bucket",
-      "descriptionSha256": "dc3137d3190670a36187ff96ed34f03e7c3e84048927e595bf1aba68ee88fb0a",
+      "descriptionSha256": "18907bad781929710c2adacfa9c80f63a250f061add1d0bf1c8080cf97b2f63b",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -1249,11 +1249,12 @@
     },
     {
       "name": "s3_create_multipart_upload",
-      "descriptionSha256": "6a2c69b510eab88f817fe26f68ea02c62bd1836cfb754dc007e9c6a2248ac735",
+      "descriptionSha256": "6ac14d0a0f837fee403cd883ba6a535a8e1d158312531505a46676eb72b2e561",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
           "acl": {
+            "description": "Canned ACL for the final object: 'private' (default) or 'public-read'; bucket visibility still governs access.",
             "enum": ["private", "public-read"],
             "type": "string"
           },
@@ -1262,7 +1263,7 @@
             "type": "string"
           },
           "contentType": {
-            "description": "MIME type of the object.",
+            "description": "MIME type recorded on the final assembled object.",
             "type": "string"
           },
           "key": {
@@ -1273,7 +1274,7 @@
             "additionalProperties": {
               "type": "string"
             },
-            "description": "Custom metadata for the object.",
+            "description": "Custom metadata stored on the final object.",
             "propertyNames": {
               "type": "string"
             },
@@ -1910,7 +1911,7 @@
     },
     {
       "name": "s3_upload_part_copy",
-      "descriptionSha256": "86b2bd390e25226f42a275c46f92842ec91bba00e968d89ccd4a20caf8b41f67",
+      "descriptionSha256": "7f6440f79e06455a2dd731e28cdbb7c4b956024b5ec8f2b084738e4681a6a64b",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -1923,11 +1924,11 @@
             "type": "string"
           },
           "copySourceRange": {
-            "description": "Byte range to copy from the source, e.g. 'bytes=0-104857599' for the first 100MB.",
+            "description": "Byte range to copy from the source, e.g. 'bytes=0-104857599' for the first 100MB; omit to copy the entire source object. The copied range must be ≥5 MiB unless this is the last part.",
             "type": "string"
           },
           "copySourceVersionId": {
-            "description": "Version ID of the source object to copy from.",
+            "description": "Version ID of the source object to copy; omit to copy the current version. It is folded into the copy source so the exact version is copied rather than the live one.",
             "type": "string"
           },
           "key": {
@@ -1960,5 +1961,5 @@
     "toolsListCacheHint": null,
     "discover": null
   },
-  "hash": "2f60e933766c9b698536d5b38fce4dd23e27285a079df085e7cba17f981bb1bc"
+  "hash": "2b4d5729fe8948c2a1856b4e43842126ca04c36d54774dd29efaa7ebeb39f801"
 }
