@@ -130,6 +130,7 @@ describe("package surface policy", () => {
     expect(files).toContain("docs/references/deployment/vercel.md");
     expect(files).toContain("docs/generated/tool-profile-contract.json");
     expect(files).toContain("docs/generated/tool-profiles.md");
+    expect(files).toContain("PRIVACY.md");
     expect(pkg.files.filter((file) => file.startsWith("skills/"))).toEqual(skillsPack.packageFiles);
     for (const skillPath of skillsPack.packageFiles) {
       expect(files).toContain(skillPath);

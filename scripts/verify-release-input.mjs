@@ -25,6 +25,7 @@ const requiredFiles = new Set([
   "docs/generated/tool-profiles.md",
   "README.md",
   "CHANGELOG.md",
+  "PRIVACY.md",
   "SECURITY.md",
   "LICENSE",
 ]);

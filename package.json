@@ -31,7 +31,7 @@
     "build": "pnpm run clean && tsc",
     "build:mcpb": "node scripts/build-mcpb.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
-    "docs": "typedoc",
+    "docs": "typedoc && node scripts/write-privacy-page.mjs",
     "docs:watch": "typedoc --watch",
     "start": "node dist/index.js",
     "start:http": "node dist/http-server.js",
@@ -181,6 +181,7 @@
     "tests/fixtures/tool-contract/*.json",
     "README.md",
     "CHANGELOG.md",
+    "PRIVACY.md",
     "SECURITY.md",
     "LICENSE"
   ]

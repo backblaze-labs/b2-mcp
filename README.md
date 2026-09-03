@@ -622,6 +622,20 @@ details are documented in [`docs/AUTHENTICATION.md`](docs/AUTHENTICATION.md).
 
 ---
 
+## Privacy
+
+b2-mcp runs locally over stdio or in a self-hosted HTTP deployment controlled by
+the user or operator. The publisher does not receive runtime B2 credentials,
+object data, prompts, logs, or telemetry from normal use. Object-byte workflows
+should use presigned URLs so bytes move directly between the client or worker
+and Backblaze B2, and logs are structured with secret redaction.
+
+Read the canonical [`PRIVACY.md`](PRIVACY.md) source or the hosted
+[privacy policy](https://backblaze-labs.github.io/b2-mcp/privacy/) published by
+GitHub Pages.
+
+---
+
 ## Development
 
 ```bash
@@ -657,6 +671,7 @@ committed lockfile and a sanitized temporary environment.
 ## Documentation
 
 - [API reference](https://backblaze-labs.github.io/b2-mcp/) — generated TypeDoc for the public `src` surface, published to GitHub Pages from `main`
+- [Privacy policy](https://backblaze-labs.github.io/b2-mcp/privacy/) / [`PRIVACY.md`](PRIVACY.md) — runtime data-handling policy for local and self-hosted deployments
 - [`docs/product-specs/clients.md`](docs/product-specs/clients.md) — per-client setup + compatibility matrix
 - [`docs/AUTHENTICATION.md`](docs/AUTHENTICATION.md) — OAuth, credential custody, and auth boundary
 - [`docs/DEPLOY.md`](docs/DEPLOY.md) — deployment matrix and supported-host links

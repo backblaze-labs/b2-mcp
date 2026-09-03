@@ -10,6 +10,7 @@
   "documentation": "https://github.com/backblaze-labs/b2-mcp#readme",
   "support": "https://github.com/backblaze-labs/b2-mcp/issues",
   "license": "MIT",
+  "privacy_policies": ["https://backblaze-labs.github.io/b2-mcp/privacy/"],
   "keywords": ["backblaze", "b2", "storage", "object-storage", "s3", "mcp"],
   "server": {
     "type": "node",
