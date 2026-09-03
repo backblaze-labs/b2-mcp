@@ -754,9 +754,7 @@ function explicitPackageRunCommand(args) {
 // returns null both when no explicit package was supplied and when one was but no
 // run command follows; this distinguishes the second (an error in strict mode).
 function hasExplicitPackageOption(args) {
-  return args.some(
-    (arg) => arg === "--package" || arg === "-p" || arg.startsWith("--package="),
-  );
+  return args.some((arg) => arg === "--package" || arg === "-p" || arg.startsWith("--package="));
 }
 
 function parsePackageSpec(packageSpec) {

@@ -164,7 +164,9 @@ describe("documentation example validator policy", () => {
 
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain(`README.md:${expectedLine}`);
-    expect(result.stderr).toContain("pinned client config command node must be an exported package binary");
+    expect(result.stderr).toContain(
+      "pinned client config command node must be an exported package binary",
+    );
   });
 
   it("accepts a pinned client fence whose --package command is a package binary", () => {
@@ -188,8 +190,16 @@ describe("documentation example validator policy", () => {
   });
 
   it.each([
-    ["mutable version", "npx.cmd -y @backblaze-labs/b2-mcp@latest --version", "must not execute mutable-versioned package examples"],
-    ["package drift", "npx.cmd -y @attacker/b2-mcp@0.2.0 --version", "references package @attacker/b2-mcp@0.2.0"],
+    [
+      "mutable version",
+      "npx.cmd -y @backblaze-labs/b2-mcp@latest --version",
+      "must not execute mutable-versioned package examples",
+    ],
+    [
+      "package drift",
+      "npx.cmd -y @attacker/b2-mcp@0.2.0 --version",
+      "references package @attacker/b2-mcp@0.2.0",
+    ],
   ])("rejects an npx.cmd launcher with a %s", (_label, command, message) => {
     const readme = read("README.md").replace(
       "npx -y @backblaze-labs/b2-mcp@0.2.0 --version",
@@ -246,8 +256,8 @@ describe("documentation example validator policy", () => {
   });
 
   it.each([
-    ['quoted ; operator', 'npm --prefix "/tmp;cache" install -g @attacker/b2-mcp@0.2.0'],
-    ['quoted | operator', 'npm --prefix "/tmp|cache" install -g @attacker/b2-mcp@0.2.0'],
+    ["quoted ; operator", 'npm --prefix "/tmp;cache" install -g @attacker/b2-mcp@0.2.0'],
+    ["quoted | operator", 'npm --prefix "/tmp|cache" install -g @attacker/b2-mcp@0.2.0'],
   ])("rejects a global npm install whose %s hides the drift", (_label, command) => {
     const readme = read("README.md").replace(
       "npm install -g @backblaze-labs/b2-mcp@0.2.0",
