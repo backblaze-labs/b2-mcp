@@ -120,9 +120,16 @@ export function assertSupportedMarkdown(markdown) {
     }
     // Reject every CommonMark thematic break (3+ of -, *, or _, optionally
     // space-separated: `---`, `- - -`, `***`, `___`, `_ _ _`) plus setext
-    // underlines (`===`). Matching only the compact `---` let a spaced `- - -`
-    // fall through to the bullet rule and render as `<ul><li>- -</li></ul>`.
-    if (/^([-*_])(?:[ \t]*\1){2,}$/.test(trimmed) || /^={3,}$/.test(trimmed)) {
+    // underlines. Matching only the compact `---` let a spaced `- - -` fall
+    // through to the bullet rule and render as `<ul><li>- -</li></ul>`.
+    // CommonMark accepts one or more `=` or `-` as a setext underline, so
+    // `Title\n=`, `Title\n==`, `Title\n-`, and `Title\n--` must fail closed
+    // too; matching only `={3,}` merged those into a paragraph.
+    if (
+      /^([-*_])(?:[ \t]*\1){2,}$/.test(trimmed) ||
+      /^=+$/.test(trimmed) ||
+      /^-+$/.test(trimmed)
+    ) {
       unsupported(lineNumber, "horizontal rules and alternate headings are not supported");
     }
 
