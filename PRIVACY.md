@@ -1,6 +1,6 @@
 # Privacy Policy
 
-Effective date: September 3, 2026
+Effective date: September 2, 2026
 
 This policy covers the `@backblaze-labs/b2-mcp` server software published from
 the [backblaze-labs/b2-mcp](https://github.com/backblaze-labs/b2-mcp)

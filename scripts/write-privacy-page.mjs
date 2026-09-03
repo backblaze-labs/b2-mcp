@@ -1,14 +1,19 @@
 #!/usr/bin/env node
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const privacyMarkdownPath = join(root, "PRIVACY.md");
-const outputRoot = join(root, "api-docs");
-const privacyDir = join(outputRoot, "privacy");
-const hostedPrivacyUrl = "https://backblaze-labs.github.io/b2-mcp/privacy/";
-const repoBlobUrl = "https://github.com/backblaze-labs/b2-mcp/blob/main/";
+const defaultPrivacyMarkdownPath = join(root, "PRIVACY.md");
+const defaultOutputRoot = join(root, "api-docs");
+
+export const HOSTED_PRIVACY_URL = "https://backblaze-labs.github.io/b2-mcp/privacy/";
+export const REPO_BLOB_URL = "https://github.com/backblaze-labs/b2-mcp/blob/main/";
+
+// Supported Markdown subset for PRIVACY.md: blank lines, paragraphs, #/##/###
+// headings, top-level "- " bullets with indented continuation lines, inline
+// links, and inline code spans. The generator fails closed on unsupported
+// constructs so the hosted page cannot silently drift from the canonical file.
 
 function escapeHtml(value) {
   return value
@@ -30,10 +35,100 @@ function linkTarget(rawTarget) {
   if (/^(?:https?:|mailto:|tel:)/i.test(rawTarget) || rawTarget.startsWith("#")) {
     return rawTarget;
   }
-  return `${repoBlobUrl}${rawTarget.replace(/^\.\//, "")}`;
+  return `${REPO_BLOB_URL}${rawTarget.replace(/^\.\//, "")}`;
 }
 
-function renderInline(markdown) {
+function withoutSupportedInline(markdown) {
+  return markdown
+    .replace(/`[^`\n]+`/g, "")
+    .replace(/\[[^\]\n]+\]\([^) \n]+(?:\s+"[^"\n]+")?\)/g, "");
+}
+
+function unsupported(lineNumber, message) {
+  throw new Error(`unsupported Markdown in PRIVACY.md line ${lineNumber}: ${message}`);
+}
+
+function assertSupportedInline(markdown, lineNumber) {
+  if (/!\[[^\]\n]*\]\([^)]+\)/.test(markdown)) {
+    unsupported(lineNumber, "images are not supported");
+  }
+
+  const text = withoutSupportedInline(markdown);
+  if (/[*_~]/.test(text)) {
+    unsupported(lineNumber, "emphasis and strikethrough are not supported");
+  }
+  if (/[<>]/.test(text)) {
+    unsupported(lineNumber, "raw HTML and autolinks are not supported");
+  }
+  if (/\[|\]/.test(text)) {
+    unsupported(lineNumber, "only inline [text](url) links are supported");
+  }
+}
+
+export function assertSupportedMarkdown(markdown) {
+  let inList = false;
+
+  for (const [index, line] of markdown.split(/\r?\n/).entries()) {
+    const lineNumber = index + 1;
+    const trimmed = line.trim();
+    if (!trimmed) {
+      inList = false;
+      continue;
+    }
+
+    if (/^ {0,3}(`{3,}|~{3,})/.test(line)) {
+      unsupported(lineNumber, "fenced code blocks are not supported");
+    }
+    if (/^ {0,3}>/.test(line)) {
+      unsupported(lineNumber, "block quotes are not supported");
+    }
+    if (/^ {0,3}\[[^\]\n]+\]:/.test(line)) {
+      unsupported(lineNumber, "reference links are not supported");
+    }
+    if (/^ {0,3}\|/.test(line) || /^\s*\|?[\s:-]+\|[\s|:-]*$/.test(line)) {
+      unsupported(lineNumber, "tables are not supported");
+    }
+    if (/^ {0,3}#{4,6}\s+/.test(line)) {
+      unsupported(lineNumber, "only #, ##, and ### headings are supported");
+    }
+    if (/^(?:\d+[.)]|[*+])\s+/.test(line)) {
+      unsupported(lineNumber, "only top-level '- ' unordered lists are supported");
+    }
+    if (/^\s+(?:[-*+]|\d+[.)])\s+/.test(line)) {
+      unsupported(lineNumber, "nested lists are not supported");
+    }
+    if (/^(?:-{3,}|={3,})$/.test(trimmed)) {
+      unsupported(lineNumber, "horizontal rules and alternate headings are not supported");
+    }
+
+    const heading = line.match(/^(#{1,3})\s+(.+)$/);
+    if (heading) {
+      inList = false;
+      assertSupportedInline(heading[2], lineNumber);
+      continue;
+    }
+
+    const bullet = line.match(/^- (.+)$/);
+    if (bullet) {
+      inList = true;
+      assertSupportedInline(bullet[1], lineNumber);
+      continue;
+    }
+
+    if (/^\s+/.test(line)) {
+      if (inList && /^ {2,}\S/.test(line)) {
+        assertSupportedInline(trimmed, lineNumber);
+        continue;
+      }
+      unsupported(lineNumber, "indented blocks are only supported as list continuations");
+    }
+
+    inList = false;
+    assertSupportedInline(trimmed, lineNumber);
+  }
+}
+
+export function renderInline(markdown) {
   const inlinePattern = /\[([^\]\n]+)\]\(([^)\n]+)\)|`([^`\n]+)`/g;
   let output = "";
   let cursor = 0;
@@ -51,10 +146,13 @@ function renderInline(markdown) {
   return output;
 }
 
-function renderMarkdown(markdown) {
+export function renderMarkdown(markdown) {
+  assertSupportedMarkdown(markdown);
+
   const html = [];
   const paragraph = [];
   let listOpen = false;
+  let currentListItem = null;
 
   function closeParagraph() {
     if (paragraph.length === 0) return;
@@ -62,8 +160,15 @@ function renderMarkdown(markdown) {
     paragraph.length = 0;
   }
 
+  function closeListItem() {
+    if (!currentListItem) return;
+    html.push(`<li>${renderInline(currentListItem.join(" "))}</li>`);
+    currentListItem = null;
+  }
+
   function closeList() {
     if (!listOpen) return;
+    closeListItem();
     html.push("</ul>");
     listOpen = false;
   }
@@ -89,14 +194,21 @@ function renderMarkdown(markdown) {
     const bullet = line.match(/^- (.+)$/);
     if (bullet) {
       closeParagraph();
+      closeListItem();
       if (!listOpen) {
         html.push("<ul>");
         listOpen = true;
       }
-      html.push(`<li>${renderInline(bullet[1].trim())}</li>`);
+      currentListItem = [bullet[1].trim()];
       continue;
     }
 
+    if (listOpen && currentListItem && /^ {2,}\S/.test(line)) {
+      currentListItem.push(line.trim());
+      continue;
+    }
+
+    closeList();
     paragraph.push(line.trim());
   }
 
@@ -105,14 +217,14 @@ function renderMarkdown(markdown) {
   return html.join("\n");
 }
 
-function pageHtml(markdown) {
+export function pageHtml(markdown) {
   const body = renderMarkdown(markdown);
   return `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <link rel="canonical" href="${hostedPrivacyUrl}">
+    <link rel="canonical" href="${HOSTED_PRIVACY_URL}">
     <title>Privacy Policy | Backblaze B2 MCP Server</title>
     <style>
       :root {
@@ -227,7 +339,7 @@ ${body
   .map((line) => `      ${line}`)
   .join("\n")}
       <footer>
-        Source: <a href="https://github.com/backblaze-labs/b2-mcp/blob/main/PRIVACY.md">PRIVACY.md</a>
+        Source: <a href="${REPO_BLOB_URL}PRIVACY.md">PRIVACY.md</a>
       </footer>
     </main>
   </body>
@@ -235,9 +347,23 @@ ${body
 `;
 }
 
-const markdown = readFileSync(privacyMarkdownPath, "utf8");
-const html = pageHtml(markdown);
-mkdirSync(privacyDir, { recursive: true });
-writeFileSync(join(privacyDir, "index.html"), html);
-writeFileSync(join(outputRoot, "privacy.html"), html);
-console.log(`privacy-page: wrote ${hostedPrivacyUrl}`);
+export function writePrivacyPage({
+  privacyMarkdownPath = defaultPrivacyMarkdownPath,
+  outputRoot = defaultOutputRoot,
+  log = console.log,
+} = {}) {
+  const privacyDir = join(outputRoot, "privacy");
+  const markdown = readFileSync(privacyMarkdownPath, "utf8");
+  const html = pageHtml(markdown);
+  mkdirSync(privacyDir, { recursive: true });
+  const indexPath = join(privacyDir, "index.html");
+  const legacyPath = join(outputRoot, "privacy.html");
+  writeFileSync(indexPath, html);
+  writeFileSync(legacyPath, html);
+  log(`privacy-page: wrote ${HOSTED_PRIVACY_URL}`);
+  return { hostedPrivacyUrl: HOSTED_PRIVACY_URL, files: [indexPath, legacyPath] };
+}
+
+if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+  writePrivacyPage();
+}
