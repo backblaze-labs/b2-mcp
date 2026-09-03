@@ -327,6 +327,29 @@ describe("configFromHeaders — credential model", () => {
     expect(cfg?.applicationKeyId).toBe("app-id");
   });
 
+  it("does not authenticate the removed short X-B2-Key-* primary headers", () => {
+    // Short X-B2-Key-* is no longer parsed, so header-mode credential resolution
+    // sees no primary pair and returns null instead of authenticating.
+    expect(
+      configFromHeaders({ headers: { "x-b2-key-id": "app-id", "x-b2-key": "app-secret" } }),
+    ).toBeNull();
+  });
+
+  it("ignores the removed short X-B2-Master-Key-* headers and falls back to the app key", () => {
+    const cfg = configFromHeaders({
+      headers: {
+        "x-b2-mcp-key-id": "app-id",
+        "x-b2-mcp-key": "app-secret",
+        "x-b2-master-key-id": "s3-master-id",
+        "x-b2-master-key": "s3-master-secret",
+      },
+    });
+    // The retired short master header is not parsed; master mirrors the app key.
+    expect(cfg?.applicationKeyId).toBe("app-id");
+    expect(cfg?.masterKeyId).toBe("app-id");
+    expect(cfg?.masterKey).toBe("app-secret");
+  });
+
   it("accepts the explicit X-B2-MCP-* header names", () => {
     const cfg = configFromHeaders({
       headers: { "x-b2-mcp-key-id": "app-id", "x-b2-mcp-key": "app-secret" },
