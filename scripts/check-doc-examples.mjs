@@ -497,7 +497,19 @@ function parseJsoncFragment(file, fence) {
 }
 
 function validateJsonCommandConfigs(file, fence, value, expectedPackage, options = {}) {
-  for (const commandConfig of findCommandConfigs(value)) {
+  const commandConfigs = findCommandConfigs(value);
+  // The strict pinned/global-binary fences enforce properties of a launch
+  // command, so an empty config set must fail closed. Otherwise replacing the
+  // documented config with `{}` (or dropping `command`/`path`) silently passes
+  // even though there is nothing to launch.
+  if (
+    (options.requireExactVersion || options.requireExportedBinary) &&
+    commandConfigs.length === 0
+  ) {
+    addFinding(file, fence.line, "strict client config fence must declare a launch command");
+    return;
+  }
+  for (const commandConfig of commandConfigs) {
     validatePackageCommand(file, fence.line, commandConfig, expectedPackage, options);
     validateDirectClientCommand(file, fence.line, commandConfig, options);
   }
@@ -783,13 +795,25 @@ function validatePackageNameReferences(file, text, startLine) {
   // Accept the same skip-confirmation option forms `firstPackageArg` honors
   // (`-y` and the long-form `--yes`); otherwise `npx --yes @attacker/...` drifts
   // to another package with no finding because only `-y` was permitted here.
+  // Capture both scoped (`@scope/name`) and unscoped (`name`) operands so the
+  // unscoped drift `npx -y b2-mcp@0.2.0` is not missed by a scoped-only regex.
   const npxPackagePattern =
-    /\bnpx\s+(?:(?:-y|--yes)\s+)*(@[a-z0-9._-]+\/[a-z0-9._-]+(?:@[^\s`"',\]]+)?)/g;
+    /\bnpx\s+(?:(?:-y|--yes)\s+)*((?:@[a-z0-9._-]+\/)?[a-z0-9._-]+(?:@[^\s`"',\]]+)?)/g;
+  // Our own unscoped name (for example `b2-mcp`). Unscoped operands are only
+  // flagged when they collide with it, so unrelated launchers such as
+  // `npx wrangler` in a validated fence are not false-positived.
+  const unscopedName = pkg.name.includes("/")
+    ? pkg.name.slice(pkg.name.indexOf("/") + 1)
+    : pkg.name;
   for (const { line, text: logicalLine } of foldShellContinuations(text)) {
     for (const match of logicalLine.matchAll(npxPackagePattern)) {
       const packageSpec = match[1];
       const parsedPackageSpec = parsePackageSpec(packageSpec);
-      if (parsedPackageSpec?.name !== pkg.name) {
+      if (!parsedPackageSpec) continue;
+      const drifts = parsedPackageSpec.name.startsWith("@")
+        ? parsedPackageSpec.name !== pkg.name
+        : parsedPackageSpec.name === unscopedName && pkg.name !== unscopedName;
+      if (drifts) {
         addFinding(
           file,
           startLine + line - 1,

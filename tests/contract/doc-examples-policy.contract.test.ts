@@ -110,6 +110,29 @@ describe("documentation example validator policy", () => {
     },
   );
 
+  it("rejects the global binary fence when its launch command is removed", () => {
+    const readme = read("README.md").replace('"command": "b2-mcp"', '"note": "b2-mcp"');
+    const expectedLine = lineOf(readme, '```json\n   {\n     "note": "b2-mcp"');
+    const result = runDocExamplesWithOverrides({ "README.md": readme });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(`README.md:${expectedLine}`);
+    expect(result.stderr).toContain("strict client config fence must declare a launch command");
+  });
+
+  it("rejects the pinned client fence when its launch command is removed", () => {
+    const readme = read("README.md").replace(
+      '"command": "npx",\n     "args": ["-y", "@backblaze-labs/b2-mcp@0.2.0"]',
+      '"note": "removed"',
+    );
+    const expectedLine = lineOf(readme, '```json\n   {\n     "note": "removed"');
+    const result = runDocExamplesWithOverrides({ "README.md": readme });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(`README.md:${expectedLine}`);
+    expect(result.stderr).toContain("strict client config fence must declare a launch command");
+  });
+
   it("rejects an npx --yes long-form launcher that drifts to another package", () => {
     const readme = read("README.md").replace(
       "npx -y @backblaze-labs/b2-mcp@0.2.0 --version",
@@ -121,6 +144,19 @@ describe("documentation example validator policy", () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain(`README.md:${expectedLine}`);
     expect(result.stderr).toContain("references package @attacker/b2-mcp@0.2.0");
+  });
+
+  it("rejects an unscoped npx launcher that drifts from the scoped package", () => {
+    const readme = read("README.md").replace(
+      "npx -y @backblaze-labs/b2-mcp@0.2.0 --version",
+      "npx -y b2-mcp@0.2.0 --version",
+    );
+    const expectedLine = lineOf(readme, "npx -y b2-mcp@0.2.0 --version");
+    const result = runDocExamplesWithOverrides({ "README.md": readme });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(`README.md:${expectedLine}`);
+    expect(result.stderr).toContain("references package b2-mcp@0.2.0");
   });
 
   it("rejects a global npm install with a valid operand plus an extra URL operand", () => {
