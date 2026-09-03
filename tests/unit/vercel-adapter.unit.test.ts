@@ -646,4 +646,34 @@ describe("Vercel adapter", () => {
       "vercel.config.invalid",
     );
   });
+
+  it.each([
+    "B2_APP_KEY",
+    "B2_APP_KEY_ID",
+    "B2_CREDENTIAL_TENANT_A_APP_KEY",
+    "B2_CREDENTIAL_TENANT_A_APP_KEY_ID",
+  ])("does not trip the preview custody guard on the retired alias %s", async (name) => {
+    // The server no longer reads B2_APP_KEY* (issue #386), so the preview custody
+    // guard must not treat a lingering retired alias as guarded credential
+    // material. Canonical creds are removed so the alias is the only credential-
+    // shaped env var; the preview rejection must not fire for it.
+    delete process.env.B2_APPLICATION_KEY_ID;
+    delete process.env.B2_APPLICATION_KEY;
+    process.env.VERCEL_ENV = "preview";
+    process.env[name] = "credential-material";
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+
+    const response = await vercelHealthFetch(
+      new Request("https://mcp.example.com/health", { headers: { host: "mcp.example.com" } }),
+    );
+    const body = (await response.json()) as { error?: string };
+
+    expect(warn).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        err: expect.stringContaining("Preview B2 credentials require"),
+      }),
+      "vercel.config.invalid",
+    );
+    expect(body.error ?? "").not.toContain("Preview B2 credentials require");
+  });
 });

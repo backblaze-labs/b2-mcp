@@ -15,8 +15,12 @@ import { logger } from "../../src/utils/logger.js";
 const ALLOW_HEADER_MODE_FLAG = "B2_VERCEL_ALLOW_HEADER_CREDENTIAL_MODE";
 const ALLOW_PREVIEW_B2_CREDENTIALS_FLAG = "B2_VERCEL_ALLOW_PREVIEW_B2_CREDENTIALS";
 const ALLOW_SHARED_SERVER_CREDENTIAL_FLAG = "B2_VERCEL_ALLOW_SHARED_SERVER_CREDENTIAL";
+// Only the canonical credential names the server actually reads are guarded. The
+// retired B2_APP_KEY* aliases (issue #386) are no longer read, so blocking a
+// preview deploy on them would be a vestigial false positive. Log-redaction
+// still scrubs those names (see src/utils/secret-sanitizer.ts).
 const PREVIEW_B2_CREDENTIAL_ENV_PATTERN =
-  /^B2_(?:APPLICATION_KEY|APP_KEY|MASTER_KEY)(?:_ID)?$|^B2_CREDENTIAL_[A-Z0-9_]+_(?:APPLICATION_KEY|APP_KEY|MASTER_KEY)(?:_ID)?$/;
+  /^B2_(?:APPLICATION_KEY|MASTER_KEY)(?:_ID)?$|^B2_CREDENTIAL_[A-Z0-9_]+_(?:APPLICATION_KEY|MASTER_KEY)(?:_ID)?$/;
 
 export interface VercelMcpFetchContext extends ServerlessMcpFetchContext {}
 
