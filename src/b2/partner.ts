@@ -554,7 +554,7 @@ export function registerPartnerTools(
       "b2_reserve_trial_create_account",
       {
         description:
-          "Reserve and create a B2 Reserve trial account through the Partner API, returning a durable application key for the new account. Requires a Partner-entitled master key, and is a billable, irreversible account creation governed by the destructive-operation gate. Available only in explicit inline secret-sink mode because Reserve Trial has no provider-side recovery path if a file-sink write fails after account creation; the minted key is shown once, so capture it. Reuse the same idempotencyKey only to retry the identical request — a new key value creates another account. Use b2_create_group_member to add an account to an existing Partner group instead of provisioning a standalone trial.",
+          "Reserve and create a B2 Reserve trial account through the Partner API, returning a durable application key for the new account. Requires a Partner-entitled master key, and is a billable, irreversible account creation governed by the destructive-operation gate. Available only in explicit inline secret-sink mode because Reserve Trial has no provider-side recovery path if a file-sink write fails after account creation; the minted key is shown once, so capture it. Retries are not deduplicated server-side, so repeating the call can create another account regardless of idempotencyKey; verify whether the account already exists and reconcile before retrying. Use b2_create_group_member to add an account to an existing Partner group instead of provisioning a standalone trial.",
         inputSchema: {
           email: z.string().email().describe("Email address for the new B2 Reserve trial account."),
           region: z
@@ -568,7 +568,7 @@ export function registerPartnerTools(
             .string()
             .min(1)
             .describe(
-              "Caller-generated idempotency key. Reuse the same value only when retrying the identical reserve-trial account creation request.",
+              "Caller-generated idempotency key recorded with the request. Note: in inline mode retries are not deduplicated server-side, so reconcile before retrying rather than relying on this key to prevent a duplicate account.",
             ),
           confirm: z
             .boolean()

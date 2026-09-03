@@ -154,7 +154,7 @@
     },
     {
       "name": "b2_create_bucket",
-      "descriptionSha256": "18907bad781929710c2adacfa9c80f63a250f061add1d0bf1c8080cf97b2f63b",
+      "descriptionSha256": "0790047c3b422656820f636079092384e778c869e2c7acd4678899ff71de179d",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -1347,12 +1347,12 @@
     },
     {
       "name": "s3_create_multipart_upload",
-      "descriptionSha256": "08e41baed27672d1065b789c6044af1fa1eafcb05107b61929d46fec014b0f1e",
+      "descriptionSha256": "d91f990f43efa42cd0d4510d566601a66461f4f2e398f62d99c5c0f1b7bdef53",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
           "acl": {
-            "description": "Canned ACL for the final object: 'private' (default) or 'public-read'; bucket visibility still governs access.",
+            "description": "Accepted as a no-op S3 compatibility hint; B2 access follows the destination bucket policy.",
             "enum": ["private", "public-read"],
             "type": "string"
           },
@@ -2059,5 +2059,5 @@
     "toolsListCacheHint": null,
     "discover": null
   },
-  "hash": "f51f617a7256cf7853ab182f6b977ec9d9e1bf7896ca343e088ebe2d8f956193"
+  "hash": "3d11b3b3ff83a0cdd4dcfe7838fd00ed8cec6d745d3d252eea58eb22a7305e9e"
 }

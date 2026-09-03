@@ -25,7 +25,7 @@
     },
     {
       "name": "b2_create_bucket",
-      "description": "Create a persistent B2 bucket with optional metadata, CORS, lifecycle, default encryption, and Object Lock enablement. Use for initial provisioning with a key that has writeBuckets; use b2_update_bucket for later settings changes and s3_head_bucket to check S3 reachability. Bucket names are globally unique, case-insensitive, 6-63 characters, letters/digits/hyphens/periods, and cannot start with 'b2-', begin/end with a period, contain '..', or look like an IPv4 address. Because names are unique across all of B2, requesting a name already in use (by this or any other account) fails with a duplicate-name error instead of returning the existing bucket; choose a different name or reuse the existing bucket.",
+      "description": "Create a persistent B2 bucket with optional metadata, CORS, lifecycle, default encryption, and Object Lock enablement. Use for initial provisioning with a key that has writeBuckets; use b2_update_bucket for later settings changes and s3_head_bucket to check S3 reachability. Bucket names are globally unique, case-insensitive, 6-63 characters, letters/digits/hyphens/periods, and cannot start with 'b2-', begin/end with a period, contain '..', or look like an IPv4 address. Because names are unique across all of B2, requesting a name already in use (by this or any other account) fails with a duplicate-name error instead of returning the existing bucket; reuse the existing bucket only if it belongs to your own account, otherwise choose a different globally unique name.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -638,7 +638,7 @@
     },
     {
       "name": "b2_reserve_trial_create_account",
-      "description": "Reserve and create a B2 Reserve trial account through the Partner API, returning a durable application key for the new account. Requires a Partner-entitled master key, and is a billable, irreversible account creation governed by the destructive-operation gate. Available only in explicit inline secret-sink mode because Reserve Trial has no provider-side recovery path if a file-sink write fails after account creation; the minted key is shown once, so capture it. Reuse the same idempotencyKey only to retry the identical request — a new key value creates another account. Use b2_create_group_member to add an account to an existing Partner group instead of provisioning a standalone trial.",
+      "description": "Reserve and create a B2 Reserve trial account through the Partner API, returning a durable application key for the new account. Requires a Partner-entitled master key, and is a billable, irreversible account creation governed by the destructive-operation gate. Available only in explicit inline secret-sink mode because Reserve Trial has no provider-side recovery path if a file-sink write fails after account creation; the minted key is shown once, so capture it. Retries are not deduplicated server-side, so repeating the call can create another account regardless of idempotencyKey; verify whether the account already exists and reconcile before retrying. Use b2_create_group_member to add an account to an existing Partner group instead of provisioning a standalone trial.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -676,7 +676,7 @@
           "idempotencyKey": {
             "type": "string",
             "minLength": 1,
-            "description": "Caller-generated idempotency key. Reuse the same value only when retrying the identical reserve-trial account creation request."
+            "description": "Caller-generated idempotency key recorded with the request. Note: in inline mode retries are not deduplicated server-side, so reconcile before retrying rather than relying on this key to prevent a duplicate account."
           },
           "confirm": {
             "description": "Fallback confirmation for this destructive/irreversible operation when the effective server destructive policy is 'confirm' and MCP elicitation cannot run.",
@@ -1376,7 +1376,7 @@
     },
     {
       "name": "s3_create_multipart_upload",
-      "description": "Initiate an S3-compatible multipart upload for a large object in B2 and return an UploadId. Requires the writeFiles capability. This starts an unfinished large-file upload that reserves the object key and accrues storage for each uploaded part until you finalize with s3_complete_multipart_upload or discard it with s3_abort_multipart_upload; use s3_list_multipart_uploads to find abandoned uploads. Use multipart for objects larger than the 1 MiB inline limit of s3_put_object; use s3_put_object or a single-object presigned PUT (s3_get_presigned_url) for smaller transfers. Flow: s3_create_multipart_upload → s3_presign_upload_part → PUT each part directly to B2 (capture each ETag) → s3_complete_multipart_upload with those ETags. Parts are numbered 1–10000 and every part except the last must be ≥5 MiB.",
+      "description": "Initiate an S3-compatible multipart upload for a large object in B2 and return an UploadId. Requires the writeFiles capability. This starts an unfinished large-file upload that accrues storage for each uploaded part until you finalize with s3_complete_multipart_upload or discard it with s3_abort_multipart_upload; use s3_list_multipart_uploads to find abandoned uploads. Initiating the upload does not reserve or lock the destination key, so concurrent writes may still target it. Use s3_put_object only for tiny (≤1 MiB) inline payloads; prefer a single-object presigned PUT (s3_get_presigned_url) for most single-object transfers, including large ones; use multipart when an object is uploaded or copied as parallel parts. Flow: s3_create_multipart_upload → s3_presign_upload_part → PUT each part directly to B2 (capture each ETag) → s3_complete_multipart_upload with those ETags. Parts are numbered 1–10000 and every part except the last must be ≥5 MiB.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -1406,7 +1406,7 @@
           "acl": {
             "type": "string",
             "enum": ["private", "public-read"],
-            "description": "Canned ACL for the final object: 'private' (default) or 'public-read'; bucket visibility still governs access."
+            "description": "Accepted as a no-op S3 compatibility hint; B2 access follows the destination bucket policy."
           },
           "serverSideEncryption": {
             "description": "Server-side encryption. B2 supports SSE-B2 (AES256) only — not SSE-KMS.",

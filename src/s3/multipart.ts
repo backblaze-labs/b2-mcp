@@ -51,7 +51,7 @@ export function registerS3MultipartTools(
     "s3_create_multipart_upload",
     {
       description:
-        "Initiate an S3-compatible multipart upload for a large object in B2 and return an UploadId. Requires the writeFiles capability. This starts an unfinished large-file upload that reserves the object key and accrues storage for each uploaded part until you finalize with s3_complete_multipart_upload or discard it with s3_abort_multipart_upload; use s3_list_multipart_uploads to find abandoned uploads. Use multipart for objects larger than the 1 MiB inline limit of s3_put_object; use s3_put_object or a single-object presigned PUT (s3_get_presigned_url) for smaller transfers. Flow: s3_create_multipart_upload → s3_presign_upload_part → PUT each part directly to B2 (capture each ETag) → s3_complete_multipart_upload with those ETags. Parts are numbered 1–10000 and every part except the last must be ≥5 MiB.",
+        "Initiate an S3-compatible multipart upload for a large object in B2 and return an UploadId. Requires the writeFiles capability. This starts an unfinished large-file upload that accrues storage for each uploaded part until you finalize with s3_complete_multipart_upload or discard it with s3_abort_multipart_upload; use s3_list_multipart_uploads to find abandoned uploads. Initiating the upload does not reserve or lock the destination key, so concurrent writes may still target it. Use s3_put_object only for tiny (≤1 MiB) inline payloads; prefer a single-object presigned PUT (s3_get_presigned_url) for most single-object transfers, including large ones; use multipart when an object is uploaded or copied as parallel parts. Flow: s3_create_multipart_upload → s3_presign_upload_part → PUT each part directly to B2 (capture each ETag) → s3_complete_multipart_upload with those ETags. Parts are numbered 1–10000 and every part except the last must be ≥5 MiB.",
       inputSchema: {
         bucket: z.string().describe("The destination bucket name."),
         key: z.string().describe("The object key for the final assembled file."),
@@ -67,7 +67,7 @@ export function registerS3MultipartTools(
           .enum(["private", "public-read"])
           .optional()
           .describe(
-            "Canned ACL for the final object: 'private' (default) or 'public-read'; bucket visibility still governs access.",
+            "Accepted as a no-op S3 compatibility hint; B2 access follows the destination bucket policy.",
           ),
         serverSideEncryption: z
           .enum(["AES256"])
