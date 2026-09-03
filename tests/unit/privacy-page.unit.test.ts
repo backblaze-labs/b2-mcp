@@ -2,6 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { readJson, root } from "../contract/support";
+import { compareToCommonMark } from "../support/commonmark-oracle";
 
 type PrivacyPageModule = {
   HOSTED_PRIVACY_URL: string;
@@ -21,6 +22,69 @@ async function privacyPageModule(): Promise<PrivacyPageModule> {
 function read(relativePath: string): string {
   return readFileSync(join(root, relativePath), "utf8");
 }
+
+// CommonMark constructs the constrained renderer must reject because it would
+// otherwise emit HTML that differs from canonical CommonMark. This list is no
+// longer the source of truth for completeness — the differential oracle below
+// is — but it stays as fast, explicit unit coverage. Each entry is backstopped
+// by the reference parser so a regression that silently accepts one of these is
+// caught as a `diverges` result, not by whether someone remembered to add it.
+const UNSUPPORTED_MARKDOWN_SAMPLES: ReadonlyArray<readonly [string, string]> = [
+  ["bold text", "**important**"],
+  ["code fence", "```text\nsecret\n```"],
+  ["ordered list", "1. first"],
+  ["nested list", "- parent\n  - child"],
+  ["block quote", "> quote"],
+  ["table", "| Field | Value |\n| --- | --- |"],
+  ["bold link label", "[**Policy**](https://example.com)"],
+  ["HTML link label", "[<b>Policy</b>](https://example.com)"],
+  ["parenthesized link target", "[Policy](https://example.com/legal_(terms))"],
+  ["angle-delimited link target", "[Policy](<https://example.com/privacy>)"],
+  ["indented continuation fence", "- item\n    ```text\n    secret\n    ```"],
+  ["indented continuation quote", "- item\n    > quote"],
+  ["compact thematic break", "---"],
+  ["spaced thematic break", "- - -"],
+  ["asterisk thematic break", "* * *"],
+  ["underscore thematic break", "___"],
+  ["setext heading underline", "==="],
+  ["single equals setext underline", "Title\n="],
+  ["double equals setext underline", "Title\n=="],
+  ["single dash setext underline", "Title\n-"],
+  ["double dash setext underline", "Title\n--"],
+  ["code span inside a link label", "[Policy `internal`](https://example.com)"],
+  ["heading inside a list continuation", "- item\n  ## heading"],
+  ["lazy list continuation", "- item\ncontinuation"],
+  ["trailing-space hard break", "line one  \nline two"],
+  ["backslash hard break", "line one\\\nline two"],
+  ["backslash-escaped link", "\\[Policy](https://example.com)"],
+  ["HTML entity reference", "Copyright &copy; 2026"],
+  ["ATX closing hash sequence", "## Contact ##"],
+  ["tab after list marker", "-\titem"],
+  ["backslash escape in link destination", "[Policy](docs\\*terms.md)"],
+  ["entity reference in link label", "[Policy &copy;](https://example.com)"],
+  ["backslash escape in link label", "[Policy\\!](https://example.com)"],
+  ["entity reference in link title", '[Policy](https://example.com "legal &copy;")'],
+];
+
+// Constructs the constrained renderer is expected to accept AND render exactly
+// as canonical CommonMark. The oracle asserts positive equivalence on this
+// supported subset so "matches" is exercised, not only the reject path.
+const SUPPORTED_MARKDOWN_SAMPLES: ReadonlyArray<readonly [string, string]> = [
+  ["level-1 heading", "# Privacy Policy"],
+  ["level-2 heading", "## Data Controller"],
+  ["level-3 heading", "### Contact"],
+  ["plain paragraph", "A single plain sentence."],
+  ["wrapped paragraph", "first line of prose\nsecond line of prose"],
+  ["absolute link", "[Backblaze](https://www.backblaze.com)"],
+  ["link with title", '[Backblaze](https://www.backblaze.com "home")'],
+  ["relative repo link", "[Security policy](SECURITY.md)"],
+  ["anchor link", "[jump](#b2-credentials)"],
+  ["mailto link", "[email us](mailto:security@example.com)"],
+  ["inline code span", "set `B2_SECRET_SINK` to disable"],
+  ["tight bullet list", "- first\n- second\n- third"],
+  ["wrapped bullet continuation", "- an item that wraps\n  onto a second line"],
+  ["mixed code and link", "see `b2_create_key` and [docs](https://example.com)"],
+];
 
 describe("privacy page generator", () => {
   it("renders wrapped credential-mode bullets as complete list items", async () => {
@@ -62,48 +126,16 @@ describe("privacy page generator", () => {
     );
   });
 
-  it.each([
-    ["bold text", "**important**"],
-    ["code fence", "```text\nsecret\n```"],
-    ["ordered list", "1. first"],
-    ["nested list", "- parent\n  - child"],
-    ["block quote", "> quote"],
-    ["table", "| Field | Value |\n| --- | --- |"],
-    ["bold link label", "[**Policy**](https://example.com)"],
-    ["HTML link label", "[<b>Policy</b>](https://example.com)"],
-    ["parenthesized link target", "[Policy](https://example.com/legal_(terms))"],
-    ["angle-delimited link target", "[Policy](<https://example.com/privacy>)"],
-    ["indented continuation fence", "- item\n    ```text\n    secret\n    ```"],
-    ["indented continuation quote", "- item\n    > quote"],
-    ["compact thematic break", "---"],
-    ["spaced thematic break", "- - -"],
-    ["asterisk thematic break", "* * *"],
-    ["underscore thematic break", "___"],
-    ["setext heading underline", "==="],
-    ["single equals setext underline", "Title\n="],
-    ["double equals setext underline", "Title\n=="],
-    ["single dash setext underline", "Title\n-"],
-    ["double dash setext underline", "Title\n--"],
-    ["code span inside a link label", "[Policy `internal`](https://example.com)"],
-    ["heading inside a list continuation", "- item\n  ## heading"],
-    ["lazy list continuation", "- item\ncontinuation"],
-    ["trailing-space hard break", "line one  \nline two"],
-    ["backslash hard break", "line one\\\nline two"],
-    ["backslash-escaped link", "\\[Policy](https://example.com)"],
-    ["HTML entity reference", "Copyright &copy; 2026"],
-    ["ATX closing hash sequence", "## Contact ##"],
-    ["tab after list marker", "-\titem"],
-    ["backslash escape in link destination", "[Policy](docs\\*terms.md)"],
-    ["entity reference in link label", "[Policy &copy;](https://example.com)"],
-    ["backslash escape in link label", "[Policy\\!](https://example.com)"],
-    ["entity reference in link title", '[Policy](https://example.com "legal &copy;")'],
-  ])("rejects unsupported Markdown: %s", async (_name, markdown) => {
-    const { renderMarkdown } = await privacyPageModule();
+  it.each(UNSUPPORTED_MARKDOWN_SAMPLES)(
+    "rejects unsupported Markdown: %s",
+    async (_name, markdown) => {
+      const { renderMarkdown } = await privacyPageModule();
 
-    expect(() => renderMarkdown(`# Privacy Policy\n\n${markdown}\n`)).toThrow(
-      /unsupported Markdown in PRIVACY\.md line/,
-    );
-  });
+      expect(() => renderMarkdown(`# Privacy Policy\n\n${markdown}\n`)).toThrow(
+        /unsupported Markdown in PRIVACY\.md line/,
+      );
+    },
+  );
 
   it("renders supported Markdown links with optional titles", async () => {
     const { renderMarkdown } = await privacyPageModule();
@@ -157,4 +189,48 @@ describe("privacy page generator", () => {
     expect(read("docs/references/discoverability.md")).toContain(HOSTED_PRIVACY_URL);
     expect(pageHtml(read("PRIVACY.md"))).toContain(HOSTED_PRIVACY_URL);
   });
+});
+
+// The constrained renderer must never emit HTML that differs from canonical
+// CommonMark on the constructs it accepts; anything it would render differently
+// must be rejected instead. These tests make that completeness machine-checked
+// against the reference `commonmark` parser, so drift is caught automatically
+// rather than by hand-adding another rejection case each review round (#384).
+describe("privacy page differential CommonMark oracle", () => {
+  it("renders the shipped PRIVACY.md identically to reference CommonMark", async () => {
+    const { renderMarkdown } = await privacyPageModule();
+
+    const comparison = compareToCommonMark(read("PRIVACY.md"), renderMarkdown);
+    if (comparison.kind === "diverges") {
+      expect(comparison.constrained).toBe(comparison.reference);
+    }
+    expect(comparison.kind).toBe("matches");
+  });
+
+  it.each(SUPPORTED_MARKDOWN_SAMPLES)(
+    "renders supported construct identically to reference CommonMark: %s",
+    async (_name, markdown) => {
+      const { renderMarkdown } = await privacyPageModule();
+
+      const comparison = compareToCommonMark(`# Privacy Policy\n\n${markdown}\n`, renderMarkdown);
+      if (comparison.kind === "diverges") {
+        expect(comparison.constrained).toBe(comparison.reference);
+      }
+      expect(comparison.kind).toBe("matches");
+    },
+  );
+
+  it.each(UNSUPPORTED_MARKDOWN_SAMPLES)(
+    "never silently mis-renders unsupported construct vs reference CommonMark: %s",
+    async (_name, markdown) => {
+      const { renderMarkdown } = await privacyPageModule();
+
+      // Fail-closed invariant: the renderer either rejects the construct or
+      // renders it exactly as CommonMark. A `diverges` outcome — accepted but
+      // rendered differently — is the drift bug this whole class must prevent.
+      const comparison = compareToCommonMark(`# Privacy Policy\n\n${markdown}\n`, renderMarkdown);
+      expect(comparison.kind).not.toBe("diverges");
+      expect(comparison.kind).toBe("rejected");
+    },
+  );
 });
