@@ -115,17 +115,21 @@ system are responsible for that system's privacy, access, and retention policy.
 ## Analytics, Telemetry, And Tracking
 
 b2-mcp does not include analytics, telemetry, advertising pixels, tracking
-cookies, crash reporting, or phone-home behavior. The only routine outbound
-metadata is the User-Agent header sent to Backblaze B2 on ordinary B2 and
-S3-compatible API requests. That User-Agent is produced by the underlying SDKs
+cookies, crash reporting, or phone-home behavior. Ordinary B2 and S3-compatible
+API calls necessarily disclose to Backblaze the operation being performed, the
+bucket, object, and account identifiers it targets, request timing and source
+network, and any payload the operation requires — this is the B2 processing
+described under B2 Credentials, Object Data, and Third Parties, not extra
+tracking. The only identification metadata b2-mcp itself adds on top of that is
+the User-Agent header. That User-Agent is produced by the underlying SDKs
 (the official Backblaze B2 SDK and the AWS S3 SDK) and carries their standard
 SDK, runtime, and platform identifiers; it is not an exhaustive list controlled
-by b2-mcp. On top of the SDK-owned metadata, b2-mcp adds a few identifying
-fields: the product token, such as `b2-mcp/<version>` for published releases or
-`b2-mcp/dev` for source and development builds; the active transport label, such
-as `stdio` or `http`; optional S3 tool-surface labels; and, if an operator sets
-`B2_MCP_UA_SUFFIX`, that operator-supplied deployment tag. No request body,
-credential, or object data is placed in this User-Agent metadata.
+by b2-mcp. The fields b2-mcp adds are the product token, such as
+`b2-mcp/<version>` for published releases or `b2-mcp/dev` for source and
+development builds; the active transport label, such as `stdio` or `http`;
+optional S3 tool-surface labels; and, if an operator sets `B2_MCP_UA_SUFFIX`,
+that operator-supplied deployment tag. b2-mcp adds no request body, credential,
+or object data to this User-Agent metadata.
 
 ## Third Parties
 
