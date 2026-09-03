@@ -44,6 +44,8 @@ const UNSUPPORTED_MARKDOWN_SAMPLES: ReadonlyArray<readonly [string, string]> = [
   ["HTML link label", "[<b>Policy</b>](https://example.com)"],
   ["parenthesized link target", "[Policy](https://example.com/legal_(terms))"],
   ["angle-delimited link target", "[Policy](<https://example.com/privacy>)"],
+  ["network-path link target", "[Policy](//example.com/privacy)"],
+  ["root-absolute link target", "[Policy](/legal/privacy)"],
   ["indented continuation fence", "- item\n    ```text\n    secret\n    ```"],
   ["indented continuation quote", "- item\n    > quote"],
   ["compact thematic break", "---"],
