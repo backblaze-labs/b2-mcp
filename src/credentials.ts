@@ -346,7 +346,11 @@ export function warnRemovedCredentialEnvAliases(): void {
   }
 }
 
-/** Reset the one-time removed-alias warning guard. Test-only. */
+/**
+ * Test-only: reset the one-time removed-alias warning guard.
+ *
+ * @internal
+ */
 export function _resetRemovedCredentialEnvAliasWarning(): void {
   warnedRemovedCredentialEnvAliases = false;
 }

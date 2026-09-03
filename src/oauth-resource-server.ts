@@ -377,6 +377,8 @@ const REMOVED_INTROSPECTION_CACHE_ALIASES: ReadonlyArray<readonly [string, strin
   ["B2_OAUTH_INTROSPECTION_CACHE_SKEW_SECONDS", "B2_OAUTH_TOKEN_CACHE_SKEW_SECONDS"],
 ];
 
+let warnedRemovedIntrospectionCacheAliases = false;
+
 /**
  * Warn when a removed OAuth introspection-cache alias env var is still set.
  *
@@ -386,9 +388,15 @@ const REMOVED_INTROSPECTION_CACHE_ALIASES: ReadonlyArray<readonly [string, strin
  * defaults, changing introspection call volume and cache pressure in
  * production. The message names the canonical replacement.
  *
+ * `loadOAuthResourceServerConfig` runs on every metadata request (e.g. via
+ * `oauthMetadataRouteResponse()`), so this warning is guarded to emit only once
+ * per process — a startup-only migration signal, not per-request log spam.
+ *
  * @param env - Environment to inspect.
  */
 function warnRemovedIntrospectionCacheAliases(env: NodeJS.ProcessEnv): void {
+  if (warnedRemovedIntrospectionCacheAliases) return;
+  warnedRemovedIntrospectionCacheAliases = true;
   for (const [removed, canonical] of REMOVED_INTROSPECTION_CACHE_ALIASES) {
     if (env[removed] !== undefined) {
       logger.warn(
@@ -396,6 +404,15 @@ function warnRemovedIntrospectionCacheAliases(env: NodeJS.ProcessEnv): void {
       );
     }
   }
+}
+
+/**
+ * Test-only: reset the one-time removed-alias warning guard.
+ *
+ * @internal
+ */
+export function _resetRemovedIntrospectionCacheAliasWarning(): void {
+  warnedRemovedIntrospectionCacheAliases = false;
 }
 
 /**
