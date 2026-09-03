@@ -71,9 +71,12 @@ response, so the secret enters the model's context and may be retained by your
 MCP client. Because of that exposure it is never a default and is refused on
 HTTP or serverless deployments unless the operator also sets
 `B2_ALLOW_INLINE_SECRETS=true`. The same `file`, `off`, and `inline` sink
-behavior governs every credential-producing tool, including the Partner API
-tools `b2_create_group_member` and `b2_reserve_trial_create_account`, not just
-`b2_create_key`.
+behavior governs `b2_create_key` and the Partner API tool
+`b2_create_group_member`. The Partner API tool
+`b2_reserve_trial_create_account` is a deliberate exception: because Reserve
+Trial account creation has no provider-side recovery path if a sink write fails
+after the account is created, it is available only in explicit `inline` mode and
+is unavailable in both `file` and `off` modes.
 
 ## Object Data
 
