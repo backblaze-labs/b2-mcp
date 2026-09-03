@@ -1,3 +1,4 @@
+import { spawnSync } from "child_process";
 import {
   chmodSync,
   existsSync,
@@ -10,7 +11,6 @@ import {
 import { createRequire } from "module";
 import { tmpdir } from "os";
 import { delimiter, join } from "path";
-import { spawnSync } from "child_process";
 
 const root = join(__dirname, "../..");
 const nodeRequire = createRequire(__filename);
@@ -130,6 +130,7 @@ describe("package surface policy", () => {
     expect(files).toContain("docs/references/deployment/vercel.md");
     expect(files).toContain("docs/generated/tool-profile-contract.json");
     expect(files).toContain("docs/generated/tool-profiles.md");
+    expect(files).toContain("PRIVACY.md");
     expect(pkg.files.filter((file) => file.startsWith("skills/"))).toEqual(skillsPack.packageFiles);
     for (const skillPath of skillsPack.packageFiles) {
       expect(files).toContain(skillPath);

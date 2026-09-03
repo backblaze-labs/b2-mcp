@@ -622,6 +622,20 @@ details are documented in [`docs/AUTHENTICATION.md`](docs/AUTHENTICATION.md).
 
 ---
 
+## Privacy
+
+b2-mcp runs locally over stdio or in a self-hosted HTTP deployment controlled by
+the user or operator. The publisher does not receive runtime B2 credentials,
+object data, prompts, logs, or telemetry from normal use. Object-byte workflows
+should use presigned URLs so bytes move directly between the client or worker
+and Backblaze B2, and logs are structured with secret redaction.
+
+Read the canonical [`PRIVACY.md`](PRIVACY.md) source or the hosted
+[privacy policy](https://backblaze-labs.github.io/b2-mcp/privacy/) published by
+GitHub Pages.
+
+---
+
 ## Development
 
 ```bash
@@ -640,6 +654,9 @@ pnpm run test:live:b2-contract    # live B2 request-shape checks; requires B2 cr
 pnpm run test:live:b2             # both protected live B2 suites
 pnpm run evals                    # deterministic LLM eval harness; live provider cases skip by default
 pnpm run evals:provider-comparison # opt-in Claude vs OpenAI comparison; requires provider keys and current dist/
+pnpm run docs                     # TypeDoc API docs plus hosted privacy page
+pnpm run docs:privacy             # regenerate the privacy page from PRIVACY.md
+pnpm run docs:watch               # regenerate privacy once, then watch TypeDoc without cleaning output
 pnpm start                        # stdio transport
 pnpm run start:http --port 3000   # MCP 2026-07-28 HTTP transport
 b2-mcp --help                     # installed package CLI help after publish/install
@@ -657,6 +674,7 @@ committed lockfile and a sanitized temporary environment.
 ## Documentation
 
 - [API reference](https://backblaze-labs.github.io/b2-mcp/) — generated TypeDoc for the public `src` surface, published to GitHub Pages from `main`
+- [Privacy policy](https://backblaze-labs.github.io/b2-mcp/privacy/) / [`PRIVACY.md`](PRIVACY.md) — runtime data-handling policy for local and self-hosted deployments
 - [`docs/product-specs/clients.md`](docs/product-specs/clients.md) — per-client setup + compatibility matrix
 - [`docs/AUTHENTICATION.md`](docs/AUTHENTICATION.md) — OAuth, credential custody, and auth boundary
 - [`docs/DEPLOY.md`](docs/DEPLOY.md) — deployment matrix and supported-host links

@@ -16,6 +16,7 @@ work in [#297](https://github.com/backblaze-labs/b2-mcp/issues/297) /
 | Container | `ghcr.io/backblaze-labs/b2-mcp` |
 | Display name | **Backblaze B2 MCP Server** (never bare "B2 MCP") |
 | Description | *Official Backblaze B2 MCP server for buckets, files, keys, Object Lock, and S3 storage.* |
+| Privacy policy | `https://backblaze-labs.github.io/b2-mcp/privacy/` |
 | Anchor text for backlinks | `Backblaze B2 MCP server` |
 
 Every submission must use the display name above and link the canonical repo, so
@@ -25,11 +26,11 @@ directories de-duplicate community forks under the official entry.
 
 | File | Directory | Notes |
 | --- | --- | --- |
-| `server.json` | Official MCP Registry | Version synced by `scripts/update-server-json-version.mjs` at release cut. |
+| `server.json` | Official MCP Registry | Version synced by `scripts/update-server-json-version.mjs` at release cut. Schema `2025-12-11` has no privacy-policy field, so the registry entry relies on `websiteUrl`, README, and the hosted privacy page. |
 | `smithery.yaml` | Smithery | stdio one-click config; credential fields masked as `password`. |
 | `glama.json` | Glama | `maintainers` list gates the org claim. Read from the default branch. |
 | `lhm.plugin.json` | LobeHub | Owner declaration used by `lhm plugin update`; regenerate on release. |
-| `mcpb/manifest.json` | Smithery (Local/MCPB) | MCPB 0.3 manifest; packed to a `.mcpb` bundle (`pnpm run build:mcpb`) and uploaded via Smithery's Local publish tab. |
+| `mcpb/manifest.json` | Smithery (Local/MCPB) | MCPB 0.3 manifest with `privacy_policies`; packed to a `.mcpb` bundle (`pnpm run build:mcpb`) and uploaded via Smithery's Local publish tab. |
 
 The canonical registry description lives in
 `scripts/lib/mcp-registry-manifest.mjs` (`mcpRegistryDescription`) and is
@@ -141,6 +142,11 @@ Aggregators that ingest the Official MCP Registry pick the server up
 automatically; the rest need a submission or claim. Full status lives in
 [#300](https://github.com/backblaze-labs/b2-mcp/issues/300).
 
+- Privacy URL — use `https://backblaze-labs.github.io/b2-mcp/privacy/` for
+  Claude Connectors ([#358](https://github.com/backblaze-labs/b2-mcp/issues/358))
+  and the OpenAI directory
+  ([#359](https://github.com/backblaze-labs/b2-mcp/issues/359)); both require a
+  publicly reachable privacy-policy URL.
 - Official MCP Registry — published (`server.json` + `publish.yml`).
 - mcp.so — submitted (`mcp.so/servers/backblaze-b2-mcp-server`).
 - MCP Market — live, auto-crawled from the registry (`mcpmarket.com/server/backblaze-b2`).

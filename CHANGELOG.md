@@ -22,6 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   auto-extractors (mcp.so, Glama, ...) can populate the tool section. (#300)
 - `docs/references/discoverability.md` runbook documenting the registry/directory listings
   and per-release steps (Glama, Smithery, LobeHub, mcp.so). (#300)
+- Privacy policy surface: root `PRIVACY.md`, hosted GitHub Pages
+  `privacy.html` / `privacy/`, README and discoverability links, and MCPB
+  `privacy_policies` metadata for Claude and OpenAI directory submissions.
+  (#379)
 - README "official server" note and an `Official …` MCP Registry manifest
   description to distinguish `backblaze-labs/b2-mcp` from community forks. (#301)
 - Read-only MCP resources for non-secret server config, credential

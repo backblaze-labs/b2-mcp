@@ -84,6 +84,7 @@ function withFixture(run: (fixtureRoot: string) => void): void {
             "docs/generated/tool-profiles.md",
             "README.md",
             "CHANGELOG.md",
+            "PRIVACY.md",
             "SECURITY.md",
             "LICENSE",
           ],
@@ -362,6 +363,7 @@ describe("release scripts", () => {
     // The npx launcher must stay pinned to the exact release so the advertised
     // MCPB bundle runs reproducible code, not whatever npm publishes later.
     expect(mcpb.server.mcp_config.args).toContain(`@backblaze-labs/b2-mcp@${packageJson.version}`);
+    expect(mcpb.privacy_policies).toEqual(["https://backblaze-labs.github.io/b2-mcp/privacy/"]);
   });
 
   it("packs a valid .mcpb bundle with the pinned mcpb CLI", () => {
