@@ -2,4 +2,5 @@
 
 | id | area | severity | opened | notes |
 | --- | --- | --- | --- | --- |
-| TBD | TBD | TBD | TBD | Seed tracker for future harness-engineering debt records. |
+
+No entries yet. Add rows as debt is identified.

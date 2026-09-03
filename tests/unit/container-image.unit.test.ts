@@ -336,6 +336,20 @@ describe("container image policy", () => {
     expect(dockerfile).toContain("COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./");
   });
 
+  it("keeps in-image operator docs and compatibility aliases complete", () => {
+    expect(dockerfile).toContain("COPY --chown=node:node docs/CLIENTS.md docs/DEPLOY.md");
+    expect(dockerfile).toContain("COPY --chown=node:node docs/deployment ./docs/deployment");
+    expect(dockerfile).toContain(
+      "COPY --chown=node:node docs/product-specs/clients.md ./docs/product-specs/clients.md",
+    );
+    expect(dockerfile).toContain(
+      "COPY --chown=node:node docs/references/deployment ./docs/references/deployment",
+    );
+    expect(dockerfile).not.toContain(
+      "COPY --chown=node:node docs/product-specs ./docs/product-specs",
+    );
+  });
+
   it("derives pnpm from package.json packageManager", () => {
     expect(packageJson.packageManager).toMatch(/^pnpm@/);
     expect(dockerfile).toContain('require("./package.json")');

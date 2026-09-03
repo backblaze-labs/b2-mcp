@@ -72,6 +72,14 @@ describe("deployment documentation policy", () => {
     }
   });
 
+  it("keeps one-release deployment compatibility aliases", () => {
+    for (const fileName of ["security-and-credentials.md", ...providerGuides]) {
+      const aliasPath = join(root, "docs", "deployment", fileName);
+      expect(existsSync(aliasPath), `${fileName} compatibility alias is missing`).toBe(true);
+      expect(readFileSync(aliasPath, "utf8")).toContain(`../references/deployment/${fileName}`);
+    }
+  });
+
   it("keeps provider guides complete enough for copy-paste operations", () => {
     const requiredSections = [
       "## Status",
@@ -215,6 +223,7 @@ describe("deployment documentation policy", () => {
     );
     expect(pkg.files).not.toContain("deploy/cloudflare-worker/adapter.ts");
     expect(pkg.files).not.toContain("deploy/cloudflare-worker/worker.ts");
+    expect(pkg.files).toContain("docs/deployment/*.md");
     expect(pkg.files).toContain("docs/references/deployment/*.md");
     expect(existsSync(join(root, "deploy/cloudflare-worker/worker.ts"))).toBe(true);
     expect(WORKER_EMITTED_FILES_BUDGET).toBeGreaterThan(0);

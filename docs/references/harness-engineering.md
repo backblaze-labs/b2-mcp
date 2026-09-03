@@ -20,7 +20,7 @@ docs/
   product-specs/
     index.md
   references/
-  generated/
+  generated/  # Phase 2 target; not present in Phase 1.
 ```
 
 Phase 1 moves the non-generated system-of-record docs into that shape. The

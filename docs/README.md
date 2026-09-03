@@ -13,9 +13,18 @@ open the smallest document that covers the task at hand.
 - [`TESTING.md`](TESTING.md) - deterministic, live, package, and eval test policy.
 - [`EVALS.md`](EVALS.md) - LLM eval harness runbook.
 
+## Filename Convention
+
+New documents inside taxonomy subdirectories use lowercase kebab-case. Existing
+root-level and top-level `docs/` entrypoints keep their uppercase names because
+they are stable public paths; the Phase 1 compatibility aliases under
+[`CLIENTS.md`](CLIENTS.md) and [`deployment/`](deployment/) are intentionally
+temporary. Generated tool-profile artifacts keep their current names until the
+Phase 2 generated-docs move.
+
 ## System Of Record
 
-- [`design-docs/index.md`](design-docs/index.md) - public contract catalog with owners and status.
+- [`design-docs/index.md`](design-docs/index.md) - design document catalog with owners and status.
 - [`design-docs/tool-contract.md`](design-docs/tool-contract.md) - tool and prompt contract policy.
 - [`design-docs/sdk-adoption-contract.md`](design-docs/sdk-adoption-contract.md) - SDK adoption and backing taxonomy.
 - [`design-docs/security-review.md`](design-docs/security-review.md) - pre-public security and provenance review.
