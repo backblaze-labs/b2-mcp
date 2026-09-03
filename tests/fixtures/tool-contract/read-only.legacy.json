@@ -400,7 +400,7 @@
     },
     {
       "name": "s3_get_object",
-      "descriptionSha256": "372860e08b930d6f3a8a153a0a6ea99015de17cbd7067a56cc5ccef70db07856",
+      "descriptionSha256": "1f105cb19c32513a49545dbf7e12bc5193dabccf736f0869104d8194b80046d0",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -703,5 +703,5 @@
     "toolsListCacheHint": null,
     "discover": null
   },
-  "hash": "5fefc07c6182565e9da2c08cea05496affa651a848404b97915168ae16a747a5"
+  "hash": "3c4ba900d7221865c067815fb307a229dca789422270aca2ba8480a1b651a6b2"
 }

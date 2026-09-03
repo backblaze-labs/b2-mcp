@@ -567,7 +567,7 @@ export function registerS3ObjectTools(
     "s3_get_object",
     {
       description:
-        "Read a SMALL object inline (≤1 MiB, returned base64) — for manifests, sidecars, and configs the agent must inspect — or stream any size to a local path with saveToPath. For real object data, generate a GetObject URL with s3_get_presigned_url and download directly from B2 (bytes never pass through the server or the model context).",
+        "Read a SMALL object inline (≤1 MiB, returned base64) — for manifests, sidecars, and configs the agent must inspect — or stream any size to a local path with saveToPath. saveToPath writes the fetched bytes to the local filesystem (creating parent directories), removes the partial file if the stream fails (cleanup of its own output only), and performs no mutation of B2 or any remote data. For real object data, generate a GetObject URL with s3_get_presigned_url and download directly from B2 (bytes never pass through the server or the model context).",
       inputSchema: {
         bucket: z.string().describe("The bucket name."),
         key: z.string().describe("The object key."),
