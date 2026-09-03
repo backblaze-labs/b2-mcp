@@ -453,7 +453,7 @@ The server exposes **40 tools** (registration is capability-aware, so a given ke
 - `s3_list_objects_v2` — List objects
 - `s3_list_object_versions` — List object versions and delete markers (paginated)
 - `s3_create_multipart_upload` — Begin a multipart upload
-- `s3_presign_upload_part` — Mint a presigned PUT URL for a part
+- `s3_get_presigned_upload_part_url` — Mint a presigned PUT URL for a part
 - `s3_complete_multipart_upload` — Complete multipart upload from ordered part ETags
 - `s3_abort_multipart_upload` — Abort a multipart upload
 - `s3_list_parts` — List uploaded parts
@@ -466,9 +466,9 @@ The server exposes **40 tools** (registration is capability-aware, so a given ke
 
 **Custom MCP analytics (4):**
 
-- `b2_usage_growth` — Rank accounts by stored-data growth between two dates
-- `b2_egress_leaders` — Top egress by account or bucket over a period
-- `b2_largest_files` — A bucket's largest objects via bounded live listing
+- `b2_report_usage_growth` — Rank accounts by stored-data growth between two dates
+- `b2_rank_egress_leaders` — Top egress by account or bucket over a period
+- `b2_list_largest_files` — A bucket's largest objects via bounded live listing
 - `b2_unfinished_uploads` — Abandoned multipart uploads consuming storage
 
 For availability nuances, the destructive-gate list, and durable-secret handling, see the detailed reference below.
@@ -549,7 +549,7 @@ configured and the account is authorized for the Partner API.
 | `s3_head_object`                                                                         | Available    | Object metadata                                                                                  |
 | `s3_copy_object`                                                                         | Available    | Server-side copy; `acl` is a no-op compatibility hint because B2 access follows bucket policy    |
 | `s3_list_objects_v2` / `s3_list_object_versions`                                         | Available    | List current objects / paginated versions and delete markers                                      |
-| `s3_create_multipart_upload` / `s3_presign_upload_part` / `s3_complete_multipart_upload` | Available    | Multipart upload flow; complete with ordered part ETags after direct-to-B2 part uploads          |
+| `s3_create_multipart_upload` / `s3_get_presigned_upload_part_url` / `s3_complete_multipart_upload` | Available    | Multipart upload flow; complete with ordered part ETags after direct-to-B2 part uploads          |
 | `s3_abort_multipart_upload` / `s3_list_parts` / `s3_list_multipart_uploads`              | Available    | Manage and page through in-progress multipart uploads                                             |
 | `s3_upload_part_copy`                                                                    | Available    | Server-side copy of a part                                                                       |
 | `s3_get_presigned_url`                                                                   | Available    | Short-lived presigned PUT/GET bearer URL (browser/CORS handoff)                                  |
@@ -564,9 +564,9 @@ configured and the account is authorized for the Partner API.
 
 | Tool                    | Availability | Description                                                                                         |
 | ----------------------- | ------------ | --------------------------------------------------------------------------------------------------- |
-| `b2_usage_growth`       | Available    | Rank accounts by stored-data growth between two dates (daily usage reports; requires Usage Reports) |
-| `b2_egress_leaders`     | Available    | Top egress by account or bucket over a period (daily usage reports; requires Usage Reports)         |
-| `b2_largest_files`      | Available    | A bucket's largest objects via live listing (bounded scan)                                          |
+| `b2_report_usage_growth`       | Available    | Rank accounts by stored-data growth between two dates (daily usage reports; requires Usage Reports) |
+| `b2_rank_egress_leaders`     | Available    | Top egress by account or bucket over a period (daily usage reports; requires Usage Reports)         |
+| `b2_list_largest_files`      | Available    | A bucket's largest objects via live listing (bounded scan)                                          |
 | `b2_unfinished_uploads` | Available    | Abandoned multipart uploads silently consuming storage (bounded live listing)                       |
 
 Scope follows the caller's key — a partner key sees its sub-accounts; a customer key sees only itself. The usage-report tools feature-detect the `b2-reports-<accountId>` bucket and return a clear "not enabled" message when Usage Reports aren't enabled on the account.
@@ -601,7 +601,7 @@ Running it safely:
   [`Fly.io`](docs/references/deployment/fly-io.md), and
   [`shared security`](docs/references/deployment/security-and-credentials.md).
 - **Use a least-privilege key** — a non-master key is correct for normal storage operations. Local stdio can create scoped keys through the file sink; hosted HTTP deployments should create and rotate keys outside the MCP tool flow unless the file sink has been explicitly configured and reviewed. `b2_create_key` refuses key-management grants, unscoped write/delete grants, and over-long or non-expiring keys unless the corresponding policy override is set.
-- **Presigned URLs are different from durable secrets** — `s3_get_presigned_url` and `s3_presign_upload_part` return short-lived bearer capabilities with `expiresIn` / `expiresAt`. Treat the URL as sensitive until expiry, but it is not a long-lived B2 application key.
+- **Presigned URLs are different from durable secrets** — `s3_get_presigned_url` and `s3_get_presigned_upload_part_url` return short-lived bearer capabilities with `expiresIn` / `expiresAt`. Treat the URL as sensitive until expiry, but it is not a long-lived B2 application key.
 - **Local use → stdio** (the Quick Start above). Credentials stay in your client config / environment.
 - **Exposing HTTP → choose a credential mode.** Unset mode remains `headers`
   for one-release compatibility with existing header clients. Credential-free

@@ -212,7 +212,7 @@ no provider-side recovery path after account creation; it requires explicit
 inline mode.
 
 Presigned S3 URLs are different. `s3_get_presigned_url` and
-`s3_presign_upload_part` may return short-lived bearer URLs with operation and
+`s3_get_presigned_upload_part_url` may return short-lived bearer URLs with operation and
 expiry metadata. Treat the URL as sensitive until `expiresAt`, but it is not a
 long-lived B2 application key.
 

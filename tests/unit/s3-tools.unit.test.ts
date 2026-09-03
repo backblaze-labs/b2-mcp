@@ -1287,9 +1287,9 @@ describe("s3_get_presigned_url", () => {
   });
 });
 
-describe("s3_presign_upload_part", () => {
+describe("s3_get_presigned_upload_part_url", () => {
   it("returns a presigned PUT URL per requested part without calling S3", async () => {
-    const result = await callTool(server, "s3_presign_upload_part", {
+    const result = await callTool(server, "s3_get_presigned_upload_part_url", {
       bucket: "b",
       key: "k",
       uploadId: "u",

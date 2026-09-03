@@ -47,6 +47,45 @@ The public contract defines:
 - opt-in prompt names, argument schemas, and workflow prerequisites;
 - compatibility rules for stale cached `tools/list` profiles.
 
+## Tool naming conventions
+
+Tool names are part of the public contract, so they follow one convention and
+must not drift. New-tool authors and reviewers apply this before adding or
+renaming a tool.
+
+- **Prefix.** `b2_*` for B2-native control-plane tools and the custom analytics
+  category; `s3_*` for the S3-compatible data plane.
+- **Shape.** `<prefix>_<verb>_<noun>`, snake_case, lowercase, **verb-first**.
+  Use a standard verb — `list`, `get`, `create`, `update`, `delete`, `put`,
+  `rank`, `report`, … — and never a noun-only name. (The deviation this
+  convention fixed: `b2_largest_files` → `b2_list_largest_files`,
+  `b2_egress_leaders` → `b2_rank_egress_leaders`,
+  `b2_usage_growth` → `b2_report_usage_growth`.)
+- **Known grandfathered exception.** `b2_unfinished_uploads` is a shipped
+  noun-only name in the custom-analytics category that predates this convention.
+  It is intentionally left unchanged for now because renaming it is another
+  no-alias breaking change; a future release may rename it (e.g.
+  `b2_list_unfinished_uploads`). Do not copy it as a pattern for new tools.
+- **Match the upstream operation.** Where a B2 native or S3 API verb exists, use
+  it; otherwise pick the closest standard verb.
+- **Presign.** Use the consistent `s3_get_presigned_*_url` form
+  (`s3_get_presigned_url`, `s3_get_presigned_upload_part_url`), not a bare
+  `s3_presign_*` verb form.
+
+**Lockstep on any add/rename.** A name change touches many artifacts; update all
+of them in the same change, then regenerate:
+
+1. Tool registration (`server.registerTool(name, config, cb)` via the
+   `ToolRegistrar` adapter in the relevant `register*` file).
+2. `src/utils/tool-capabilities.ts` (capability map and access class).
+3. `src/tool-contract.ts` backing-category map.
+4. README/`docs/` tool tables and any skill playbooks that name the tool.
+5. `lhm.plugin.json`.
+6. Run `pnpm run generate:tool-contract` to regenerate the contract/prompt
+   fixtures (`tests/fixtures/tool-contract/*`, `tests/fixtures/prompt-contract/*`)
+   and generated docs (`docs/generated/tool-profile-contract.json`,
+   `docs/generated/tool-profiles.md`); confirm the contract tests are green.
+
 ## Structured Result Text Contract
 
 Issue #82 adds the pre-release structured-result text contract. MCP transport

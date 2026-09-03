@@ -362,7 +362,7 @@
       }
     },
     {
-      "name": "b2_egress_leaders",
+      "name": "b2_rank_egress_leaders",
       "description": "Rank top egress (downloaded bytes) by account or bucket over a period — default month-to-date. For 'who's downloading the most', 'where is egress concentrated'. Returns leaders with each one's share of total egress, from the daily usage reports. Scope follows the caller's key. Needs Usage Reports enabled.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -457,7 +457,7 @@
       }
     },
     {
-      "name": "b2_largest_files",
+      "name": "b2_list_largest_files",
       "description": "List a bucket's largest objects by size via a live listing. For 'largest files', 'what's taking up space in <bucket>'. Give the bucket by name or bucketId; optional path prefix. Sorting by size requires a full listing, so on very large buckets the scan is bounded by max_scan and a time budget — it then returns the largest among the objects scanned with truncated=true; pass a prefix to focus on a subtree for a complete ranking. Returns name, size, and upload time — never contents.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -1190,7 +1190,7 @@
       }
     },
     {
-      "name": "b2_usage_growth",
+      "name": "b2_report_usage_growth",
       "description": "Rank accounts by how much STORED data grew or shrank between two points in time, from the daily B2 usage reports (uses stored_gb, the end-of-day snapshot). For 'which customers grew the most/least', 'who's moving data off'. Compares the latest snapshot against one month/quarter/year earlier and fetches only those two days, so it stays fast even on large report buckets. Returns the two dates compared and per-account start vs current GB and % growth (new accounts flagged). Scope follows the caller's key (a partner key sees all its sub-accounts). Needs Usage Reports enabled.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -1265,7 +1265,7 @@
     },
     {
       "name": "s3_complete_multipart_upload",
-      "description": "Finalize an S3-compatible multipart upload in B2 by assembling uploaded parts. Use only after s3_create_multipart_upload and s3_presign_upload_part (or s3_upload_part_copy) have produced every required part; use s3_list_parts to verify uploaded parts before retrying. Requires writeFiles. Completion is idempotent only when B2 already committed the exact same part list; if the response is lost, reconcile with s3_head_object or s3_list_object_versions before retrying.",
+      "description": "Finalize an S3-compatible multipart upload in B2 by assembling uploaded parts. Use only after s3_create_multipart_upload and s3_get_presigned_upload_part_url (or s3_upload_part_copy) have produced every required part; use s3_list_parts to verify uploaded parts before retrying. Requires writeFiles. Completion is idempotent only when B2 already committed the exact same part list; if the response is lost, reconcile with s3_head_object or s3_list_object_versions before retrying.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -1295,7 +1295,7 @@
                 },
                 "etag": {
                   "type": "string",
-                  "description": "The ETag from this part's direct PUT response (the s3_presign_upload_part flow)."
+                  "description": "The ETag from this part's direct PUT response (the s3_get_presigned_upload_part_url flow)."
                 }
               },
               "required": ["partNumber", "etag"]
@@ -1376,7 +1376,7 @@
     },
     {
       "name": "s3_create_multipart_upload",
-      "description": "Initiate an S3-compatible multipart upload for a large object in B2 and return an UploadId. Requires the writeFiles capability. This starts an unfinished large-file upload that accrues storage for each uploaded part until you finalize with s3_complete_multipart_upload or discard it with s3_abort_multipart_upload; use s3_list_multipart_uploads to enumerate abandoned uploads, or b2_unfinished_uploads for storage-cost analysis of a selected bucket. Initiating the upload does not reserve or lock the destination key, so concurrent writes may still target it. Use s3_put_object only for tiny (≤1 MiB) inline payloads; prefer a single-object presigned PUT (s3_get_presigned_url) for most single-object transfers, including large ones; use multipart when an object is uploaded or copied as parallel parts. Flow: s3_create_multipart_upload → s3_presign_upload_part → PUT each part directly to B2 (capture each ETag) → s3_complete_multipart_upload with those ETags. Parts are numbered 1–10000 and every part except the last must be ≥5 MiB, and no part may exceed 5 GiB.",
+      "description": "Initiate an S3-compatible multipart upload for a large object in B2 and return an UploadId. Requires the writeFiles capability. This starts an unfinished large-file upload that accrues storage for each uploaded part until you finalize with s3_complete_multipart_upload or discard it with s3_abort_multipart_upload; use s3_list_multipart_uploads to enumerate abandoned uploads, or b2_unfinished_uploads for storage-cost analysis of a selected bucket. Initiating the upload does not reserve or lock the destination key, so concurrent writes may still target it. Use s3_put_object only for tiny (≤1 MiB) inline payloads; prefer a single-object presigned PUT (s3_get_presigned_url) for most single-object transfers, including large ones; use multipart when an object is uploaded or copied as parallel parts. Flow: s3_create_multipart_upload → s3_get_presigned_upload_part_url → PUT each part directly to B2 (capture each ETag) → s3_complete_multipart_upload with those ETags. Parts are numbered 1–10000 and every part except the last must be ≥5 MiB, and no part may exceed 5 GiB.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -1569,7 +1569,7 @@
     },
     {
       "name": "s3_get_presigned_url",
-      "description": "Generate a short-lived presigned URL bearer capability for one B2 object — GetObject (download) or PutObject (upload). Prefer this for single-object transfers; use s3_create_multipart_upload and s3_presign_upload_part for multipart uploads. The response includes the URL, operation, expiresIn, and expiresAt; treat the URL as sensitive until it expires. This is the preferred path for moving real object data: bytes flow directly between the client/worker and B2 and never pass through the MCP server. Note: presigned POST (browser form uploads) is NOT supported by B2; use a PutObject URL instead.",
+      "description": "Generate a short-lived presigned URL bearer capability for one B2 object — GetObject (download) or PutObject (upload). Prefer this for single-object transfers; use s3_create_multipart_upload and s3_get_presigned_upload_part_url for multipart uploads. The response includes the URL, operation, expiresIn, and expiresAt; treat the URL as sensitive until it expires. This is the preferred path for moving real object data: bytes flow directly between the client/worker and B2 and never pass through the MCP server. Note: presigned POST (browser form uploads) is NOT supported by B2; use a PutObject URL instead.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -1668,7 +1668,7 @@
     },
     {
       "name": "s3_list_multipart_uploads",
-      "description": "List in-progress S3-compatible multipart uploads for a B2 bucket. Use to resume or audit unfinished uploads before s3_presign_upload_part, s3_complete_multipart_upload, or s3_abort_multipart_upload; use b2_unfinished_uploads when you need storage-cost analysis across bounded listings. Requires listFiles. Results are paginated with maxUploads (default 100, range 1-1000) and key/upload markers; delimiter responses include commonPrefixes.",
+      "description": "List in-progress S3-compatible multipart uploads for a B2 bucket. Use to resume or audit unfinished uploads before s3_get_presigned_upload_part_url, s3_complete_multipart_upload, or s3_abort_multipart_upload; use b2_unfinished_uploads when you need storage-cost analysis across bounded listings. Requires listFiles. Results are paginated with maxUploads (default 100, range 1-1000) and key/upload markers; delimiter responses include commonPrefixes.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -1839,8 +1839,8 @@
       }
     },
     {
-      "name": "s3_presign_upload_part",
-      "description": "Generate short-lived presigned PUT URL bearer capabilities for parts of an S3-compatible multipart upload, so the client/worker uploads each part DIRECTLY to B2. Prefer this over s3_get_presigned_url for multipart uploads; use s3_get_presigned_url for single-object PUT/GET transfers. The response includes expiresIn/expiresAt; treat each URL as sensitive until it expires. Flow: s3_create_multipart_upload → s3_presign_upload_part → PUT each part to its URL (capture the ETag from each response header) → s3_complete_multipart_upload with those ETags. Parts except the last must be ≥5 MiB, and no part may exceed 5 GiB.",
+      "name": "s3_get_presigned_upload_part_url",
+      "description": "Generate short-lived presigned PUT URL bearer capabilities for parts of an S3-compatible multipart upload, so the client/worker uploads each part DIRECTLY to B2. Prefer this over s3_get_presigned_url for multipart uploads; use s3_get_presigned_url for single-object PUT/GET transfers. The response includes expiresIn/expiresAt; treat each URL as sensitive until it expires. Flow: s3_create_multipart_upload → s3_get_presigned_upload_part_url → PUT each part to its URL (capture the ETag from each response header) → s3_complete_multipart_upload with those ETags. Parts except the last must be ≥5 MiB, and no part may exceed 5 GiB.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -2038,7 +2038,7 @@
     },
     {
       "name": "s3_upload_part_copy",
-      "description": "Copy a byte range from an existing B2 object into a part of an in-progress S3-compatible multipart upload, without downloading or re-uploading the data. Requires the writeFiles capability on the destination and read access to the source object. The source must be a bucket reachable within the same B2 account and region as the destination; cross-account sources cannot be copied this way. Use this to assemble large objects from data already in B2; use s3_presign_upload_part instead when the client must upload new bytes. The copied part belongs to the upload created by s3_create_multipart_upload, so it obeys the 1–10000 part numbering, the ≥5 MiB minimum for every part except the last, and the 5 GiB per-part maximum. A missing or inaccessible source, or a range outside the source object, fails the part copy. Returns the part ETag to pass to s3_complete_multipart_upload.",
+      "description": "Copy a byte range from an existing B2 object into a part of an in-progress S3-compatible multipart upload, without downloading or re-uploading the data. Requires the writeFiles capability on the destination and read access to the source object. The source must be a bucket reachable within the same B2 account and region as the destination; cross-account sources cannot be copied this way. Use this to assemble large objects from data already in B2; use s3_get_presigned_upload_part_url instead when the client must upload new bytes. The copied part belongs to the upload created by s3_create_multipart_upload, so it obeys the 1–10000 part numbering, the ≥5 MiB minimum for every part except the last, and the 5 GiB per-part maximum. A missing or inaccessible source, or a range outside the source object, fails the part copy. Returns the part ETag to pass to s3_complete_multipart_upload.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",

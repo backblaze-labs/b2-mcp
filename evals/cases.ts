@@ -510,7 +510,7 @@ export const CUSTOM_ANALYTICS_EVAL_CASES: readonly EvalCase[] = [
   evalToolCase({
     name: "usage growth analytics",
     category: "custom-analytics",
-    toolName: "b2_usage_growth",
+    toolName: "b2_report_usage_growth",
     args: {},
     request: "Analyze Backblaze B2 storage usage growth from usage reports.",
     result: b2BadAuthTokenError,
@@ -518,7 +518,7 @@ export const CUSTOM_ANALYTICS_EVAL_CASES: readonly EvalCase[] = [
   evalToolCase({
     name: "egress leaders analytics",
     category: "custom-analytics",
-    toolName: "b2_egress_leaders",
+    toolName: "b2_rank_egress_leaders",
     args: {},
     request: "Find the Backblaze B2 accounts or buckets with the highest egress.",
     result: b2BadAuthTokenError,
@@ -526,7 +526,7 @@ export const CUSTOM_ANALYTICS_EVAL_CASES: readonly EvalCase[] = [
   evalToolCase({
     name: "largest files analytics",
     category: "custom-analytics",
-    toolName: "b2_largest_files",
+    toolName: "b2_list_largest_files",
     args: { bucket: "eval-bucket" },
     request: "Find the largest files in a Backblaze B2 bucket.",
     result: b2BadAuthTokenError,
@@ -707,7 +707,7 @@ export const S3_DATA_PLANE_EVAL_CASES: readonly EvalCase[] = [
   evalToolCase({
     name: "presign upload parts",
     category: "s3-data-plane",
-    toolName: "s3_presign_upload_part",
+    toolName: "s3_get_presigned_upload_part_url",
     args: {
       bucket: "eval-bucket",
       key: "large.bin",

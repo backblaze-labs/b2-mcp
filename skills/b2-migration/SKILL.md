@@ -34,7 +34,7 @@ description: Plan source-to-B2 or B2-to-B2 migrations with inventory, direct byt
 - `s3_copy_object`
 - `s3_get_presigned_url`
 - `s3_create_multipart_upload`
-- `s3_presign_upload_part`
+- `s3_get_presigned_upload_part_url`
 - `s3_complete_multipart_upload`
 - `s3_list_parts`
 

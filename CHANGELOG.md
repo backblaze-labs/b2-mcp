@@ -34,6 +34,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the MCP `resources` capability. (#165)
 
 ### Changed
+- **BREAKING:** Renamed four tools to the standard `<prefix>_<verb>_<noun>`
+  naming convention for server coherence; the old names are removed with no
+  aliases, so existing integrations must switch to the new names. Old → new:
+  `b2_usage_growth` → `b2_report_usage_growth`,
+  `b2_egress_leaders` → `b2_rank_egress_leaders`,
+  `b2_largest_files` → `b2_list_largest_files`,
+  `s3_presign_upload_part` → `s3_get_presigned_upload_part_url`. The naming
+  convention is now documented in `docs/design-docs/tool-contract.md` and
+  referenced from `AGENTS.md`. (#365)
 - The stdio and HTTP transports now support credential-free discovery for
   directory scanners and MCP inspectors: `initialize` / `server/discover` /
   `tools/list` can run without B2 credentials, placeholder header credentials

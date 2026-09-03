@@ -57,7 +57,7 @@ describe("s3 multipart tools with deterministic S3 fake", () => {
 
     expect(
       parseResult(
-        await tools.call("s3_presign_upload_part", {
+        await tools.call("s3_get_presigned_upload_part_url", {
           bucket: "b",
           key: "large.bin",
           uploadId: "upload-1",

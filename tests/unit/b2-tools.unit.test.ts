@@ -490,7 +490,7 @@ describe("SDK 401 re-auth-and-retry", () => {
     });
 
     const result = parseResult(
-      await callTool(server, "b2_largest_files", {
+      await callTool(server, "b2_list_largest_files", {
         bucket: "raw-reauth-bucket",
         limit: 1,
         max_scan: 1000,
@@ -565,7 +565,7 @@ describe("SDK 401 re-auth-and-retry", () => {
 
     for (let i = 0; i < 2; i++) {
       const result = parseResult(
-        await callTool(server, "b2_largest_files", {
+        await callTool(server, "b2_list_largest_files", {
           bucket: "raw-cache-bucket",
           limit: 1,
           max_scan: 1000,
@@ -1529,7 +1529,7 @@ describe("native SDK DTO boundaries", () => {
       parseResult(await callTool(server, "b2_list_buckets", {})),
       parseResult(await callTool(server, "b2_list_keys", {})),
       parseResult(
-        await callTool(server, "b2_largest_files", {
+        await callTool(server, "b2_list_largest_files", {
           bucket: "dto-bucket",
           limit: 1,
           max_scan: 1000,

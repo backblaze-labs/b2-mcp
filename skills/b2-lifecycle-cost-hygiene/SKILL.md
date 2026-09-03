@@ -26,9 +26,9 @@ description: Audit B2 storage growth, stale versions, unfinished uploads, egress
 
 ## Tools used
 
-- `b2_usage_growth`
-- `b2_largest_files`
-- `b2_egress_leaders`
+- `b2_report_usage_growth`
+- `b2_list_largest_files`
+- `b2_rank_egress_leaders`
 - `b2_unfinished_uploads`
 - `b2_list_buckets`
 - `s3_list_objects_v2`
@@ -43,7 +43,7 @@ description: Audit B2 storage growth, stale versions, unfinished uploads, egress
 ## Playbook
 
 1. Define the cost question: storage growth, old versions, hidden files, abandoned multipart uploads, egress, large objects, or lifecycle coverage.
-2. Use `b2_usage_growth`, `b2_largest_files`, `b2_egress_leaders`, and `b2_unfinished_uploads` to build an evidence-first summary. Use `s3_list_objects_v2`, `s3_list_object_versions`, and `s3_list_multipart_uploads` for targeted follow-up.
+2. Use `b2_report_usage_growth`, `b2_list_largest_files`, `b2_rank_egress_leaders`, and `b2_unfinished_uploads` to build an evidence-first summary. Use `s3_list_objects_v2`, `s3_list_object_versions`, and `s3_list_multipart_uploads` for targeted follow-up.
 3. For listings, request pages of at most 1,000 keys or versions, persist continuation tokens, stop chat output after 50 sampled rows or 10 pages, and write full inventories to an external manifest or report.
 4. Group findings by bucket, prefix, owner, age, object count, and estimated bytes. Separate live data, noncurrent versions, hide markers, unfinished uploads, and report-derived egress.
 5. Propose lifecycle rules only after checking retention and recovery requirements. For deletion policies, state the exact rule, prefix filter, age threshold, expected effect, and rollback limitation before `s3_put_bucket_lifecycle` or `b2_update_bucket`.

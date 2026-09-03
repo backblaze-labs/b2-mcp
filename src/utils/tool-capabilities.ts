@@ -37,9 +37,9 @@ export const TOOL_CAPABILITIES: Record<string, string[]> = {
   b2_update_file_retention: ["writeFileRetentions"],
   b2_update_file_legal_hold: ["writeFileLegalHolds"],
   // Storage-activity insights read the daily usage-report CSVs / live listings.
-  b2_usage_growth: ["readFiles"],
-  b2_egress_leaders: ["readFiles"],
-  b2_largest_files: ["listFiles"],
+  b2_report_usage_growth: ["readFiles"],
+  b2_rank_egress_leaders: ["readFiles"],
+  b2_list_largest_files: ["listFiles"],
   b2_unfinished_uploads: ["listFiles"],
 
   // ── S3 data plane ────────────────────────────────────────────────────────
@@ -52,7 +52,7 @@ export const TOOL_CAPABILITIES: Record<string, string[]> = {
   s3_list_objects_v2: ["listFiles"],
   s3_list_object_versions: ["listFiles"],
   s3_create_multipart_upload: ["writeFiles"],
-  s3_presign_upload_part: ["writeFiles"],
+  s3_get_presigned_upload_part_url: ["writeFiles"],
   s3_complete_multipart_upload: ["writeFiles"],
   s3_abort_multipart_upload: ["writeFiles"],
   s3_list_parts: ["listFiles"],
@@ -116,7 +116,7 @@ export const IDEMPOTENT_NON_READONLY_TOOL_NAMES = new Set([
   "s3_copy_object",
   "s3_upload_part_copy",
   "s3_complete_multipart_upload",
-  "s3_presign_upload_part",
+  "s3_get_presigned_upload_part_url",
 ]);
 
 function isReadListCapability(capability: string): boolean {
@@ -207,9 +207,9 @@ export const OAUTH_TOOL_SCOPE_POLICY: Record<string, OAuthToolScopePolicy> = {
   b2_delete_bucket: "write",
   b2_delete_key: "admin",
   b2_eject_group_member: "admin",
-  b2_egress_leaders: "read",
+  b2_rank_egress_leaders: "read",
   b2_get_bucket_notification_rules: "admin",
-  b2_largest_files: "read",
+  b2_list_largest_files: "read",
   b2_list_buckets: "read",
   b2_list_group_members: "admin",
   b2_list_groups: "admin",
@@ -220,7 +220,7 @@ export const OAUTH_TOOL_SCOPE_POLICY: Record<string, OAuthToolScopePolicy> = {
   b2_update_bucket: "admin",
   b2_update_file_legal_hold: "admin",
   b2_update_file_retention: "admin",
-  b2_usage_growth: "read",
+  b2_report_usage_growth: "read",
   s3_abort_multipart_upload: "write",
   s3_complete_multipart_upload: "write",
   s3_copy_object: "write",
@@ -236,7 +236,7 @@ export const OAUTH_TOOL_SCOPE_POLICY: Record<string, OAuthToolScopePolicy> = {
   s3_list_object_versions: "read",
   s3_list_objects_v2: "read",
   s3_list_parts: "read",
-  s3_presign_upload_part: "write",
+  s3_get_presigned_upload_part_url: "write",
   s3_put_bucket_lifecycle: "admin",
   s3_put_object: "write",
   s3_upload_part_copy: "write",

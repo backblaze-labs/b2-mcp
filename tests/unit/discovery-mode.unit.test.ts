@@ -17,7 +17,7 @@ describe("credential-less discovery mode", () => {
   it("registers the full surface but refuses tool calls with missing_credentials", async () => {
     const server = createServer(testConfig, null, { credentialsUnavailable: true });
 
-    for (const name of ["b2_list_buckets", "s3_head_bucket", "b2_usage_growth"]) {
+    for (const name of ["b2_list_buckets", "s3_head_bucket", "b2_report_usage_growth"]) {
       const result = await callTool(server, name, {});
       expect(result.isError).toBe(true);
       const text = result.content[0].text;
