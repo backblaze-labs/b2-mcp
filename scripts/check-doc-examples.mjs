@@ -628,6 +628,16 @@ function validatePackageCommand(file, line, commandConfig, expectedPackage, opti
   // launches. The strict pinned fence must confirm it is an exported package
   // binary so a pinned package spec cannot front an unrelated executable.
   if (options.requireExactVersion) {
+    // `-c`/`--call` runs an arbitrary shell string after fetching the package,
+    // so a pinned spec could still front any executable. Reject it outright in
+    // strict mode rather than trying to vet the free-form command string.
+    if (execArgs.some((arg) => arg === "-c" || arg === "--call" || arg.startsWith("--call="))) {
+      addFinding(
+        file,
+        line,
+        "pinned client config must not use --call to run an arbitrary command",
+      );
+    }
     const runCommand = explicitPackageRunCommand(execArgs);
     if (runCommand !== null && !new Set(Object.keys(pkg.bin ?? {})).has(runCommand)) {
       addFinding(
@@ -1015,6 +1025,45 @@ function stripShellToken(token) {
   return token.replace(/^[`'"]+|[`'",\]]+$/g, "");
 }
 
+// Split a command on shell control operators (`&&`, `||`, `;`, `|`) while
+// ignoring operators inside single- or double-quoted spans. Splitting with a
+// plain regex before tokenizing defeated the quote-aware parser: a quoted option
+// value such as `npm --prefix "/tmp;cache" install -g <pkg>` was cut inside the
+// quoted path, so neither fragment parsed as an install and the drift passed.
+// Quote characters are kept so downstream `tokenizeShell` still strips them.
+function splitShellOperators(text) {
+  const segments = [];
+  let current = "";
+  let quote = null;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (quote) {
+      current += char;
+      if (char === quote) quote = null;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      current += char;
+      continue;
+    }
+    if ((char === "&" && text[index + 1] === "&") || (char === "|" && text[index + 1] === "|")) {
+      segments.push(current);
+      current = "";
+      index += 1;
+      continue;
+    }
+    if (char === ";" || char === "|") {
+      segments.push(current);
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+  segments.push(current);
+  return segments;
+}
+
 function validateMutablePackageLaunchers(file, text, startLine) {
   // Fold backslash-continued shell commands into one logical command before
   // applying the policy. Splitting on physical lines let a continuation such as
@@ -1124,7 +1173,7 @@ function isExecutablePackageLine(line) {
   // executable, but an adjacent-only regex (`npm\s+exec`) missed it and let a
   // mutable-version exec through.
   for (const chunk of line.split("`")) {
-    for (const segment of chunk.split(/\s*(?:&&|\|\||[;|])\s*/)) {
+    for (const segment of splitShellOperators(chunk)) {
       if (segmentIsPackageExecutor(segment)) return true;
     }
   }
@@ -1215,7 +1264,7 @@ function npmInstallSegmentSpecs(line) {
   // on backticks first (then on shell operators) so prose following a closing
   // backtick is not misread as trailing package operands.
   for (const chunk of withoutComment.split("`")) {
-    for (const segment of chunk.split(/\s*(?:&&|\|\||[;|])\s*/)) {
+    for (const segment of splitShellOperators(chunk)) {
       const invocation = npmInstallInvocation(segment);
       if (invocation) segments.push(invocation);
     }

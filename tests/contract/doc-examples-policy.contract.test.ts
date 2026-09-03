@@ -203,6 +203,35 @@ describe("documentation example validator policy", () => {
     expect(result.stderr).toContain(message);
   });
 
+  it("rejects a pinned client fence that uses --call to run an arbitrary command", () => {
+    const readme = read("README.md").replace(
+      '"command": "npx",\n     "args": ["-y", "@backblaze-labs/b2-mcp@0.2.0"]',
+      '"command": "npx",\n     "args": ["--package=@backblaze-labs/b2-mcp@0.2.0", "--call", "node ./other.js"]',
+    );
+    const expectedLine = lineOf(readme, '```json\n   {\n     "command": "npx",');
+    const result = runDocExamplesWithOverrides({ "README.md": readme });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(`README.md:${expectedLine}`);
+    expect(result.stderr).toContain("must not use --call to run an arbitrary command");
+  });
+
+  it.each([
+    ['quoted ; operator', 'npm --prefix "/tmp;cache" install -g @attacker/b2-mcp@0.2.0'],
+    ['quoted | operator', 'npm --prefix "/tmp|cache" install -g @attacker/b2-mcp@0.2.0'],
+  ])("rejects a global npm install whose %s hides the drift", (_label, command) => {
+    const readme = read("README.md").replace(
+      "npm install -g @backblaze-labs/b2-mcp@0.2.0",
+      command,
+    );
+    const expectedLine = lineOf(readme, command);
+    const result = runDocExamplesWithOverrides({ "README.md": readme });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(`README.md:${expectedLine}`);
+    expect(result.stderr).toContain("global npm install examples must install");
+  });
+
   it("rejects an npx launcher with an extra option before a drifting package", () => {
     const readme = read("README.md").replace(
       "npx -y @backblaze-labs/b2-mcp@0.2.0 --version",
