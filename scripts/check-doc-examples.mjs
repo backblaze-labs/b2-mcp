@@ -222,6 +222,10 @@ const npmInstallValueOptions = new Set([
   "--workspace",
 ]);
 
+// npx options that consume the following token as their value, so it is not
+// misread as the package operand (e.g. `npx --call "cmd" @scope/pkg`).
+const npxValueOptions = new Set(["-c", "--call"]);
+
 const findings = [];
 const docs = new Map(releaseDocs.map((file) => [file, read(file)]));
 
@@ -541,7 +545,19 @@ function findCommandConfigs(value) {
 
 function validatePackageCommand(file, line, commandConfig, expectedPackage, options = {}) {
   const command = commandConfig.command.trim();
-  if (!["npx", "npm", "pnpm"].includes(command)) return;
+  if (!["npx", "npm", "pnpm"].includes(command)) {
+    // The pinned fence pins a version through a package manager. A bare binary,
+    // filesystem path, or `node` launcher pins nothing, so a strict
+    // requireExactVersion fence must fail closed rather than return silently.
+    if (options.requireExactVersion) {
+      addFinding(
+        file,
+        line,
+        `pinned client config must launch via npx/npm/pnpm to pin a version, got ${command}`,
+      );
+    }
+    return;
+  }
   const args = commandConfig.args;
   if (!Array.isArray(args) || args.some((arg) => typeof arg !== "string")) {
     addFinding(file, line, `${command} client config args must be an array of strings`);
@@ -611,10 +627,15 @@ function firstPackageArg(args) {
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === "--") continue;
-    if (arg === "-y" || arg === "--yes") continue;
     if (arg.startsWith("--package=")) return arg.slice("--package=".length);
     if (arg === "--package" || arg === "-p") return args[index + 1] ?? null;
-    if (arg.startsWith("-")) continue;
+    if (arg.startsWith("-")) {
+      // Skip an option and, for value-taking options, its value. Parsing to the
+      // real operand keeps `npx --yes --offline @attacker/pkg` from capturing an
+      // option (`--offline`) as the package spec.
+      if (!arg.includes("=") && npxValueOptions.has(arg)) index += 1;
+      continue;
+    }
     return arg;
   }
   return null;
@@ -787,27 +808,18 @@ function validatePackageScriptReferences(file, text, startLine) {
 }
 
 function validatePackageNameReferences(file, text, startLine) {
-  // Fold backslash-continued shell commands first, matching the launcher policy.
-  // Otherwise a continued `npx -y \` + `@attacker/b2-mcp@0.2.0` splits the
-  // executable and package spec across physical lines, the regex never matches,
-  // and the drift passes unchecked (the launcher check only searches for the
-  // canonical package, so it will not catch a different name either).
-  // Accept the same skip-confirmation option forms `firstPackageArg` honors
-  // (`-y` and the long-form `--yes`); otherwise `npx --yes @attacker/...` drifts
-  // to another package with no finding because only `-y` was permitted here.
-  // Capture both scoped (`@scope/name`) and unscoped (`name`) operands so the
-  // unscoped drift `npx -y b2-mcp@0.2.0` is not missed by a scoped-only regex.
-  const npxPackagePattern =
-    /\bnpx\s+(?:(?:-y|--yes)\s+)*((?:@[a-z0-9._-]+\/)?[a-z0-9._-]+(?:@[^\s`"',\]]+)?)/g;
   // Our own unscoped name (for example `b2-mcp`). Unscoped operands are only
   // flagged when they collide with it, so unrelated launchers such as
-  // `npx wrangler` in a validated fence are not false-positived.
+  // `npx wrangler` in a validated fence do not raise a false positive.
   const unscopedName = pkg.name.includes("/")
     ? pkg.name.slice(pkg.name.indexOf("/") + 1)
     : pkg.name;
+  // Fold backslash-continued shell commands first, matching the launcher policy.
+  // Otherwise a continued `npx -y \` + `@attacker/b2-mcp@0.2.0` splits the
+  // executable and package spec across physical lines and the drift passes
+  // unchecked (the launcher check only searches for the canonical package).
   for (const { line, text: logicalLine } of foldShellContinuations(text)) {
-    for (const match of logicalLine.matchAll(npxPackagePattern)) {
-      const packageSpec = match[1];
+    for (const packageSpec of npxPackageSpecsInLine(logicalLine)) {
       const parsedPackageSpec = parsePackageSpec(packageSpec);
       if (!parsedPackageSpec) continue;
       const drifts = parsedPackageSpec.name.startsWith("@")
@@ -822,6 +834,26 @@ function validatePackageNameReferences(file, text, startLine) {
       }
     }
   }
+}
+
+// Locate the package operand of every `npx` invocation on a logical line by
+// tokenizing and parsing options through the same `firstPackageArg` logic used
+// for JSON client configs. Scanning tokens (rather than a fixed regex) means an
+// extra option such as `npx --yes --offline @attacker/pkg` no longer captures
+// the option as the package, and both scoped and unscoped operands are covered.
+function npxPackageSpecsInLine(logicalLine) {
+  const tokens = logicalLine.split(/\s+/).map(stripShellToken).filter(Boolean);
+  const specs = [];
+  for (let index = 0; index < tokens.length; index += 1) {
+    if (tokens[index] !== "npx") continue;
+    const operand = firstPackageArg(tokens.slice(index + 1));
+    if (operand) specs.push(operand);
+  }
+  return specs;
+}
+
+function stripShellToken(token) {
+  return token.replace(/^[`'"]+|[`'",\]]+$/g, "");
 }
 
 function validateMutablePackageLaunchers(file, text, startLine) {
@@ -932,7 +964,59 @@ function isExecutablePackageLine(line) {
 }
 
 function isGlobalNpmInstallLine(line) {
-  return /\bnpm\s+(?:install|i)\b/.test(line) && /(?:^|\s)(?:-g|--global)(?:\s|$)/.test(line);
+  return npmInstallSegmentSpecs(line).some((segment) => segment.isGlobal);
+}
+
+// Parse an `npm install`/`npm i` invocation from a single command segment,
+// allowing global and other options to precede the subcommand (for example
+// `npm --global install <pkg>`). Returns null when the segment is not an npm
+// install; otherwise reports whether it is global and the package operands.
+function npmInstallInvocation(segment) {
+  const tokens = segment.split(/\s+/).map(stripShellToken).filter(Boolean);
+  const npmIndex = tokens.findIndex((token) => token === "npm" || token === "npm.cmd");
+  if (npmIndex === -1) return null;
+
+  let index = npmIndex + 1;
+  let isGlobal = false;
+  // Skip options (and any value they consume) that precede the subcommand, so a
+  // global flag written before `install` is still recognized.
+  while (index < tokens.length && tokens[index].startsWith("-")) {
+    const option = tokens[index];
+    if (option === "-g" || option === "--global") isGlobal = true;
+    if (!option.includes("=") && npmInstallValueOptions.has(option)) index += 1;
+    index += 1;
+  }
+  if (tokens[index] !== "install" && tokens[index] !== "i") return null;
+  index += 1;
+
+  const operands = [];
+  for (; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (token.startsWith("-")) {
+      if (token === "-g" || token === "--global") isGlobal = true;
+      // A bare value-taking option (e.g. `--prefix /path`) consumes the next
+      // token, which must not be mistaken for a package operand.
+      if (!token.includes("=") && npmInstallValueOptions.has(token)) index += 1;
+      continue;
+    }
+    operands.push(token);
+  }
+  return { isGlobal, operands };
+}
+
+function npmInstallSegmentSpecs(line) {
+  const withoutComment = line.replace(/(?:^|\s)#.*$/, "");
+  const segments = [];
+  // A backtick delimits inline code in prose; a command never spans one. Split
+  // on backticks first (then on shell operators) so prose following a closing
+  // backtick is not misread as trailing package operands.
+  for (const chunk of withoutComment.split("`")) {
+    for (const segment of chunk.split(/\s*(?:&&|\|\||[;|])\s*/)) {
+      const invocation = npmInstallInvocation(segment);
+      if (invocation) segments.push(invocation);
+    }
+  }
+  return segments;
 }
 
 function hasBroadMcpLogWildcard(line) {
@@ -951,34 +1035,17 @@ function globalNpmInstallSegments(line) {
   // Validate every chained global install, not just the first. Splitting on the
   // first operator (or matching only the first `npm install`) let a second
   // `npm install -g <attacker>` after `&&`/`;`/`|` slip through unchecked, and
-  // let a non-global first install mask a later global one. Strip a trailing
-  // shell comment, split into command segments, and return one entry per segment
-  // that is itself a global `npm install` so each can be validated on its own.
-  const withoutComment = line.replace(/(?:^|\s)#.*$/, "");
+  // let a non-global first install mask a later global one. Return one entry per
+  // segment that is itself a global `npm install` so each can be validated alone.
   const segments = [];
-  for (const segment of withoutComment.split(/\s*(?:&&|\|\||[;|])\s*/)) {
-    const match = segment.match(/\bnpm\s+(?:install|i)\b(?<args>[^`\n]*)/);
-    const args = match?.groups?.args;
-    if (!args) continue;
-    if (!/(?:^|\s)(?:-g|--global)(?:\s|$)/.test(args)) continue;
-    const specs = [];
-    const tokens = args.split(/\s+/);
-    for (let index = 0; index < tokens.length; index += 1) {
-      const cleaned = tokens[index].replace(/^[`'"]+|[`'",\]]+$/g, "");
-      if (!cleaned) continue;
-      if (cleaned.startsWith("-")) {
-        // A bare value-taking option (e.g. `--prefix /path`, `--registry <url>`)
-        // consumes the next token, which must not be mistaken for a package
-        // operand. `--opt=value` forms are self-contained.
-        if (!cleaned.includes("=") && npmInstallValueOptions.has(cleaned)) index += 1;
-        continue;
-      }
-      const spec = parsePackageSpec(cleaned);
-      // Fail closed on an operand `parsePackageSpec` cannot recognize (a URL or
-      // file/tarball path). Silently dropping it let a valid operand mask an extra
-      // off-policy package such as `... @backblaze-labs/b2-mcp@0.2.0 https://x/y.tgz`.
-      specs.push(spec ?? { name: cleaned, version: null });
-    }
+  for (const invocation of npmInstallSegmentSpecs(line)) {
+    if (!invocation.isGlobal) continue;
+    // Fail closed on an operand `parsePackageSpec` cannot recognize (a URL or
+    // file/tarball path). Silently dropping it let a valid operand mask an extra
+    // off-policy package such as `... @backblaze-labs/b2-mcp@0.2.0 https://x/y.tgz`.
+    const specs = invocation.operands.map(
+      (operand) => parsePackageSpec(operand) ?? { name: operand, version: null },
+    );
     segments.push({ specs });
   }
   return segments;
