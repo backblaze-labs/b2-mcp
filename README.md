@@ -179,23 +179,42 @@ closed the stdio transport.
 Fully quit the affected MCP client first. If the npm error includes a path like
 `~/.npm/_npx/<hash>/...`, delete only that failing extraction:
 
+macOS/Linux:
+
 ```bash
 rm -rf ~/.npm/_npx/<hash-from-error>
+```
+
+Windows PowerShell:
+
+```text
+$npxCache = Join-Path ((npm config get cache).Trim()) "_npx"
+Remove-Item -Recurse -Force (Join-Path $npxCache "<hash-from-error>") -ErrorAction SilentlyContinue
 ```
 
 Then reopen the client. If the error does not show a hash, or if the targeted
 cleanup does not stick, this broader last-resort cleanup removes all `npx`
 extractions for the current user and forces future `npx` launches to re-fetch:
 
+macOS/Linux:
+
 ```bash
 rm -rf ~/.npm/_npx
+npm cache clean --force
+```
+
+Windows PowerShell:
+
+```text
+$npxCache = Join-Path ((npm config get cache).Trim()) "_npx"
+Remove-Item -Recurse -Force $npxCache -ErrorAction SilentlyContinue
 npm cache clean --force
 ```
 
 Do not run the broad cleanup while MCP clients are still starting. The
 `npm cache clean --force` command is optional; use it only if clearing `_npx`
 alone does not resolve the stale or corrupt cache. To reduce repeat
-cache-refresh failures, use a pinned `npx` version or a global install from
+cache-refresh failures, use a pinned package version or a global install from
 [More robust local install options](#more-robust-local-install-options).
 
 ### How do I confirm which version is actually running?
@@ -235,11 +254,14 @@ shown in [Quick start](#quick-start).
 
 For normal storage work, set `B2_APPLICATION_KEY_ID` and `B2_APPLICATION_KEY` to
 a non-master B2 application key. That one key covers native B2, S3-compatible,
-and key-management tools. `bad_auth_token` usually means the key ID/secret pair
-is wrong, expired, revoked, or copied with extra whitespace. Missing-capability
-messages mean the key does not grant the operation you asked for, and
-capability-aware registration may hide tools that key cannot use. Partner/Groups
-tools are the exception: they require `B2_MASTER_KEY_ID` / `B2_MASTER_KEY` on a
+and key-management tools. If startup fails with `capability_auth_failed`, check
+that the key ID/secret pair is correct, active, not copied with extra
+whitespace, and grants enough capability for startup discovery. Operation-level
+authorization failures are retried once after reauthorization; if they continue,
+check the B2 error payload and key scope. Missing-capability messages mean the
+key does not grant the operation you asked for, and capability-aware
+registration may hide tools that key cannot use. Partner/Groups tools are the
+exception: they require `B2_MASTER_KEY_ID` / `B2_MASTER_KEY` on a
 Partner-entitled account. See [Configuration](#configuration) and
 [Security & self-hosting](#security--self-hosting) for the full credential model.
 
