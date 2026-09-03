@@ -22,14 +22,14 @@
     "b2_authorize_account",
     "b2_create_group_member",
     "b2_create_key",
-    "b2_egress_leaders",
     "b2_get_bucket_notification_rules",
-    "b2_largest_files",
     "b2_list_buckets",
     "b2_list_keys",
+    "b2_list_largest_files",
+    "b2_rank_egress_leaders",
+    "b2_report_usage_growth",
     "b2_reserve_trial_create_account",
     "b2_unfinished_uploads",
-    "b2_usage_growth",
     "s3_get_bucket_location",
     "s3_get_object",
     "s3_get_presigned_url",
@@ -44,14 +44,14 @@
     "b2_authorize_account": [],
     "b2_create_group_member": [],
     "b2_create_key": [],
-    "b2_egress_leaders": [],
     "b2_get_bucket_notification_rules": ["bucketId"],
-    "b2_largest_files": ["bucket"],
     "b2_list_buckets": [],
     "b2_list_keys": [],
+    "b2_list_largest_files": ["bucket"],
+    "b2_rank_egress_leaders": [],
+    "b2_report_usage_growth": [],
     "b2_reserve_trial_create_account": [],
     "b2_unfinished_uploads": ["bucket"],
-    "b2_usage_growth": [],
     "s3_get_bucket_location": ["bucket"],
     "s3_get_object": ["bucket", "key"],
     "s3_get_presigned_url": ["bucket", "key", "operation"],
@@ -120,41 +120,6 @@
       }
     },
     {
-      "name": "b2_egress_leaders",
-      "descriptionSha256": "bd10578dd665435a3af4ddf2a0d8dee3dc32716a1fe0b64678f784bbfa2f2bcd",
-      "inputSchema": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "properties": {
-          "by": {
-            "default": "account",
-            "description": "Rank by 'account' (default) or 'bucket'.",
-            "enum": ["account", "bucket"],
-            "type": "string"
-          },
-          "days": {
-            "description": "Rolling window in days (1–90). Omit for current month to date.",
-            "maximum": 90,
-            "minimum": 1,
-            "type": "integer"
-          },
-          "limit": {
-            "default": 15,
-            "description": "Leaders to return (15).",
-            "maximum": 9007199254740991,
-            "minimum": 1,
-            "type": "integer"
-          }
-        },
-        "type": "object"
-      },
-      "annotations": {
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": true,
-        "readOnlyHint": true
-      }
-    },
-    {
       "name": "b2_get_bucket_notification_rules",
       "descriptionSha256": "0d5905bfd63ffde70b05eb9854f4f054d6de05be98b6c829e778e9a065ae6b2d",
       "inputSchema": {
@@ -166,46 +131,6 @@
           }
         },
         "required": ["bucketId"],
-        "type": "object"
-      },
-      "annotations": {
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": true,
-        "readOnlyHint": true
-      }
-    },
-    {
-      "name": "b2_largest_files",
-      "descriptionSha256": "551618b1bfc6a4df209c7992244a028b7cd57b1cdffac80563ce435ffa6d9c95",
-      "inputSchema": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "properties": {
-          "bucket": {
-            "description": "Bucket name or bucketId to inspect.",
-            "minLength": 1,
-            "type": "string"
-          },
-          "limit": {
-            "default": 10,
-            "description": "How many of the largest files to return (default 10, max 100).",
-            "maximum": 100,
-            "minimum": 1,
-            "type": "integer"
-          },
-          "max_scan": {
-            "default": 50000,
-            "description": "Safety cap on objects scanned (default 50,000, max 500,000). Buckets with millions of files cannot be fully sorted by size in one live call; the scan stops at this cap (or a time budget) and returns truncated=true. Narrow with prefix for an exhaustive ranking of a subtree.",
-            "maximum": 500000,
-            "minimum": 1000,
-            "type": "integer"
-          },
-          "prefix": {
-            "description": "Optional path prefix, e.g. \"checkpoints/\".",
-            "type": "string"
-          }
-        },
-        "required": ["bucket"],
         "type": "object"
       },
       "annotations": {
@@ -282,6 +207,122 @@
       }
     },
     {
+      "name": "b2_list_largest_files",
+      "descriptionSha256": "551618b1bfc6a4df209c7992244a028b7cd57b1cdffac80563ce435ffa6d9c95",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "bucket": {
+            "description": "Bucket name or bucketId to inspect.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "limit": {
+            "default": 10,
+            "description": "How many of the largest files to return (default 10, max 100).",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "max_scan": {
+            "default": 50000,
+            "description": "Safety cap on objects scanned (default 50,000, max 500,000). Buckets with millions of files cannot be fully sorted by size in one live call; the scan stops at this cap (or a time budget) and returns truncated=true. Narrow with prefix for an exhaustive ranking of a subtree.",
+            "maximum": 500000,
+            "minimum": 1000,
+            "type": "integer"
+          },
+          "prefix": {
+            "description": "Optional path prefix, e.g. \"checkpoints/\".",
+            "type": "string"
+          }
+        },
+        "required": ["bucket"],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "b2_rank_egress_leaders",
+      "descriptionSha256": "bd10578dd665435a3af4ddf2a0d8dee3dc32716a1fe0b64678f784bbfa2f2bcd",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "by": {
+            "default": "account",
+            "description": "Rank by 'account' (default) or 'bucket'.",
+            "enum": ["account", "bucket"],
+            "type": "string"
+          },
+          "days": {
+            "description": "Rolling window in days (1–90). Omit for current month to date.",
+            "maximum": 90,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "limit": {
+            "default": 15,
+            "description": "Leaders to return (15).",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "b2_report_usage_growth",
+      "descriptionSha256": "7a7dec02f490d7760620fa11f21cbdcd5672e9a2f63e764cc9566c8c4ad217ff",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "days": {
+            "description": "Custom trailing window in days that overrides `period` (e.g. 7 for week-over-week).",
+            "maximum": 3650,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "limit": {
+            "default": 50,
+            "description": "Max accounts (default 50).",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "order": {
+            "default": "most_grown",
+            "description": "Ranking. Default most_grown.",
+            "enum": ["most_grown", "least_grown", "shrinking"],
+            "type": "string"
+          },
+          "period": {
+            "default": "month",
+            "description": "Compare the latest snapshot against one month, quarter, or year ago. Default month.",
+            "enum": ["month", "quarter", "year"],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
+      }
+    },
+    {
       "name": "b2_reserve_trial_create_account",
       "descriptionSha256": "68741d07c8dec96e72801be0c0078ca13cc1e5c2f52011abdb4b3fe6a0bdbfb0",
       "inputSchema": {
@@ -327,47 +368,6 @@
           }
         },
         "required": ["bucket"],
-        "type": "object"
-      },
-      "annotations": {
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": true,
-        "readOnlyHint": true
-      }
-    },
-    {
-      "name": "b2_usage_growth",
-      "descriptionSha256": "7a7dec02f490d7760620fa11f21cbdcd5672e9a2f63e764cc9566c8c4ad217ff",
-      "inputSchema": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "properties": {
-          "days": {
-            "description": "Custom trailing window in days that overrides `period` (e.g. 7 for week-over-week).",
-            "maximum": 3650,
-            "minimum": 1,
-            "type": "integer"
-          },
-          "limit": {
-            "default": 50,
-            "description": "Max accounts (default 50).",
-            "maximum": 9007199254740991,
-            "minimum": 1,
-            "type": "integer"
-          },
-          "order": {
-            "default": "most_grown",
-            "description": "Ranking. Default most_grown.",
-            "enum": ["most_grown", "least_grown", "shrinking"],
-            "type": "string"
-          },
-          "period": {
-            "default": "month",
-            "description": "Compare the latest snapshot against one month, quarter, or year ago. Default month.",
-            "enum": ["month", "quarter", "year"],
-            "type": "string"
-          }
-        },
         "type": "object"
       },
       "annotations": {
@@ -437,7 +437,7 @@
     },
     {
       "name": "s3_get_presigned_url",
-      "descriptionSha256": "836960662a8d29ad25fbf0f472fc57567ebf4e3408a35033a9496eacc8625902",
+      "descriptionSha256": "70780433ff2d08331f34b47cd37912ad997816c578e78d995d42cdd610e11fdd",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -528,7 +528,7 @@
     },
     {
       "name": "s3_list_multipart_uploads",
-      "descriptionSha256": "afaaeffd219e690e532fb156935c6200ca70d8067a3e26d27c4b0ad5d82d82fe",
+      "descriptionSha256": "bd831dc0b36fdfb319a968f05be218405fad9fa3c690b56b770f56e3cb90ca87",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -722,5 +722,5 @@
       "resultType": "complete"
     }
   },
-  "hash": "b5244ef8a3d5d15f6a8c9a1e553401aeffaea0811740991a05cade76b6f238ec"
+  "hash": "5fefc07c6182565e9da2c08cea05496affa651a848404b97915168ae16a747a5"
 }

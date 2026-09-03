@@ -198,24 +198,24 @@ describe("insight usage-report read paths", () => {
     vi.setSystemTime(REPORT_CLOCK);
   });
 
-  it("returns not-enabled metadata when b2_usage_growth cannot list the report bucket", async () => {
+  it("returns not-enabled metadata when b2_report_usage_growth cannot list the report bucket", async () => {
     const report = createPagedReportClient({}, { listError: noSuchBucket() });
     const tools = registerTools(report.client);
 
     const result = parseResult(
-      await tools.call("b2_usage_growth", { period: "month", order: "most_grown", limit: 10 }),
+      await tools.call("b2_report_usage_growth", { period: "month", order: "most_grown", limit: 10 }),
     );
 
     expect(result.reports_enabled).toBe(false);
     expect(result.note).toContain("No b2-reports");
   });
 
-  it("returns a clean empty-snapshot result for b2_usage_growth", async () => {
+  it("returns a clean empty-snapshot result for b2_report_usage_growth", async () => {
     const report = createPagedReportClient({});
     const tools = registerTools(report.client);
 
     const result = parseResult(
-      await tools.call("b2_usage_growth", { period: "month", order: "most_grown", limit: 10 }),
+      await tools.call("b2_report_usage_growth", { period: "month", order: "most_grown", limit: 10 }),
     );
 
     expect(result.reports_enabled).toBe(true);
@@ -233,7 +233,7 @@ describe("insight usage-report read paths", () => {
     const tools = registerTools(report.client);
 
     const result = parseResult(
-      await tools.call("b2_usage_growth", {
+      await tools.call("b2_report_usage_growth", {
         days: 30,
         period: "month",
         order: "most_grown",
@@ -246,7 +246,7 @@ describe("insight usage-report read paths", () => {
     expect(result.note).toContain("Not enough report history");
   });
 
-  it("applies b2_usage_growth ranking modes and limits across two snapshots", async () => {
+  it("applies b2_report_usage_growth ranking modes and limits across two snapshots", async () => {
     const thenDay = daysAgo(30);
     const latest = daysAgo(1);
     const report = createPagedReportClient({
@@ -265,7 +265,7 @@ describe("insight usage-report read paths", () => {
     const tools = registerTools(report.client);
 
     const shrinking = parseResult(
-      await tools.call("b2_usage_growth", {
+      await tools.call("b2_report_usage_growth", {
         days: 30,
         period: "month",
         order: "shrinking",
@@ -273,7 +273,7 @@ describe("insight usage-report read paths", () => {
       }),
     );
     const leastGrown = parseResult(
-      await tools.call("b2_usage_growth", {
+      await tools.call("b2_report_usage_growth", {
         days: 30,
         period: "month",
         order: "least_grown",
@@ -295,11 +295,11 @@ describe("insight usage-report read paths", () => {
   it.each([
     [{ by: "account" as const, days: 30, limit: 5 }, "last 30 days"],
     [{ by: "bucket" as const, limit: 5 }, "current month to date"],
-  ])("returns a clean empty-snapshot result for b2_egress_leaders", async (args, period) => {
+  ])("returns a clean empty-snapshot result for b2_rank_egress_leaders", async (args, period) => {
     const report = createPagedReportClient({});
     const tools = registerTools(report.client);
 
-    const result = parseResult(await tools.call("b2_egress_leaders", args));
+    const result = parseResult(await tools.call("b2_rank_egress_leaders", args));
 
     expect(result.period).toBe(period);
     expect(result.rank_by).toBe(args.by);
@@ -314,7 +314,7 @@ describe("insight usage-report read paths", () => {
     expect(result.report_scan.parsed_rows).toBe(0);
   });
 
-  it("keeps empty b2_egress_leaders scans inconclusive when truncated", async () => {
+  it("keeps empty b2_rank_egress_leaders scans inconclusive when truncated", async () => {
     const day = daysAgo(1);
     const report = createPagedReportClient(
       Object.fromEntries(
@@ -328,7 +328,7 @@ describe("insight usage-report read paths", () => {
     const tools = registerTools(report.client);
 
     const result = parseResult(
-      await tools.call("b2_egress_leaders", { by: "account", days: 7, limit: 5 }),
+      await tools.call("b2_rank_egress_leaders", { by: "account", days: 7, limit: 5 }),
     );
 
     expect(result.reports_enabled).toBe(true);
@@ -342,7 +342,7 @@ describe("insight usage-report read paths", () => {
     expect(result.report_scan.stop_reasons).toEqual(["max_pages"]);
   });
 
-  it("distinguishes an empty b2_egress_leaders window from no snapshots yet", async () => {
+  it("distinguishes an empty b2_rank_egress_leaders window from no snapshots yet", async () => {
     const staleDay = daysAgo(31);
     const report = createPagedReportClient({
       [`${staleDay}/usage.account-stale.csv`]: csv([
@@ -352,7 +352,7 @@ describe("insight usage-report read paths", () => {
     const tools = registerTools(report.client);
 
     const result = parseResult(
-      await tools.call("b2_egress_leaders", { by: "account", days: 30, limit: 5 }),
+      await tools.call("b2_rank_egress_leaders", { by: "account", days: 30, limit: 5 }),
     );
 
     expect(result.reports_enabled).toBe(true);
@@ -363,7 +363,7 @@ describe("insight usage-report read paths", () => {
     expect(result.leaders).toEqual([]);
   });
 
-  it("does not treat non-usage date-prefixed objects as b2_egress_leaders snapshots", async () => {
+  it("does not treat non-usage date-prefixed objects as b2_rank_egress_leaders snapshots", async () => {
     const day = daysAgo(2);
     const report = createPagedReportClient({
       [`${day}/notes.txt`]: "not a usage report",
@@ -372,7 +372,7 @@ describe("insight usage-report read paths", () => {
     const tools = registerTools(report.client);
 
     const result = parseResult(
-      await tools.call("b2_egress_leaders", { by: "account", days: 7, limit: 5 }),
+      await tools.call("b2_rank_egress_leaders", { by: "account", days: 7, limit: 5 }),
     );
 
     expect(result.reports_enabled).toBe(true);
@@ -384,7 +384,7 @@ describe("insight usage-report read paths", () => {
     expect(result.leaders).toEqual([]);
   });
 
-  it("qualifies b2_egress_leaders with the horizon when snapshots predate 180 days", async () => {
+  it("qualifies b2_rank_egress_leaders with the horizon when snapshots predate 180 days", async () => {
     const ancientDay = daysAgo(200);
     const report = createPagedReportClient({
       [`${ancientDay}/usage.account-old.csv`]: csv([
@@ -394,7 +394,7 @@ describe("insight usage-report read paths", () => {
     const tools = registerTools(report.client);
 
     const result = parseResult(
-      await tools.call("b2_egress_leaders", { by: "account", days: 30, limit: 5 }),
+      await tools.call("b2_rank_egress_leaders", { by: "account", days: 30, limit: 5 }),
     );
 
     expect(result.reports_enabled).toBe(true);
@@ -406,7 +406,7 @@ describe("insight usage-report read paths", () => {
     expect(result.leaders).toEqual([]);
   });
 
-  it("qualifies b2_usage_growth with the horizon when snapshots predate 180 days", async () => {
+  it("qualifies b2_report_usage_growth with the horizon when snapshots predate 180 days", async () => {
     const ancientDay = daysAgo(200);
     const report = createPagedReportClient({
       [`${ancientDay}/usage.account-old.csv`]: csv([
@@ -416,7 +416,7 @@ describe("insight usage-report read paths", () => {
     const tools = registerTools(report.client);
 
     const result = parseResult(
-      await tools.call("b2_usage_growth", { period: "month", order: "most_grown", limit: 10 }),
+      await tools.call("b2_report_usage_growth", { period: "month", order: "most_grown", limit: 10 }),
     );
 
     expect(result.reports_enabled).toBe(true);
@@ -425,7 +425,7 @@ describe("insight usage-report read paths", () => {
     expect(result.searched_since).toBe(daysAgo(180));
   });
 
-  it("keeps b2_usage_growth inconclusive when latest-snapshot discovery is truncated", async () => {
+  it("keeps b2_report_usage_growth inconclusive when latest-snapshot discovery is truncated", async () => {
     const report = createPagedReportClient(
       Object.fromEntries(
         Array.from({ length: 101 }, (_, index) => {
@@ -441,7 +441,7 @@ describe("insight usage-report read paths", () => {
     const tools = registerTools(report.client);
 
     const result = parseResult(
-      await tools.call("b2_usage_growth", { period: "month", order: "most_grown", limit: 10 }),
+      await tools.call("b2_report_usage_growth", { period: "month", order: "most_grown", limit: 10 }),
     );
 
     expect(result.reports_enabled).toBe(true);
@@ -452,7 +452,7 @@ describe("insight usage-report read paths", () => {
     expect(result.report_scan.stop_reasons).toEqual(["max_pages"]);
   });
 
-  it("omits latest_snapshot when empty b2_egress_leaders discovery is truncated", async () => {
+  it("omits latest_snapshot when empty b2_rank_egress_leaders discovery is truncated", async () => {
     const staleDay = daysAgo(2);
     const report = createPagedReportClient(
       Object.fromEntries(
@@ -466,7 +466,7 @@ describe("insight usage-report read paths", () => {
     const tools = registerTools(report.client);
 
     const result = parseResult(
-      await tools.call("b2_egress_leaders", { by: "account", days: 1, limit: 5 }),
+      await tools.call("b2_rank_egress_leaders", { by: "account", days: 1, limit: 5 }),
     );
 
     expect(result.reports_enabled).toBe(true);
@@ -478,7 +478,7 @@ describe("insight usage-report read paths", () => {
     expect(result.report_scan.stop_reasons).toEqual(["max_pages"]);
   });
 
-  it("does not report measured zero when b2_egress_leaders parses no usage rows", async () => {
+  it("does not report measured zero when b2_rank_egress_leaders parses no usage rows", async () => {
     const day = daysAgo(1);
     const report = createPagedReportClient({
       [`${day}/usage.account-empty.csv`]: "",
@@ -486,7 +486,7 @@ describe("insight usage-report read paths", () => {
     const tools = registerTools(report.client);
 
     const result = parseResult(
-      await tools.call("b2_egress_leaders", { by: "account", days: 7, limit: 5 }),
+      await tools.call("b2_rank_egress_leaders", { by: "account", days: 7, limit: 5 }),
     );
 
     expect(result.reports_enabled).toBe(true);
@@ -497,7 +497,7 @@ describe("insight usage-report read paths", () => {
     expect(result.report_scan.parsed_rows).toBe(0);
   });
 
-  it("paginates b2_egress_leaders report keys and skips empty or malformed CSV rows", async () => {
+  it("paginates b2_rank_egress_leaders report keys and skips empty or malformed CSV rows", async () => {
     const oldDay = daysAgo(120);
     const dayOne = daysAgo(3);
     const dayTwo = daysAgo(2);
@@ -525,7 +525,7 @@ describe("insight usage-report read paths", () => {
     const tools = registerTools(report.client);
 
     const result = parseResult(
-      await tools.call("b2_egress_leaders", { by: "account", days: 90, limit: 2 }),
+      await tools.call("b2_rank_egress_leaders", { by: "account", days: 90, limit: 2 }),
     );
 
     expect(result.period).toBe("last 90 days");
@@ -542,7 +542,7 @@ describe("insight usage-report read paths", () => {
     ]);
   });
 
-  it("returns zero share for b2_egress_leaders when total egress is zero", async () => {
+  it("returns zero share for b2_rank_egress_leaders when total egress is zero", async () => {
     const day = daysAgo(1);
     const report = createPagedReportClient({
       [`${day}/usage.account-zero.csv`]: csv([`zero,${day},bucket-zero,,1,0,0,0\n`]),
@@ -550,19 +550,19 @@ describe("insight usage-report read paths", () => {
     const tools = registerTools(report.client);
 
     const result = parseResult(
-      await tools.call("b2_egress_leaders", { by: "bucket", days: 7, limit: 1 }),
+      await tools.call("b2_rank_egress_leaders", { by: "bucket", days: 7, limit: 1 }),
     );
 
     expect(result.total_egress_gb).toBe(0);
     expect(result.leaders).toEqual([{ bucket: "bucket-zero", egress_gb: 0, share_pct: 0 }]);
   });
 
-  it("returns not-enabled metadata when b2_egress_leaders cannot list the report bucket", async () => {
+  it("returns not-enabled metadata when b2_rank_egress_leaders cannot list the report bucket", async () => {
     const report = createPagedReportClient({}, { listError: noSuchBucket() });
     const tools = registerTools(report.client);
 
     const result = parseResult(
-      await tools.call("b2_egress_leaders", { by: "account", days: 7, limit: 5 }),
+      await tools.call("b2_rank_egress_leaders", { by: "account", days: 7, limit: 5 }),
     );
 
     expect(result.reports_enabled).toBe(false);
@@ -580,7 +580,7 @@ describe("insight usage-report read paths", () => {
     );
     const tools = registerTools(report.client);
 
-    const result = await tools.call("b2_egress_leaders", { by: "account", days: 7, limit: 5 });
+    const result = await tools.call("b2_rank_egress_leaders", { by: "account", days: 7, limit: 5 });
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("report service failed");
@@ -589,7 +589,7 @@ describe("insight usage-report read paths", () => {
 
 describe("insight native bucket read paths", () => {
   it.each([
-    ["b2_largest_files", { bucket: "missing", limit: 5, max_scan: 1000 }],
+    ["b2_list_largest_files", { bucket: "missing", limit: 5, max_scan: 1000 }],
     ["b2_unfinished_uploads", { bucket: "missing", max_uploads: 10 }],
   ])("%s returns a bucket-resolution failure for an unknown bucket", async (toolName, args) => {
     const tools = registerTools(
@@ -606,7 +606,7 @@ describe("insight native bucket read paths", () => {
     });
   });
 
-  it("returns candidate buckets when b2_largest_files receives an ambiguous bucket name", async () => {
+  it("returns candidate buckets when b2_list_largest_files receives an ambiguous bucket name", async () => {
     const nativeClient = createNativeClient({
       buckets: [
         { bucketId: "logs-a", bucketName: "logs-alpha", bucketType: "allPrivate" },
@@ -616,7 +616,7 @@ describe("insight native bucket read paths", () => {
     const tools = registerTools(createPagedReportClient({}).client, nativeClient);
 
     const result = parseResult(
-      await tools.call("b2_largest_files", { bucket: "logs", limit: 5, max_scan: 1000 }),
+      await tools.call("b2_list_largest_files", { bucket: "logs", limit: 5, max_scan: 1000 }),
     );
 
     expect(result.error).toBe("bucket_not_uniquely_resolved");
@@ -635,7 +635,7 @@ describe("insight native bucket read paths", () => {
     ]);
 
     const result = parseResult(
-      await tools.call("b2_largest_files", { bucket: "photos", limit: 5, max_scan: 1000 }),
+      await tools.call("b2_list_largest_files", { bucket: "photos", limit: 5, max_scan: 1000 }),
     );
 
     expect(result).toMatchObject({ bucket: "photos", returned: 1, truncated: false });
@@ -678,7 +678,7 @@ describe("insight native bucket read paths", () => {
     ]);
 
     const result = parseResult(
-      await tools.call("b2_largest_files", {
+      await tools.call("b2_list_largest_files", {
         bucket: "zzz-does-not-exist",
         limit: 5,
         max_scan: 1000,
@@ -728,7 +728,7 @@ describe("insight native bucket read paths", () => {
     ]);
 
     const result = parseResult(
-      await tools.call("b2_largest_files", { bucket: "logs", limit: 5, max_scan: 1000 }),
+      await tools.call("b2_list_largest_files", { bucket: "logs", limit: 5, max_scan: 1000 }),
     );
 
     expect(result.error).toBe("bucket_not_uniquely_resolved");
@@ -737,14 +737,14 @@ describe("insight native bucket read paths", () => {
     expect(nativeClient.listBuckets).not.toHaveBeenCalled();
   });
 
-  it("returns an empty b2_largest_files result and passes the prefix filter", async () => {
+  it("returns an empty b2_list_largest_files result and passes the prefix filter", async () => {
     const nativeClient = createNativeClient({
       filePages: [{ files: [], nextFileName: null }],
     });
     const tools = registerTools(createPagedReportClient({}).client, nativeClient);
 
     const result = parseResult(
-      await tools.call("b2_largest_files", {
+      await tools.call("b2_list_largest_files", {
         bucket: "photos",
         prefix: "raw/",
         limit: 5,
@@ -758,12 +758,12 @@ describe("insight native bucket read paths", () => {
     );
   });
 
-  it("marks b2_largest_files as truncated when the listing deadline fires", async () => {
+  it("marks b2_list_largest_files as truncated when the listing deadline fires", async () => {
     const nativeClient = createNativeClient({ filePages: [timeoutError()] });
     const tools = registerTools(createPagedReportClient({}).client, nativeClient);
 
     const result = parseResult(
-      await tools.call("b2_largest_files", { bucket: "photos", limit: 5, max_scan: 1000 }),
+      await tools.call("b2_list_largest_files", { bucket: "photos", limit: 5, max_scan: 1000 }),
     );
 
     expect(result.truncated).toBe(true);
@@ -771,7 +771,7 @@ describe("insight native bucket read paths", () => {
     expect(result.note).toContain("time budget");
   });
 
-  it("stops b2_largest_files after a page when the time budget is spent", async () => {
+  it("stops b2_list_largest_files after a page when the time budget is spent", async () => {
     let clock = 0;
     vi.spyOn(Date, "now").mockImplementation(() => clock);
     const nativeClient = createNativeClient({
@@ -789,7 +789,7 @@ describe("insight native bucket read paths", () => {
     const tools = registerTools(createPagedReportClient({}).client, nativeClient);
 
     const result = parseResult(
-      await tools.call("b2_largest_files", { bucket: "photos", limit: 5, max_scan: 1000 }),
+      await tools.call("b2_list_largest_files", { bucket: "photos", limit: 5, max_scan: 1000 }),
     );
 
     expect(result.truncated).toBe(true);

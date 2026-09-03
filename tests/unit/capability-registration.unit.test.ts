@@ -85,7 +85,7 @@ describe("capability-aware registration", () => {
     expect(names.length).toBeLessThan(40);
     expect(names).toContain("b2_authorize_account");
     expect(names).toContain("b2_create_key");
-    expect(names).not.toContain("b2_usage_growth");
+    expect(names).not.toContain("b2_report_usage_growth");
   });
 
   it("suppresses privileged stubs for fail-closed unknown capabilities", () => {
@@ -101,7 +101,7 @@ describe("capability-aware registration", () => {
       "s3_list_objects_v2",
       "b2_list_buckets",
       "s3_get_presigned_url",
-      "b2_usage_growth",
+      "b2_report_usage_growth",
       "b2_list_keys",
     ]) {
       expect(names).toContain(t);

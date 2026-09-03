@@ -8,16 +8,16 @@ Approved modern cache hint: `ttlMs=30000`, `cacheScope=private`
 
 | Profile | Total | `b2_*` | `s3_*` | `bz_*` | Hash prefix |
 | --- | ---: | ---: | ---: | ---: | --- |
-| `full` | 40 | 21 | 19 | 0 | `7485fa2c7549` |
-| `live-b2-contract` | 39 | 20 | 19 | 0 | `8fb1ad2c686e` |
-| `phase1-default` | 37 | 18 | 19 | 0 | `764bf667bd59` |
-| `read-only` | 20 | 11 | 9 | 0 | `b5244ef8a3d5` |
+| `full` | 40 | 21 | 19 | 0 | `a15ea2576e84` |
+| `live-b2-contract` | 39 | 20 | 19 | 0 | `91945963dc6b` |
+| `phase1-default` | 37 | 18 | 19 | 0 | `ed6cd7050149` |
+| `read-only` | 20 | 11 | 9 | 0 | `5fefc07c6182` |
 
 ## `full`
 
 Complete tool superset for contract review and regression detection across all backing categories; durable-secret producers are sink-backed when a secret sink is active and otherwise remain availability-annotated stubs.
 
-Profile hash: `7485fa2c75493f6d41ba19b277ea4dd5b498c1394f07f9ac4931d937233ec6d9`
+Profile hash: `a15ea2576e84e590694e97556e5f08a23eb5b86a9077bc691d48954ecbcd10f2`
 
 ### Capability Input
 
@@ -37,21 +37,21 @@ Profile hash: `7485fa2c75493f6d41ba19b277ea4dd5b498c1394f07f9ac4931d937233ec6d9`
 - `b2_create_key`
 - `b2_delete_bucket`
 - `b2_delete_key`
-- `b2_egress_leaders`
 - `b2_eject_group_member`
 - `b2_get_bucket_notification_rules`
-- `b2_largest_files`
 - `b2_list_buckets`
 - `b2_list_group_members`
 - `b2_list_groups`
 - `b2_list_keys`
+- `b2_list_largest_files`
+- `b2_rank_egress_leaders`
+- `b2_report_usage_growth`
 - `b2_reserve_trial_create_account`
 - `b2_set_bucket_notification_rules`
 - `b2_unfinished_uploads`
 - `b2_update_bucket`
 - `b2_update_file_legal_hold`
 - `b2_update_file_retention`
-- `b2_usage_growth`
 
 ### `s3_*` Tools (19)
 
@@ -63,6 +63,7 @@ Profile hash: `7485fa2c75493f6d41ba19b277ea4dd5b498c1394f07f9ac4931d937233ec6d9`
 - `s3_delete_objects`
 - `s3_get_bucket_location`
 - `s3_get_object`
+- `s3_get_presigned_upload_part_url`
 - `s3_get_presigned_url`
 - `s3_head_bucket`
 - `s3_head_object`
@@ -70,7 +71,6 @@ Profile hash: `7485fa2c75493f6d41ba19b277ea4dd5b498c1394f07f9ac4931d937233ec6d9`
 - `s3_list_object_versions`
 - `s3_list_objects_v2`
 - `s3_list_parts`
-- `s3_presign_upload_part`
 - `s3_put_bucket_lifecycle`
 - `s3_put_object`
 - `s3_upload_part_copy`
@@ -79,7 +79,7 @@ Profile hash: `7485fa2c75493f6d41ba19b277ea4dd5b498c1394f07f9ac4931d937233ec6d9`
 
 Protected live B2 contract profile: non-master application key with release-evidence capabilities, no key-management grants, and a distinct master key only for Partner/Groups API surface discovery.
 
-Profile hash: `8fb1ad2c686e8ee02090b10d2fb4cf31f1b8537c26e3aa72621a41d88e77f89d`
+Profile hash: `91945963dc6b2b001bf97f93467deb52294691a101e10abc4987e88e6a85fc03`
 
 ### Capability Input
 
@@ -116,21 +116,21 @@ Profile hash: `8fb1ad2c686e8ee02090b10d2fb4cf31f1b8537c26e3aa72621a41d88e77f89d`
 - `b2_create_group_member`
 - `b2_create_key`
 - `b2_delete_bucket`
-- `b2_egress_leaders`
 - `b2_eject_group_member`
 - `b2_get_bucket_notification_rules`
-- `b2_largest_files`
 - `b2_list_buckets`
 - `b2_list_group_members`
 - `b2_list_groups`
 - `b2_list_keys`
+- `b2_list_largest_files`
+- `b2_rank_egress_leaders`
+- `b2_report_usage_growth`
 - `b2_reserve_trial_create_account`
 - `b2_set_bucket_notification_rules`
 - `b2_unfinished_uploads`
 - `b2_update_bucket`
 - `b2_update_file_legal_hold`
 - `b2_update_file_retention`
-- `b2_usage_growth`
 
 ### `s3_*` Tools (19)
 
@@ -142,6 +142,7 @@ Profile hash: `8fb1ad2c686e8ee02090b10d2fb4cf31f1b8537c26e3aa72621a41d88e77f89d`
 - `s3_delete_objects`
 - `s3_get_bucket_location`
 - `s3_get_object`
+- `s3_get_presigned_upload_part_url`
 - `s3_get_presigned_url`
 - `s3_head_bucket`
 - `s3_head_object`
@@ -149,7 +150,6 @@ Profile hash: `8fb1ad2c686e8ee02090b10d2fb4cf31f1b8537c26e3aa72621a41d88e77f89d`
 - `s3_list_object_versions`
 - `s3_list_objects_v2`
 - `s3_list_parts`
-- `s3_presign_upload_part`
 - `s3_put_bucket_lifecycle`
 - `s3_put_object`
 - `s3_upload_part_copy`
@@ -158,7 +158,7 @@ Profile hash: `8fb1ad2c686e8ee02090b10d2fb4cf31f1b8537c26e3aa72621a41d88e77f89d`
 
 Default customer-hosted Phase 1 profile: standard B2 application key, no distinct Partner/master credential, and durable-secret producers exposed as sink-backed tools on local stdio or unavailable stubs when the sink is off.
 
-Profile hash: `764bf667bd597009734bc9835952cba69e825ea09812557944620a214667c548`
+Profile hash: `ed6cd7050149daa99e1097a594f2726f74a8344e715983c3378e6921222c0027`
 
 ### Capability Input
 
@@ -190,18 +190,18 @@ Profile hash: `764bf667bd597009734bc9835952cba69e825ea09812557944620a214667c548`
 - `b2_create_key`
 - `b2_delete_bucket`
 - `b2_delete_key`
-- `b2_egress_leaders`
 - `b2_get_bucket_notification_rules`
-- `b2_largest_files`
 - `b2_list_buckets`
 - `b2_list_keys`
+- `b2_list_largest_files`
+- `b2_rank_egress_leaders`
+- `b2_report_usage_growth`
 - `b2_reserve_trial_create_account`
 - `b2_set_bucket_notification_rules`
 - `b2_unfinished_uploads`
 - `b2_update_bucket`
 - `b2_update_file_legal_hold`
 - `b2_update_file_retention`
-- `b2_usage_growth`
 
 ### `s3_*` Tools (19)
 
@@ -213,6 +213,7 @@ Profile hash: `764bf667bd597009734bc9835952cba69e825ea09812557944620a214667c548`
 - `s3_delete_objects`
 - `s3_get_bucket_location`
 - `s3_get_object`
+- `s3_get_presigned_upload_part_url`
 - `s3_get_presigned_url`
 - `s3_head_bucket`
 - `s3_head_object`
@@ -220,7 +221,6 @@ Profile hash: `764bf667bd597009734bc9835952cba69e825ea09812557944620a214667c548`
 - `s3_list_object_versions`
 - `s3_list_objects_v2`
 - `s3_list_parts`
-- `s3_presign_upload_part`
 - `s3_put_bucket_lifecycle`
 - `s3_put_object`
 - `s3_upload_part_copy`
@@ -229,7 +229,7 @@ Profile hash: `764bf667bd597009734bc9835952cba69e825ea09812557944620a214667c548`
 
 Deterministic read/list profile for safe production use and contract tests; write/delete/admin handlers are omitted while durable-secret producer names remain unavailable stubs unless a sink-backed admin profile is configured.
 
-Profile hash: `b5244ef8a3d5d15f6a8c9a1e553401aeffaea0811740991a05cade76b6f238ec`
+Profile hash: `5fefc07c6182565e9da2c08cea05496affa651a848404b97915168ae16a747a5`
 
 ### Capability Input
 
@@ -250,14 +250,14 @@ Profile hash: `b5244ef8a3d5d15f6a8c9a1e553401aeffaea0811740991a05cade76b6f238ec`
 - `b2_authorize_account`
 - `b2_create_group_member`
 - `b2_create_key`
-- `b2_egress_leaders`
 - `b2_get_bucket_notification_rules`
-- `b2_largest_files`
 - `b2_list_buckets`
 - `b2_list_keys`
+- `b2_list_largest_files`
+- `b2_rank_egress_leaders`
+- `b2_report_usage_growth`
 - `b2_reserve_trial_create_account`
 - `b2_unfinished_uploads`
-- `b2_usage_growth`
 
 ### `s3_*` Tools (9)
 

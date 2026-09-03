@@ -2,13 +2,13 @@
  * Storage-activity ("insights") tools — read-only usage questions answered from
  * data B2 already provides. No new backend.
  *
- *   Phase 1 (b2_usage_growth, b2_egress_leaders) — read the caller's daily Usage
+ *   Phase 1 (b2_report_usage_growth, b2_rank_egress_leaders) — read the caller's daily Usage
  *     Report CSVs from the reserved `b2-reports-<accountId>` bucket. These reports
  *     are NOT universal: they must be enabled by Backblaze (Partner/Enterprise/
  *     Groups) — so the tools feature-detect the bucket and return a clean
  *     "not enabled" message when it is absent. Reports are region-scoped (only
  *     Group members in the same data region as the Group account).
- *   Phase 2 (b2_largest_files, b2_unfinished_uploads) — live, per-bucket native
+ *   Phase 2 (b2_list_largest_files, b2_unfinished_uploads) — live, per-bucket native
  *     listing. Works on any account; no index required.
  *
  * Everything is read-only and scoped by the caller's credential: HTTP builds a
@@ -1118,9 +1118,9 @@ export function registerInsightTools(
   auth: B2AuthManager,
   reportClient: ReportObjectClient = new B2ReportClient(auth),
 ): void {
-  // ── b2_usage_growth ───────────────────────────────────────────────────────
+  // ── b2_report_usage_growth ───────────────────────────────────────────────────────
   server.registerTool(
-    "b2_usage_growth",
+    "b2_report_usage_growth",
     {
       description:
         "Rank accounts by how much STORED data grew or shrank between two points in time, from the daily B2 usage reports (uses stored_gb, the end-of-day snapshot). For 'which customers grew the most/least', 'who's moving data off'. Compares the latest snapshot against one month/quarter/year earlier and fetches only those two days, so it stays fast even on large report buckets. Returns the two dates compared and per-account start vs current GB and % growth (new accounts flagged). Scope follows the caller's key (a partner key sees all its sub-accounts). Needs Usage Reports enabled.",
@@ -1217,9 +1217,9 @@ export function registerInsightTools(
     },
   );
 
-  // ── b2_egress_leaders ─────────────────────────────────────────────────────
+  // ── b2_rank_egress_leaders ─────────────────────────────────────────────────────
   server.registerTool(
-    "b2_egress_leaders",
+    "b2_rank_egress_leaders",
     {
       description:
         "Rank top egress (downloaded bytes) by account or bucket over a period — default month-to-date. For 'who's downloading the most', 'where is egress concentrated'. Returns leaders with each one's share of total egress, from the daily usage reports. Scope follows the caller's key. Needs Usage Reports enabled.",
@@ -1300,9 +1300,9 @@ export function registerInsightTools(
     },
   );
 
-  // ── b2_largest_files ──────────────────────────────────────────────────────
+  // ── b2_list_largest_files ──────────────────────────────────────────────────────
   server.registerTool(
-    "b2_largest_files",
+    "b2_list_largest_files",
     {
       description:
         "List a bucket's largest objects by size via a live listing. For 'largest files', 'what's taking up space in <bucket>'. Give the bucket by name or bucketId; optional path prefix. Sorting by size requires a full listing, so on very large buckets the scan is bounded by max_scan and a time budget — it then returns the largest among the objects scanned with truncated=true; pass a prefix to focus on a subtree for a complete ranking. Returns name, size, and upload time — never contents.",

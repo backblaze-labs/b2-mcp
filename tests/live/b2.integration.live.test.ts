@@ -322,7 +322,7 @@ describe("S3 presigned and multipart helpers", () => {
       expect(listed.uploads.some((upload: any) => upload.UploadId === created.uploadId)).toBe(true);
 
       const presigned = parseResult(
-        await callTool(server, "s3_presign_upload_part", {
+        await callTool(server, "s3_get_presigned_upload_part_url", {
           bucket: bucketName(),
           key,
           uploadId: created.uploadId,
@@ -407,7 +407,7 @@ describe("Object Lock live file contracts", () => {
 });
 
 describe("Insight scans, cancellation, and error mapping", () => {
-  liveIt("b2_largest_files and b2_unfinished_uploads scan only the run-owned bucket", async () => {
+  liveIt("b2_list_largest_files and b2_unfinished_uploads scan only the run-owned bucket", async () => {
     const key = contractObjectKey("insights", "largest.txt");
     expectLiveSuccess(
       await callTool(server, "s3_put_object", {
@@ -420,7 +420,7 @@ describe("Insight scans, cancellation, and error mapping", () => {
     );
 
     const largest = parseResult(
-      await callTool(server, "b2_largest_files", {
+      await callTool(server, "b2_list_largest_files", {
         bucket: bucketName(),
         prefix: `${liveRunPrefix()}/insights/`,
         limit: 5,
@@ -446,7 +446,7 @@ describe("Insight scans, cancellation, and error mapping", () => {
     const controller = new AbortController();
     controller.abort(new Error("live contract cancellation"));
     const result = await runWithMcpRequestSignal(controller.signal, () =>
-      callTool(server, "b2_largest_files", {
+      callTool(server, "b2_list_largest_files", {
         bucket: bucketName(),
         prefix: `${liveRunPrefix()}/`,
         limit: 1,

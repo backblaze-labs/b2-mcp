@@ -149,7 +149,7 @@ recorded per tool instead of as a separate bucket:
 
 - **Native B2 SDK** (`@backblaze-labs/b2-sdk`) — B2 control-plane operations the S3 API has no equivalent for, including buckets, application keys, Object Lock, event notifications, and Partner/Groups operations.
 - **AWS S3 SDK** (`@aws-sdk/client-s3`) — the S3-compatible data plane behind every `s3_*` tool.
-- **Neither SDK** — repository-owned MCP analytics (`b2_usage_growth`, `b2_egress_leaders`, `b2_largest_files`, `b2_unfinished_uploads`) built from B2 reports and bounded live listings because no SDK exposes those aggregates as primitives.
+- **Neither SDK** — repository-owned MCP analytics (`b2_report_usage_growth`, `b2_rank_egress_leaders`, `b2_list_largest_files`, `b2_unfinished_uploads`) built from B2 reports and bounded live listings because no SDK exposes those aggregates as primitives.
 
 Durable-secret-producing tools stay in the Native B2 SDK category even when
 their current availability is a non-secret compatibility stub.
@@ -168,14 +168,15 @@ their current availability is a non-secret compatibility stub.
 
 Object data movement runs through the **`s3_*` data-plane tools**. Inline object operations in `src/s3/objects.ts`, presigning in `src/s3/presigned.ts`, and multipart in `src/s3/multipart.ts` all call the repository-owned AWS S3 peer adapter configured for B2's S3-compatible endpoint.
 
-**Control-plane-first data path.** The preferred way to move real object data is a **presigned URL** (`s3_get_presigned_url`, PutObject or GetObject): the bytes flow directly between the client/worker and B2 and never pass through the server. The inline `s3_put_object` / `s3_get_object` paths are bounded to **≤ 1 MiB** (`MAX_INLINE_OBJECT_BYTES` in `src/s3/objects.ts`) — a control-plane convenience for manifests, sidecars, and tiny configs; anything larger is refused with a pointer to `s3_get_presigned_url` or the multipart flow. **Multipart is presigned-per-part too**: `s3_create_multipart_upload` → `s3_presign_upload_part` (mints a presigned PUT URL per part) → the client PUTs each part directly to B2 → `s3_complete_multipart_upload` with the returned ETags. No multipart tool streams part bytes through the server. On the trusted stdio transport, `saveToPath` still streams any size straight to disk without buffering. Because the HTTP transport also disables local-file access by default, the internet-facing server is **control-plane-only by construction**: no bulk object data can flow through it.
+**Control-plane-first data path.** The preferred way to move real object data is a **presigned URL** (`s3_get_presigned_url`, PutObject or GetObject): the bytes flow directly between the client/worker and B2 and never pass through the server. The inline `s3_put_object` / `s3_get_object` paths are bounded to **≤ 1 MiB** (`MAX_INLINE_OBJECT_BYTES` in `src/s3/objects.ts`) — a control-plane convenience for manifests, sidecars, and tiny configs; anything larger is refused with a pointer to `s3_get_presigned_url` or the multipart flow. **Multipart is presigned-per-part too**: `s3_create_multipart_upload` → `s3_get_presigned_upload_part_url` (mints a presigned PUT URL per part) → the client PUTs each part directly to B2 → `s3_complete_multipart_upload` with the returned ETags. No multipart tool streams part bytes through the server. On the trusted stdio transport, `saveToPath` still streams any size straight to disk without buffering. Because the HTTP transport also disables local-file access by default, the internet-facing server is **control-plane-only by construction**: no bulk object data can flow through it.
 
 > The former native data tools and their files (`src/b2/files.ts`, `src/b2/large-files.ts`, `src/b2/download-urls.ts` — including `b2_upload_file`'s auto-multipart path and the native download-URL builders) were **removed** from the public tool surface. The inherited `s3_*` object names remain compatibility aliases, and their implementation now uses the AWS S3 SDK against B2's S3-compatible endpoint.
 
 ### Tool naming conventions
 
-- `b2_*` — B2-native names. Most are Native B2 SDK control-plane tools; the four analytics names are the custom MCP category.
-- `s3_*` — compatibility data-plane names; object aliases, presigned URLs, multipart, reachability, and lifecycle paths use the AWS SDK peer client through the SDK `/s3` boundary.
+- **Prefix:** `b2_*` — B2-native names. Most are Native B2 SDK control-plane tools; the four analytics names are the custom MCP category. `s3_*` — compatibility data-plane names; object aliases, presigned URLs, multipart, reachability, and lifecycle paths use the AWS SDK peer client through the SDK `/s3` boundary.
+- **Shape:** `<prefix>_<verb>_<noun>`, snake_case, lowercase, **verb-first**. Use a standard verb (`list`, `get`, `create`, `update`, `delete`, `put`, `rank`, `report`, `presign`, …), matching the upstream B2/S3 operation where one exists. No noun-only names (e.g. `b2_largest_files` was renamed to `b2_list_largest_files`). Presign tools use the `s3_get_presigned_*_url` form.
+- The authoritative rule, the verb list, and the required lockstep-update checklist live in [`docs/design-docs/tool-contract.md`](docs/design-docs/tool-contract.md#tool-naming-conventions) — consult it before adding or renaming a tool.
 
 ### Retry logic (`src/utils/retry.ts`)
 

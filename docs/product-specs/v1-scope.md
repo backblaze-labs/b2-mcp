@@ -199,10 +199,10 @@ tools are SDK-backed native B2 operations in the full profile.
 - `b2_create_key`
 - `b2_delete_bucket`
 - `b2_delete_key`
-- `b2_egress_leaders`
+- `b2_rank_egress_leaders`
 - `b2_eject_group_member`
 - `b2_get_bucket_notification_rules`
-- `b2_largest_files`
+- `b2_list_largest_files`
 - `b2_list_buckets`
 - `b2_list_group_members`
 - `b2_list_groups`
@@ -213,7 +213,7 @@ tools are SDK-backed native B2 operations in the full profile.
 - `b2_update_bucket`
 - `b2_update_file_legal_hold`
 - `b2_update_file_retention`
-- `b2_usage_growth`
+- `b2_report_usage_growth`
 
 `s3_*` tools in `full`:
 
@@ -232,7 +232,7 @@ tools are SDK-backed native B2 operations in the full profile.
 - `s3_list_object_versions`
 - `s3_list_objects_v2`
 - `s3_list_parts`
-- `s3_presign_upload_part`
+- `s3_get_presigned_upload_part_url`
 - `s3_put_bucket_lifecycle`
 - `s3_put_object`
 - `s3_upload_part_copy`
@@ -265,9 +265,9 @@ compatibility stubs otherwise. Their backing category remains Native B2 SDK.
 - `b2_create_key`
 - `b2_delete_bucket`
 - `b2_delete_key`
-- `b2_egress_leaders`
+- `b2_rank_egress_leaders`
 - `b2_get_bucket_notification_rules`
-- `b2_largest_files`
+- `b2_list_largest_files`
 - `b2_list_buckets`
 - `b2_list_keys`
 - `b2_reserve_trial_create_account`
@@ -276,7 +276,7 @@ compatibility stubs otherwise. Their backing category remains Native B2 SDK.
 - `b2_update_bucket`
 - `b2_update_file_legal_hold`
 - `b2_update_file_retention`
-- `b2_usage_growth`
+- `b2_report_usage_growth`
 
 `s3_*` tools in `phase1-default`:
 
@@ -295,7 +295,7 @@ compatibility stubs otherwise. Their backing category remains Native B2 SDK.
 - `s3_list_object_versions`
 - `s3_list_objects_v2`
 - `s3_list_parts`
-- `s3_presign_upload_part`
+- `s3_get_presigned_upload_part_url`
 - `s3_put_bucket_lifecycle`
 - `s3_put_object`
 - `s3_upload_part_copy`
@@ -321,14 +321,14 @@ capabilities:
 - `b2_authorize_account`
 - `b2_create_group_member`
 - `b2_create_key`
-- `b2_egress_leaders`
+- `b2_rank_egress_leaders`
 - `b2_get_bucket_notification_rules`
-- `b2_largest_files`
+- `b2_list_largest_files`
 - `b2_list_buckets`
 - `b2_list_keys`
 - `b2_reserve_trial_create_account`
 - `b2_unfinished_uploads`
-- `b2_usage_growth`
+- `b2_report_usage_growth`
 
 `s3_*` tools in `read-only`:
 
@@ -454,7 +454,7 @@ Default-profile tools that require this target authorization include:
 - `s3_create_multipart_upload`
 - `s3_delete_object`
 - `s3_delete_objects`
-- `s3_presign_upload_part`
+- `s3_get_presigned_upload_part_url`
 - `s3_put_bucket_lifecycle`
 - `s3_put_object`
 - `s3_upload_part_copy`

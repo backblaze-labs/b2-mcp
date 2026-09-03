@@ -99,7 +99,7 @@ const liveToolCapabilities: Record<string, readonly string[]> = {
   ],
   b2_delete_bucket: ["deleteBuckets", "readBucketEncryption", "readBucketRetentions"],
   b2_get_bucket_notification_rules: ["writeBucketNotifications"],
-  b2_largest_files: ["listFiles"],
+  b2_list_largest_files: ["listFiles"],
   b2_list_buckets: ["listBuckets", "readBucketEncryption", "readBucketRetentions"],
   b2_list_group_members: [],
   b2_list_groups: [],
@@ -128,7 +128,7 @@ const liveToolCapabilities: Record<string, readonly string[]> = {
   s3_list_multipart_uploads: ["listFiles"],
   s3_list_object_versions: ["listFiles", "readFileLegalHolds", "readFileRetentions"],
   s3_list_objects_v2: ["listFiles"],
-  s3_presign_upload_part: ["writeFiles"],
+  s3_get_presigned_upload_part_url: ["writeFiles"],
   s3_put_object: ["readFileLegalHolds", "readFileRetentions", "writeFiles"],
 };
 

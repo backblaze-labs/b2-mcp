@@ -33,8 +33,8 @@ description: Triage suspected B2 exposure, credential misuse, accidental deletio
 - `b2_update_file_retention`
 - `b2_update_file_legal_hold`
 - `b2_get_bucket_notification_rules`
-- `b2_egress_leaders`
-- `b2_usage_growth`
+- `b2_rank_egress_leaders`
+- `b2_report_usage_growth`
 - `s3_list_objects_v2`
 - `s3_list_object_versions`
 - `s3_head_object`
@@ -46,7 +46,7 @@ description: Triage suspected B2 exposure, credential misuse, accidental deletio
 
 1. Start with containment scope: suspected credential, bucket, prefix, time window, affected application, and whether production access must remain available.
 2. Inventory buckets and keys with bounded complete-enough evidence. Call `b2_list_buckets` with `limit: 1000`, filter by bucket name/type when the account may exceed that cap, and treat any `truncated` response or unreviewed `total_bucket_count` remainder as incomplete evidence. Page `b2_list_keys` with `maxKeyCount: 100`, persist `nextApplicationKeyId` cursors in the incident record, continue until no cursor remains or the approved investigation bound is reached, and treat any remaining cursor as incomplete evidence. Identify public buckets, broad keys, non-expiring keys, and keys with write/delete capability only from the reviewed inventory.
-3. Inspect evidence without reading object bodies: use `b2_egress_leaders`, `b2_usage_growth`, `s3_list_objects_v2`, `s3_list_object_versions`, `s3_head_object`, and notification rules from `b2_get_bucket_notification_rules`. Use listing pages of at most 1,000 keys or versions, persist continuation tokens in the incident record, and show at most 50 sampled rows in chat.
+3. Inspect evidence without reading object bodies: use `b2_rank_egress_leaders`, `b2_report_usage_growth`, `s3_list_objects_v2`, `s3_list_object_versions`, `s3_head_object`, and notification rules from `b2_get_bucket_notification_rules`. Use listing pages of at most 1,000 keys or versions, persist continuation tokens in the incident record, and show at most 50 sampled rows in chat.
 4. Prioritize non-destructive containment: remove leaked credentials from workloads, rotate outside the model into a trusted secret sink, tighten application config, and preserve logs.
 5. For emergency key deletion, require confirmation of key ID, owner, blast radius, replacement credential, and rollback. Then use `b2_delete_key`.
 6. For bucket changes, require confirmation of exact target, current state, intended new state, and evidence impact before `b2_update_bucket`. For per-file Object Lock changes, first obtain current retention and legal-hold state through an external trusted B2 metadata lookup because `s3_head_object` does not expose those fields; do not call `b2_update_file_retention` or `b2_update_file_legal_hold` until that evidence is recorded and the user confirms the exact target, current state, intended new state, and evidence impact.

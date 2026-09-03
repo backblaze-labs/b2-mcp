@@ -73,8 +73,8 @@ describe("tool annotation policy", () => {
       "s3_complete_multipart_upload",
       "s3_copy_object",
       "s3_create_multipart_upload",
+      "s3_get_presigned_upload_part_url",
       "s3_get_presigned_url",
-      "s3_presign_upload_part",
       "s3_put_bucket_lifecycle",
       "s3_put_object",
       "s3_upload_part_copy",
@@ -166,14 +166,14 @@ describe("tool annotation policy", () => {
 
   it("keeps presign minting idempotent, destructive only for the gated PutObject minter", () => {
     // s3_get_presigned_url is gated (a PutObject URL mints overwrite/create bearer
-    // capability); s3_presign_upload_part is not gated. Both are idempotent: the
+    // capability); s3_get_presigned_upload_part_url is not gated. Both are idempotent: the
     // same request mints an equivalent URL without mutating B2 state.
     expect(annotationsForTool("s3_get_presigned_url")).toMatchObject({
       readOnlyHint: false,
       destructiveHint: true,
       idempotentHint: true,
     });
-    expect(annotationsForTool("s3_presign_upload_part")).toMatchObject({
+    expect(annotationsForTool("s3_get_presigned_upload_part_url")).toMatchObject({
       readOnlyHint: false,
       destructiveHint: false,
       idempotentHint: true,

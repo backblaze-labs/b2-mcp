@@ -1,7 +1,7 @@
 /**
  * Unit tests for the large-bucket safety bounds on the live insight tools.
  *
- * b2_largest_files and b2_unfinished_uploads walk a bucket through native SDK
+ * b2_list_largest_files and b2_unfinished_uploads walk a bucket through native SDK
  * list endpoints; those walks must stop at scan caps or wall-clock budgets.
  *
  * NOTE: callTool invokes handlers directly, so the MCP SDK's zod .default() is
@@ -101,9 +101,9 @@ const file = (fileName: string, contentLength: number) => ({
   uploadTimestamp: Date.parse("2021-01-01T00:00:00.000Z"),
 });
 
-// ── b2_largest_files ──────────────────────────────────────────────────────────
+// ── b2_list_largest_files ──────────────────────────────────────────────────────────
 
-describe("b2_largest_files — scan bound", () => {
+describe("b2_list_largest_files — scan bound", () => {
   it("stops at max_scan, reports truncated, and ranks the largest seen", async () => {
     queueB2({
       fileNamePages: [
@@ -119,7 +119,7 @@ describe("b2_largest_files — scan bound", () => {
     });
 
     const result = parseResult(
-      await callTool(server, "b2_largest_files", { bucket: "test-bucket", limit: 3, max_scan: 5 }),
+      await callTool(server, "b2_list_largest_files", { bucket: "test-bucket", limit: 3, max_scan: 5 }),
     );
 
     expect(result.truncated).toBe(true);
@@ -140,7 +140,7 @@ describe("b2_largest_files — scan bound", () => {
     });
 
     const result = parseResult(
-      await callTool(server, "b2_largest_files", { bucket: "test-bucket", limit: 3, max_scan: 2 }),
+      await callTool(server, "b2_list_largest_files", { bucket: "test-bucket", limit: 3, max_scan: 2 }),
     );
 
     expect(result.truncated).toBe(true);
@@ -154,7 +154,7 @@ describe("b2_largest_files — scan bound", () => {
     });
 
     const result = parseResult(
-      await callTool(server, "b2_largest_files", {
+      await callTool(server, "b2_list_largest_files", {
         bucket: "test-bucket",
         limit: 10,
         max_scan: 50000,
@@ -178,7 +178,7 @@ describe("b2_largest_files — scan bound", () => {
 
     const result = parseResult(
       await runWithMcpRequestSignal(request.signal, () =>
-        callTool(server, "b2_largest_files", {
+        callTool(server, "b2_list_largest_files", {
           bucket: "test-bucket",
           limit: 5,
           max_scan: 1000,

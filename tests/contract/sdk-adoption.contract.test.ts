@@ -149,7 +149,7 @@ describe("SDK adoption contract", () => {
     );
 
     expect(unresolved).toEqual([]);
-    expect(contract).not.toContain("s3_presign_upload_part` remains release-blocking");
+    expect(contract).not.toContain("s3_get_presigned_upload_part_url` remains release-blocking");
     expect(contract).not.toContain("keep the existing name as a release-blocking SDK gap");
   });
 
@@ -221,8 +221,8 @@ describe("SDK adoption contract", () => {
     expect(s3Presigned).toContain("presignObjectUrl");
     expect(s3Presigned).not.toContain("@aws-sdk/s3-request-presigner");
 
-    expectMatrixPath("b2_usage_growth", "compose", "createReportS3Client");
-    expectMatrixPath("b2_egress_leaders", "compose", "createReportS3Client");
+    expectMatrixPath("b2_report_usage_growth", "compose", "createReportS3Client");
+    expectMatrixPath("b2_rank_egress_leaders", "compose", "createReportS3Client");
     expect(reportClient).toContain("createReportS3Client");
     expect(s3Adapter).toContain("export class B2S3PeerClient");
     for (const caller of [s3Buckets, s3Objects, s3Presigned, s3Extras, s3Multipart, reportClient]) {

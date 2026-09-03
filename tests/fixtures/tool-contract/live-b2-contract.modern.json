@@ -44,21 +44,21 @@
     "b2_create_group_member",
     "b2_create_key",
     "b2_delete_bucket",
-    "b2_egress_leaders",
     "b2_eject_group_member",
     "b2_get_bucket_notification_rules",
-    "b2_largest_files",
     "b2_list_buckets",
     "b2_list_group_members",
     "b2_list_groups",
     "b2_list_keys",
+    "b2_list_largest_files",
+    "b2_rank_egress_leaders",
+    "b2_report_usage_growth",
     "b2_reserve_trial_create_account",
     "b2_set_bucket_notification_rules",
     "b2_unfinished_uploads",
     "b2_update_bucket",
     "b2_update_file_legal_hold",
     "b2_update_file_retention",
-    "b2_usage_growth",
     "s3_abort_multipart_upload",
     "s3_complete_multipart_upload",
     "s3_copy_object",
@@ -67,6 +67,7 @@
     "s3_delete_objects",
     "s3_get_bucket_location",
     "s3_get_object",
+    "s3_get_presigned_upload_part_url",
     "s3_get_presigned_url",
     "s3_head_bucket",
     "s3_head_object",
@@ -74,7 +75,6 @@
     "s3_list_object_versions",
     "s3_list_objects_v2",
     "s3_list_parts",
-    "s3_presign_upload_part",
     "s3_put_bucket_lifecycle",
     "s3_put_object",
     "s3_upload_part_copy"
@@ -85,21 +85,21 @@
     "b2_create_group_member": [],
     "b2_create_key": [],
     "b2_delete_bucket": ["bucketId"],
-    "b2_egress_leaders": [],
     "b2_eject_group_member": ["adminAccountId", "groupId", "memberAccountId"],
     "b2_get_bucket_notification_rules": ["bucketId"],
-    "b2_largest_files": ["bucket"],
     "b2_list_buckets": [],
     "b2_list_group_members": ["adminAccountId", "groupId"],
     "b2_list_groups": ["adminAccountId"],
     "b2_list_keys": [],
+    "b2_list_largest_files": ["bucket"],
+    "b2_rank_egress_leaders": [],
+    "b2_report_usage_growth": [],
     "b2_reserve_trial_create_account": [],
     "b2_set_bucket_notification_rules": ["bucketId", "eventNotificationRules"],
     "b2_unfinished_uploads": ["bucket"],
     "b2_update_bucket": ["bucketId"],
     "b2_update_file_legal_hold": ["fileId", "fileName", "legalHold"],
     "b2_update_file_retention": ["fileId", "fileName", "fileRetention"],
-    "b2_usage_growth": [],
     "s3_abort_multipart_upload": ["bucket", "key", "uploadId"],
     "s3_complete_multipart_upload": ["bucket", "key", "parts", "uploadId"],
     "s3_copy_object": ["destinationBucket", "destinationKey", "sourceBucket", "sourceKey"],
@@ -108,6 +108,7 @@
     "s3_delete_objects": ["bucket", "objects"],
     "s3_get_bucket_location": ["bucket"],
     "s3_get_object": ["bucket", "key"],
+    "s3_get_presigned_upload_part_url": ["bucket", "key", "partNumbers", "uploadId"],
     "s3_get_presigned_url": ["bucket", "key", "operation"],
     "s3_head_bucket": ["bucket"],
     "s3_head_object": ["bucket", "key"],
@@ -115,7 +116,6 @@
     "s3_list_object_versions": ["bucket"],
     "s3_list_objects_v2": ["bucket"],
     "s3_list_parts": ["bucket", "key", "uploadId"],
-    "s3_presign_upload_part": ["bucket", "key", "partNumbers", "uploadId"],
     "s3_put_bucket_lifecycle": ["bucket", "rules"],
     "s3_put_object": ["bucket", "key"],
     "s3_upload_part_copy": ["bucket", "copySource", "key", "partNumber", "uploadId"]
@@ -369,41 +369,6 @@
       }
     },
     {
-      "name": "b2_egress_leaders",
-      "descriptionSha256": "bd10578dd665435a3af4ddf2a0d8dee3dc32716a1fe0b64678f784bbfa2f2bcd",
-      "inputSchema": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "properties": {
-          "by": {
-            "default": "account",
-            "description": "Rank by 'account' (default) or 'bucket'.",
-            "enum": ["account", "bucket"],
-            "type": "string"
-          },
-          "days": {
-            "description": "Rolling window in days (1–90). Omit for current month to date.",
-            "maximum": 90,
-            "minimum": 1,
-            "type": "integer"
-          },
-          "limit": {
-            "default": 15,
-            "description": "Leaders to return (15).",
-            "maximum": 9007199254740991,
-            "minimum": 1,
-            "type": "integer"
-          }
-        },
-        "type": "object"
-      },
-      "annotations": {
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": true,
-        "readOnlyHint": true
-      }
-    },
-    {
       "name": "b2_eject_group_member",
       "descriptionSha256": "b7e69c9f7fd8c9cd9c7491777be963e47272c9f8337af9696f91fc1618ae19dc",
       "inputSchema": {
@@ -454,46 +419,6 @@
           }
         },
         "required": ["bucketId"],
-        "type": "object"
-      },
-      "annotations": {
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": true,
-        "readOnlyHint": true
-      }
-    },
-    {
-      "name": "b2_largest_files",
-      "descriptionSha256": "551618b1bfc6a4df209c7992244a028b7cd57b1cdffac80563ce435ffa6d9c95",
-      "inputSchema": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "properties": {
-          "bucket": {
-            "description": "Bucket name or bucketId to inspect.",
-            "minLength": 1,
-            "type": "string"
-          },
-          "limit": {
-            "default": 10,
-            "description": "How many of the largest files to return (default 10, max 100).",
-            "maximum": 100,
-            "minimum": 1,
-            "type": "integer"
-          },
-          "max_scan": {
-            "default": 50000,
-            "description": "Safety cap on objects scanned (default 50,000, max 500,000). Buckets with millions of files cannot be fully sorted by size in one live call; the scan stops at this cap (or a time budget) and returns truncated=true. Narrow with prefix for an exhaustive ranking of a subtree.",
-            "maximum": 500000,
-            "minimum": 1000,
-            "type": "integer"
-          },
-          "prefix": {
-            "description": "Optional path prefix, e.g. \"checkpoints/\".",
-            "type": "string"
-          }
-        },
-        "required": ["bucket"],
         "type": "object"
       },
       "annotations": {
@@ -631,6 +556,122 @@
           },
           "startApplicationKeyId": {
             "description": "Pagination cursor from a previous response's nextApplicationKeyId.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "b2_list_largest_files",
+      "descriptionSha256": "551618b1bfc6a4df209c7992244a028b7cd57b1cdffac80563ce435ffa6d9c95",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "bucket": {
+            "description": "Bucket name or bucketId to inspect.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "limit": {
+            "default": 10,
+            "description": "How many of the largest files to return (default 10, max 100).",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "max_scan": {
+            "default": 50000,
+            "description": "Safety cap on objects scanned (default 50,000, max 500,000). Buckets with millions of files cannot be fully sorted by size in one live call; the scan stops at this cap (or a time budget) and returns truncated=true. Narrow with prefix for an exhaustive ranking of a subtree.",
+            "maximum": 500000,
+            "minimum": 1000,
+            "type": "integer"
+          },
+          "prefix": {
+            "description": "Optional path prefix, e.g. \"checkpoints/\".",
+            "type": "string"
+          }
+        },
+        "required": ["bucket"],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "b2_rank_egress_leaders",
+      "descriptionSha256": "bd10578dd665435a3af4ddf2a0d8dee3dc32716a1fe0b64678f784bbfa2f2bcd",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "by": {
+            "default": "account",
+            "description": "Rank by 'account' (default) or 'bucket'.",
+            "enum": ["account", "bucket"],
+            "type": "string"
+          },
+          "days": {
+            "description": "Rolling window in days (1–90). Omit for current month to date.",
+            "maximum": 90,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "limit": {
+            "default": 15,
+            "description": "Leaders to return (15).",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "b2_report_usage_growth",
+      "descriptionSha256": "7a7dec02f490d7760620fa11f21cbdcd5672e9a2f63e764cc9566c8c4ad217ff",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "days": {
+            "description": "Custom trailing window in days that overrides `period` (e.g. 7 for week-over-week).",
+            "maximum": 3650,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "limit": {
+            "default": 50,
+            "description": "Max accounts (default 50).",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "order": {
+            "default": "most_grown",
+            "description": "Ranking. Default most_grown.",
+            "enum": ["most_grown", "least_grown", "shrinking"],
+            "type": "string"
+          },
+          "period": {
+            "default": "month",
+            "description": "Compare the latest snapshot against one month, quarter, or year ago. Default month.",
+            "enum": ["month", "quarter", "year"],
             "type": "string"
           }
         },
@@ -1161,47 +1202,6 @@
       }
     },
     {
-      "name": "b2_usage_growth",
-      "descriptionSha256": "7a7dec02f490d7760620fa11f21cbdcd5672e9a2f63e764cc9566c8c4ad217ff",
-      "inputSchema": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "properties": {
-          "days": {
-            "description": "Custom trailing window in days that overrides `period` (e.g. 7 for week-over-week).",
-            "maximum": 3650,
-            "minimum": 1,
-            "type": "integer"
-          },
-          "limit": {
-            "default": 50,
-            "description": "Max accounts (default 50).",
-            "maximum": 9007199254740991,
-            "minimum": 1,
-            "type": "integer"
-          },
-          "order": {
-            "default": "most_grown",
-            "description": "Ranking. Default most_grown.",
-            "enum": ["most_grown", "least_grown", "shrinking"],
-            "type": "string"
-          },
-          "period": {
-            "default": "month",
-            "description": "Compare the latest snapshot against one month, quarter, or year ago. Default month.",
-            "enum": ["month", "quarter", "year"],
-            "type": "string"
-          }
-        },
-        "type": "object"
-      },
-      "annotations": {
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": true,
-        "readOnlyHint": true
-      }
-    },
-    {
       "name": "s3_abort_multipart_upload",
       "descriptionSha256": "3db71bf358f5a23255cddac35b29a87442e01f2911d913a055a590b09528bf62",
       "inputSchema": {
@@ -1236,7 +1236,7 @@
     },
     {
       "name": "s3_complete_multipart_upload",
-      "descriptionSha256": "93027e8d91f571b719980d6810449551a8ed02e4e10c8c8879dc6207297f19d1",
+      "descriptionSha256": "fe73bc023df39443454d5a40814b094e37bcde196ca6e23d663ce5956af8114a",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -1253,7 +1253,7 @@
             "items": {
               "properties": {
                 "etag": {
-                  "description": "The ETag from this part's direct PUT response (the s3_presign_upload_part flow).",
+                  "description": "The ETag from this part's direct PUT response (the s3_get_presigned_upload_part_url flow).",
                   "type": "string"
                 },
                 "partNumber": {
@@ -1347,7 +1347,7 @@
     },
     {
       "name": "s3_create_multipart_upload",
-      "descriptionSha256": "052a5d399969a8fca6d139fecba51255e743fb8d174c01c7595337e77cca72a6",
+      "descriptionSha256": "14a945ebc7a28ec9b9df10fa650111f140902b6aaade6bb678c7cbe8c947affe",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -1539,8 +1539,55 @@
       }
     },
     {
+      "name": "s3_get_presigned_upload_part_url",
+      "descriptionSha256": "a7b9654ccc97cb30875cfc93e44949ddd942f20bcea3b4409173e78f1ac8dbc0",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "bucket": {
+            "description": "The bucket name.",
+            "type": "string"
+          },
+          "expiresIn": {
+            "default": 3600,
+            "description": "URL expiry in seconds (default: 3600 = 1 hour, max: 604800 = 7 days).",
+            "maximum": 604800,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "key": {
+            "description": "The object key.",
+            "type": "string"
+          },
+          "partNumbers": {
+            "description": "Part numbers to presign (each 1–10000). Mint all parts at once, or only the missing ones to resume.",
+            "items": {
+              "maximum": 10000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "maxItems": 10000,
+            "minItems": 1,
+            "type": "array"
+          },
+          "uploadId": {
+            "description": "The UploadId from s3_create_multipart_upload.",
+            "type": "string"
+          }
+        },
+        "required": ["bucket", "key", "partNumbers", "uploadId"],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      }
+    },
+    {
       "name": "s3_get_presigned_url",
-      "descriptionSha256": "f385469942f35f28175cdae3265c12b0e226aa7394b9751ef094bde66a1f15ee",
+      "descriptionSha256": "397d1f8c0e6b4a9bf55ab4d9dfa7fc91767d58b6b56ab30519e8dd6e24ae16d2",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -1639,7 +1686,7 @@
     },
     {
       "name": "s3_list_multipart_uploads",
-      "descriptionSha256": "afaaeffd219e690e532fb156935c6200ca70d8067a3e26d27c4b0ad5d82d82fe",
+      "descriptionSha256": "bd831dc0b36fdfb319a968f05be218405fad9fa3c690b56b770f56e3cb90ca87",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -1810,53 +1857,6 @@
       }
     },
     {
-      "name": "s3_presign_upload_part",
-      "descriptionSha256": "eabe3413f39a42c5a27aa7a425345fffdae2c1ab7b2d6e82e70af60ac743f601",
-      "inputSchema": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "properties": {
-          "bucket": {
-            "description": "The bucket name.",
-            "type": "string"
-          },
-          "expiresIn": {
-            "default": 3600,
-            "description": "URL expiry in seconds (default: 3600 = 1 hour, max: 604800 = 7 days).",
-            "maximum": 604800,
-            "minimum": 1,
-            "type": "integer"
-          },
-          "key": {
-            "description": "The object key.",
-            "type": "string"
-          },
-          "partNumbers": {
-            "description": "Part numbers to presign (each 1–10000). Mint all parts at once, or only the missing ones to resume.",
-            "items": {
-              "maximum": 10000,
-              "minimum": 1,
-              "type": "integer"
-            },
-            "maxItems": 10000,
-            "minItems": 1,
-            "type": "array"
-          },
-          "uploadId": {
-            "description": "The UploadId from s3_create_multipart_upload.",
-            "type": "string"
-          }
-        },
-        "required": ["bucket", "key", "partNumbers", "uploadId"],
-        "type": "object"
-      },
-      "annotations": {
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": true,
-        "readOnlyHint": false
-      }
-    },
-    {
       "name": "s3_put_bucket_lifecycle",
       "descriptionSha256": "ce0c7401773a46ec2a093c238d9a5ecc430bf4abe51e963e1ec4f8d078633351",
       "inputSchema": {
@@ -2009,7 +2009,7 @@
     },
     {
       "name": "s3_upload_part_copy",
-      "descriptionSha256": "d5f89a1a11b697169791d815e934b77369cce036c4d3532d1da4a1143a74d3cc",
+      "descriptionSha256": "cc2c11b0df4a24b3ff4498071ba3a82107c9679c495ddb05cee37f47a712e1bc",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -2078,5 +2078,5 @@
       "resultType": "complete"
     }
   },
-  "hash": "8fb1ad2c686e8ee02090b10d2fb4cf31f1b8537c26e3aa72621a41d88e77f89d"
+  "hash": "91945963dc6b2b001bf97f93467deb52294691a101e10abc4987e88e6a85fc03"
 }

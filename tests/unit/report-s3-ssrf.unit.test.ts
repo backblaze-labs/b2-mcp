@@ -95,8 +95,8 @@ describe("insight report S3 endpoint validation", () => {
   });
 
   it.each([
-    ["b2_usage_growth", { period: "month", limit: 1 }],
-    ["b2_egress_leaders", { by: "account", limit: 1 }],
+    ["b2_report_usage_growth", { period: "month", limit: 1 }],
+    ["b2_rank_egress_leaders", { by: "account", limit: 1 }],
   ])("%s rejects an injected report S3 endpoint before S3 send", async (toolName, args) => {
     const transport = new RecordingTransport((request) => {
       if (b2EndpointName(request) === "b2_authorize_account") {
@@ -120,8 +120,8 @@ describe("insight report S3 endpoint validation", () => {
   });
 
   it.each([
-    ["b2_usage_growth", { period: "month", limit: 1 }],
-    ["b2_egress_leaders", { by: "account", limit: 1 }],
+    ["b2_report_usage_growth", { period: "month", limit: 1 }],
+    ["b2_rank_egress_leaders", { by: "account", limit: 1 }],
   ])("%s derives report S3 region from authorize", async (toolName, args) => {
     const seenRegions: string[] = [];
     sendSpy.mockImplementation(async function (this: S3Client) {
@@ -181,7 +181,7 @@ describe("insight report S3 endpoint validation", () => {
     installSdkTransport(transport);
     const server = createServer(ssrfConfig);
 
-    const result = await callTool(server, "b2_usage_growth", { period: "month", limit: 1 });
+    const result = await callTool(server, "b2_report_usage_growth", { period: "month", limit: 1 });
     expect(result.isError).not.toBe(true);
     expect(sendSpy).toHaveBeenCalled();
 
@@ -254,8 +254,8 @@ describe("insight report S3 endpoint validation", () => {
   });
 
   it.each([
-    ["b2_usage_growth", { days: 30, limit: 10 }],
-    ["b2_egress_leaders", { by: "account", days: 90, limit: 10 }],
+    ["b2_report_usage_growth", { days: 30, limit: 10 }],
+    ["b2_rank_egress_leaders", { by: "account", days: 90, limit: 10 }],
   ])("%s does not use the broader S3 override credential", async (toolName, args) => {
     const thenDay = daysAgo(29);
     const latestDay = daysAgo(1);

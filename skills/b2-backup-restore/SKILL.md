@@ -33,7 +33,7 @@ description: Plan and run B2 backup and restore workflows with presigned or mult
 - `s3_head_object`
 - `s3_get_presigned_url`
 - `s3_create_multipart_upload`
-- `s3_presign_upload_part`
+- `s3_get_presigned_upload_part_url`
 - `s3_complete_multipart_upload`
 - `s3_list_parts`
 - `s3_abort_multipart_upload`

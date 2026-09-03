@@ -398,7 +398,7 @@ describe("insights — empty report scan invariant", () => {
 
       const usage = JSON.parse(
         (
-          await tools.b2_usage_growth.execute({
+          await tools.b2_report_usage_growth.execute({
             period: "month",
             order: "most_grown",
             limit: 50,
@@ -407,7 +407,7 @@ describe("insights — empty report scan invariant", () => {
       );
       const egress = JSON.parse(
         (
-          await tools.b2_egress_leaders.execute({
+          await tools.b2_rank_egress_leaders.execute({
             by: "account",
             days: 30,
             limit: 15,
@@ -456,7 +456,7 @@ describe("insights — report scan bounds", () => {
     };
     const tools = insightToolHarness(b2Client as any);
 
-    const result = await tools.b2_egress_leaders.execute({
+    const result = await tools.b2_rank_egress_leaders.execute({
       by: "account",
       days: 90,
       limit: 1,
@@ -496,7 +496,7 @@ describe("insights — report scan bounds", () => {
     };
     registerInsightTools(server as any, b2Client as any, auth as any, b2Client as any);
 
-    const result = await tools.b2_egress_leaders.execute({
+    const result = await tools.b2_rank_egress_leaders.execute({
       by: "account",
       days: 90,
       limit: 1,
@@ -510,7 +510,7 @@ describe("insights — report scan bounds", () => {
     expect(downloadReportObjectText).toHaveBeenCalledTimes(1);
   });
 
-  it("shares one byte budget across b2_usage_growth discovery and both snapshots", async () => {
+  it("shares one byte budget across b2_report_usage_growth discovery and both snapshots", async () => {
     const tools: Record<string, { execute: (args: any) => Promise<any> }> = {};
     const server = {
       registerTool(name: string, _definition: unknown, execute: (args: any) => Promise<any>) {
@@ -556,7 +556,7 @@ describe("insights — report scan bounds", () => {
     };
     registerInsightTools(server as any, {} as any, auth as any, b2Client as any);
 
-    const result = await tools.b2_usage_growth.execute({
+    const result = await tools.b2_report_usage_growth.execute({
       period: "month",
       order: "most_grown",
       limit: 1,
