@@ -380,7 +380,10 @@ Sensitive response fields and structures inventoried for the Phase 1 sanitizer:
 - Notification/webhook secrets: `hmacSha256SigningSecret` and
   `customHeaders[].value`.
 - Credential headers and secret-bearing request/response headers:
-  `Authorization`, `X-B2-MCP-Key`, and `X-B2-MCP-Master-Key`.
+  `Authorization`, `X-B2-MCP-Key`, and `X-B2-MCP-Master-Key`. The retired
+  `X-B2-Key`, `X-B2-Master-Key`, `X-B2-App-Key`, and `X-B2-MCP-App-Key` families
+  are no longer accepted as credentials but are still classified as secrets and
+  scrubbed for the migration window, so a lagging client's value never leaks.
 
 Non-secret identifiers such as `applicationKeyId`, account IDs, bucket IDs, key
 names, scopes, capabilities, and expiry metadata may be returned when a
