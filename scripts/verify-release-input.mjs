@@ -63,44 +63,6 @@ function readJson(root, relativePath) {
   return JSON.parse(readFileSync(path.join(root, relativePath), "utf8"));
 }
 
-// npx option flags that consume the following argument as their value, so the
-// package-to-execute scan must skip both. Boolean flags (e.g. -y/--yes/--no) are
-// handled generically by the leading-dash check.
-const NPX_VALUE_FLAGS = new Set([
-  "-p",
-  "--package",
-  "--registry",
-  "--userconfig",
-  "--cache",
-  "--shell",
-  "--node-arg",
-  "--node-options",
-  "--npm",
-]);
-
-// npx call-mode flags: the following token is a shell command, not a package, so
-// the positional scan cannot interpret it. The launcher must not use call mode.
-const NPX_CALL_FLAGS = new Set(["-c", "--call"]);
-
-/**
- * Return the package spec npx would actually execute: the first positional
- * argument after skipping option flags (and the values of value-taking options).
- * `--` forces the next token to be the executable. Returns undefined if none.
- */
-function npxExecutableSpec(args) {
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index];
-    if (arg === "--") return args[index + 1];
-    if (NPX_VALUE_FLAGS.has(arg)) {
-      index += 1;
-      continue;
-    }
-    if (arg.startsWith("-")) continue;
-    return arg;
-  }
-  return undefined;
-}
-
 export function verifyReleaseInput(root, tag) {
   const pkg = readJson(root, "package.json");
   const runtimePolicy = readJson(root, "runtime-policy.json");
@@ -132,32 +94,19 @@ export function verifyReleaseInput(root, tag) {
     mcpbConfig.command === "npx",
     `mcpb/manifest.json launcher command must be npx, got ${mcpbConfig.command}`,
   );
-  const mcpbArgs = (mcpbConfig.args ?? []).map(String);
+  // Fail closed with an exact allowlist rather than parsing arbitrary npx options:
+  // the only supported launcher is `npx -y <pinnedSpec>`. Any extra flag (e.g.
+  // --package=, --call=, --registry) could change what npx executes or where it
+  // resolves it, so require the exact argument array.
   const pinnedSpec = `${canonicalPackageName}@${pkg.version}`;
-  // Reject npx call mode outright: it runs the following token as a shell command
-  // rather than the pinned package, so the positional scan below cannot reason
-  // about it. The launcher must be the direct `npx -y <pinnedSpec>` form.
-  for (const arg of mcpbArgs) {
-    assert(
-      !NPX_CALL_FLAGS.has(arg),
-      `mcpb/manifest.json npx launcher must not use call mode (${arg})`,
-    );
-  }
-  // The spec npx actually launches must be exactly the pinned version, not just
-  // present somewhere in args (an earlier `@latest` positional would win).
+  const expectedArgs = ["-y", pinnedSpec];
+  const mcpbArgs = mcpbConfig.args ?? [];
   assert(
-    npxExecutableSpec(mcpbArgs) === pinnedSpec,
-    `mcpb/manifest.json npx launcher must execute ${pinnedSpec} in the executable argument position, got ${npxExecutableSpec(mcpbArgs) ?? "(none)"}`,
+    Array.isArray(mcpbArgs) &&
+      mcpbArgs.length === expectedArgs.length &&
+      mcpbArgs.every((arg, index) => arg === expectedArgs[index]),
+    `mcpb/manifest.json npx launcher args must be exactly ${JSON.stringify(expectedArgs)}, got ${JSON.stringify(mcpbArgs)}`,
   );
-  // Fail closed on any other reference to our package (e.g. an `@latest` decoy or
-  // a `-p <pkg>` injection) that could resolve to unpinned code at launch.
-  for (const arg of mcpbArgs) {
-    if (arg === pinnedSpec) continue;
-    assert(
-      arg !== canonicalPackageName && !arg.startsWith(`${canonicalPackageName}@`),
-      `mcpb/manifest.json references ${canonicalPackageName} outside the pinned ${pinnedSpec}`,
-    );
-  }
   assert(
     pkg.engines?.node === runtimePolicy.engineRange,
     `package engine range must be ${runtimePolicy.engineRange}`,
