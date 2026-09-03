@@ -140,6 +140,17 @@ describe("deployment documentation policy", () => {
     }
   });
 
+  it("documents the deployment gate for cached tool-profile changes", () => {
+    const deployIndex = doc("DEPLOY.md");
+
+    expect(deployIndex).toContain("tools/list");
+    expect(deployIndex).toContain("30000 ms");
+    expect(deployIndex).toContain("expand-contract compatibility gate");
+    expect(deployIndex).toMatch(/atomic\/sticky rollout/);
+    expect(deployIndex).toContain("B2_MCP_EXPECTED_TOOL_PROFILE");
+    expect(deployIndex).toMatch(/profile\s+hash/);
+  });
+
   it("documents only known runtime or explicitly provider/test environment variables", () => {
     const sourceAndExamples = [
       ".env.example",

@@ -35,6 +35,7 @@ export const PROFILE_CAPABILITIES = {
     "listBuckets",
     "listFiles",
     "listKeys",
+    "readBucketLifecycleRules",
     "readBucketEncryption",
     "readBucketRetentions",
     "readBuckets",
@@ -56,6 +57,7 @@ export const PROFILE_CAPABILITIES = {
     "listBuckets",
     "listFiles",
     "listKeys",
+    "readBucketLifecycleRules",
     "readBucketNotifications",
     "readFiles",
     "writeBucketNotifications",
@@ -64,7 +66,14 @@ export const PROFILE_CAPABILITIES = {
     "writeFileRetentions",
     "writeFiles",
   ],
-  "read-only": ["listBuckets", "listFiles", "listKeys", "readBucketNotifications", "readFiles"],
+  "read-only": [
+    "listBuckets",
+    "listFiles",
+    "listKeys",
+    "readBucketLifecycleRules",
+    "readBucketNotifications",
+    "readFiles",
+  ],
 } as const;
 
 /** Named contract profile. */

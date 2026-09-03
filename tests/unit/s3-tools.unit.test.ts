@@ -1063,6 +1063,114 @@ describe("s3_get_bucket_lifecycle", () => {
     expect(command.constructor.name).toBe("GetBucketLifecycleConfigurationCommand");
     expect(command.input).toMatchObject({ Bucket: "my-bucket" });
   });
+
+  it("returns empty rules when the bucket has no lifecycle configuration", async () => {
+    sendSpy.mockRejectedValueOnce(
+      Object.assign(new Error("No lifecycle configuration"), {
+        name: "NoSuchLifecycleConfiguration",
+        $metadata: { httpStatusCode: 404, requestId: "req-no-lifecycle" },
+      }),
+    );
+
+    const result = await callTool(server, "s3_get_bucket_lifecycle", { bucket: "my-bucket" });
+
+    expect(result.isError).toBeFalsy();
+    expect(parseResult(result)).toEqual({ rules: [] });
+  });
+
+  it("does not treat NoSuchBucket as an empty lifecycle configuration", async () => {
+    sendSpy.mockRejectedValueOnce(
+      Object.assign(new Error("Bucket does not exist"), {
+        name: "NoSuchBucket",
+        $metadata: { httpStatusCode: 404, requestId: "req-missing-bucket" },
+      }),
+    );
+
+    const result = await callTool(server, "s3_get_bucket_lifecycle", { bucket: "missing-bucket" });
+
+    expect(result.isError).toBe(true);
+    expect(parseErrorText(parseResult(result))).toMatchObject({
+      code: "NoSuchBucket",
+      status: 404,
+      requestId: "req-missing-bucket",
+    });
+  });
+
+  it("omits absent lifecycle rule IDs instead of synthesizing sentinels", async () => {
+    sendSpy.mockResolvedValueOnce({
+      Rules: [
+        {
+          Status: "Disabled",
+          Prefix: "archive/",
+          Expiration: { Days: 365 },
+        },
+      ],
+    });
+
+    const result = parseResult(
+      await callTool(server, "s3_get_bucket_lifecycle", { bucket: "my-bucket" }),
+    );
+
+    expect(result).toEqual({
+      rules: [
+        {
+          status: "Disabled",
+          filter: { prefix: "archive/" },
+          expiration: { days: 365 },
+        },
+      ],
+    });
+  });
+
+  it.each([
+    {
+      name: "Filter.And",
+      rule: {
+        ID: "delete-tagged-only",
+        Status: "Enabled",
+        Filter: {
+          And: {
+            Prefix: "private/",
+            Tags: [{ Key: "retain", Value: "false" }],
+          },
+        },
+        Expiration: { Days: 1 },
+      },
+      message: /unsupported filter fields: And/i,
+    },
+    {
+      name: "Filter.Tag",
+      rule: {
+        ID: "delete-retain-false",
+        Status: "Enabled",
+        Filter: { Tag: { Key: "retain", Value: "false" } },
+        Expiration: { Days: 1 },
+      },
+      message: /unsupported filter fields: Tag/i,
+    },
+    {
+      name: "unknown Status",
+      rule: {
+        ID: "unknown-status",
+        Status: "Paused",
+        Filter: { Prefix: "private/" },
+        Expiration: { Days: 1 },
+      },
+      message: /unsupported Status 'Paused'/i,
+    },
+  ])("rejects unsupported lifecycle provider responses: $name", async ({ rule, message }) => {
+    sendSpy.mockResolvedValueOnce({ Rules: [rule] });
+
+    const result = await callTool(server, "s3_get_bucket_lifecycle", { bucket: "my-bucket" });
+
+    expect(result.isError).toBe(true);
+    const errorText = parseResult(result);
+    expect(errorText).toMatch(message);
+    expect(parseErrorText(errorText)).toMatchObject({
+      code: "unsupported_provider_response",
+      status: 502,
+    });
+  });
 });
 
 describe("s3_put_bucket_lifecycle", () => {

@@ -16,6 +16,7 @@
     "listBuckets",
     "listFiles",
     "listKeys",
+    "readBucketLifecycleRules",
     "readBucketEncryption",
     "readBucketRetentions",
     "readBuckets",

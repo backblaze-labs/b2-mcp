@@ -28,6 +28,7 @@ import {
 } from "../support/sdk-test-helpers";
 
 const CANARY = "B2_MCP_CANARY_SECRET_capability_do_not_leak";
+const FULL_SURFACE_TOOL_COUNT = 41;
 
 const baseConfig = {
   applicationKeyId: "k",
@@ -77,12 +78,12 @@ describe("isToolEnabled", () => {
 
 describe("capability-aware registration", () => {
   it("null capabilities → full surface plus compatibility stubs, no filtering (41 tools)", () => {
-    expect(toolNames(null).length).toBe(41);
+    expect(toolNames(null).length).toBe(FULL_SURFACE_TOOL_COUNT);
   });
 
   it("EMPTY capabilities → fail closed instead of full surface", () => {
     const names = toolNames([]);
-    expect(names.length).toBeLessThan(41);
+    expect(names.length).toBeLessThan(FULL_SURFACE_TOOL_COUNT);
     expect(names).toContain("b2_authorize_account");
     expect(names).toContain("b2_create_key");
     expect(names).not.toContain("b2_usage_growth");
@@ -94,7 +95,13 @@ describe("capability-aware registration", () => {
   });
 
   it("read-only key drops every write/delete/admin tool", () => {
-    const names = toolNames(["listBuckets", "listFiles", "readFiles", "listKeys"]);
+    const names = toolNames([
+      "listBuckets",
+      "listFiles",
+      "readFiles",
+      "listKeys",
+      "readBucketLifecycleRules",
+    ]);
     // present
     for (const t of [
       "s3_get_object",
@@ -127,7 +134,12 @@ describe("capability-aware registration", () => {
     ]) {
       expect(names).toContain(t);
     }
-    expect(names.length).toBeLessThan(40);
+    expect(names.length).toBeLessThan(FULL_SURFACE_TOOL_COUNT);
+  });
+
+  it("gates S3 lifecycle reads on readBucketLifecycleRules", () => {
+    expect(toolNames(["readBucketLifecycleRules"])).toContain("s3_get_bucket_lifecycle");
+    expect(toolNames(["listBuckets"])).not.toContain("s3_get_bucket_lifecycle");
   });
 
   it("keeps file-mode durable-secret names callable when filters omit handlers", () => {

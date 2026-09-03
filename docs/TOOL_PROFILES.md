@@ -90,6 +90,7 @@ Profile hash: `d775e5b1f3bf192beb7939e971aa1083bf2c6c20c82921b390ab069852c388ef`
 - `listBuckets`
 - `listFiles`
 - `listKeys`
+- `readBucketLifecycleRules`
 - `readBucketEncryption`
 - `readBucketRetentions`
 - `readBuckets`
@@ -170,6 +171,7 @@ Profile hash: `63b404465a6d30fbb7f43d4dc09625ee30b31e66c1685ebcc465df36cfad7598`
 - `listBuckets`
 - `listFiles`
 - `listKeys`
+- `readBucketLifecycleRules`
 - `readBucketNotifications`
 - `readFiles`
 - `writeBucketNotifications`
@@ -239,6 +241,7 @@ Profile hash: `429ff952decdaec6ad123b9e7036ed3ef7e2b95dbe422e36192fdbec1a856df0`
 - `listBuckets`
 - `listFiles`
 - `listKeys`
+- `readBucketLifecycleRules`
 - `readBucketNotifications`
 - `readFiles`
 

@@ -18,8 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `mcpb/manifest.json` (MCPB 0.3) plus a `pnpm run build:mcpb` pack script for
   Smithery's Local publish path; the release version-sync now stamps the MCPB
   manifest alongside `server.json` and `lhm.plugin.json`. (#300)
-- Flat, visible `## Tools` list of all 40 tools in the README so directory
+- Flat, visible `## Tools` list of all 41 tools in the README so directory
   auto-extractors (mcp.so, Glama, ...) can populate the tool section. (#300)
+- `s3_get_bucket_lifecycle` for S3-compatible lifecycle reads. The tool returns
+  an empty rule set when B2 reports no lifecycle configuration. (#366)
 - `docs/DISCOVERABILITY.md` runbook documenting the registry/directory listings
   and per-release steps (Glama, Smithery, LobeHub, mcp.so). (#300)
 - README "official server" note and an `Official …` MCP Registry manifest

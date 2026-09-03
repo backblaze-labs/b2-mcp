@@ -56,52 +56,68 @@ type S3SendCommand<
 /** AWS S3 client configuration accepted by the B2 peer facade. */
 export type B2S3PeerClientConfig = AwsS3ClientConfig;
 
-/** Lifecycle prefix filter. */
+/** Lifecycle filter for the subset of S3 rules B2 currently supports. */
 export interface B2S3LifecycleFilter {
-  /** Matched object-key prefix. */
+  /** Object-key prefix matched by the lifecycle rule. */
   prefix?: string;
 }
 
-/** Current-version expiration action. */
+/** Expiration action for current object versions. */
 export interface B2S3LifecycleExpiration {
-  /** Days after creation. */
+  /** Number of days after creation when current versions expire. */
   days?: number;
-  /** Expired delete-marker cleanup. */
+  /** Whether expired delete markers are removed. */
   expiredObjectDeleteMarker?: boolean;
 }
 
-/** Noncurrent-version expiration action. */
+/** Expiration action for noncurrent object versions. */
 export interface B2S3LifecycleNoncurrentVersionExpiration {
-  /** Days after becoming noncurrent. */
+  /** Number of days after a version becomes noncurrent before it expires. */
   noncurrentDays: number;
 }
 
-/** Incomplete multipart upload cleanup action. */
+/** Cleanup action for incomplete multipart uploads. */
 export interface B2S3LifecycleAbortIncompleteMultipartUpload {
-  /** Days after initiation. */
+  /** Number of days after initiation before an incomplete multipart upload is aborted. */
   daysAfterInitiation: number;
 }
 
-/** B2-supported S3 lifecycle rule. */
+/** S3 lifecycle rule accepted by the write path for B2-supported actions. */
 export interface B2S3LifecycleRule {
-  /** Rule identifier. */
+  /** Unique rule identifier sent to the provider. */
   id: string;
-  /** Rule status. */
+  /** Whether the lifecycle rule is active. */
   status: "Enabled" | "Disabled";
-  /** Prefix filter. */
+  /** Optional prefix filter limiting which objects the rule applies to. */
   filter?: B2S3LifecycleFilter;
-  /** Current-version expiration. */
+  /** Optional expiration action for current object versions. */
   expiration?: B2S3LifecycleExpiration;
-  /** Noncurrent-version expiration. */
+  /** Optional expiration action for noncurrent object versions. */
   noncurrentVersionExpiration?: B2S3LifecycleNoncurrentVersionExpiration;
-  /** Incomplete multipart cleanup. */
+  /** Optional cleanup action for incomplete multipart uploads. */
   abortIncompleteMultipartUpload?: B2S3LifecycleAbortIncompleteMultipartUpload;
 }
 
-/** S3 lifecycle configuration. */
+/** S3 lifecycle rule returned by the read path for B2-supported actions. */
+export interface B2S3LifecycleReadRule {
+  /** Rule identifier returned by the provider, when present. */
+  id?: string;
+  /** Whether the lifecycle rule is active. */
+  status: "Enabled" | "Disabled";
+  /** Optional prefix filter limiting which objects the rule applies to. */
+  filter?: B2S3LifecycleFilter;
+  /** Optional expiration action for current object versions. */
+  expiration?: B2S3LifecycleExpiration;
+  /** Optional expiration action for noncurrent object versions. */
+  noncurrentVersionExpiration?: B2S3LifecycleNoncurrentVersionExpiration;
+  /** Optional cleanup action for incomplete multipart uploads. */
+  abortIncompleteMultipartUpload?: B2S3LifecycleAbortIncompleteMultipartUpload;
+}
+
+/** S3 lifecycle configuration returned by the read path. */
 export interface B2S3LifecycleConfigurationResult {
-  /** Lifecycle rules. */
-  rules: B2S3LifecycleRule[];
+  /** Lifecycle rules projected onto the B2-supported S3 lifecycle subset. */
+  rules: B2S3LifecycleReadRule[];
 }
 
 /** Completed multipart part supplied to S3 CompleteMultipartUpload. */
@@ -798,6 +814,13 @@ function badRequest(message: string): never {
   throw Object.assign(new Error(message), { status: 400, code: "bad_request" });
 }
 
+function providerResponseError(message: string): never {
+  throw Object.assign(new Error(message), {
+    status: 502,
+    code: "unsupported_provider_response",
+  });
+}
+
 /**
  * Reject browser-executable content types for signed upload capabilities.
  *
@@ -824,17 +847,84 @@ export function assertSafeObjectContentType(
   }
 }
 
-function lifecycleRuleFromAws(
-  rule: NonNullable<GetBucketLifecycleConfigurationCommandOutput["Rules"]>[number],
-): B2S3LifecycleRule {
-  const prefix = rule.Filter?.Prefix ?? rule.Prefix;
+type AwsLifecycleRule = NonNullable<GetBucketLifecycleConfigurationCommandOutput["Rules"]>[number];
+
+function lifecycleRuleLabel(rule: AwsLifecycleRule): string {
+  return typeof rule.ID === "string" && rule.ID ? rule.ID : "(missing id)";
+}
+
+function lifecycleRuleStatus(rule: AwsLifecycleRule): B2S3LifecycleReadRule["status"] {
+  if (rule.Status === "Enabled" || rule.Status === "Disabled") return rule.Status;
+  const status = rule.Status === undefined ? "missing" : `'${String(rule.Status)}'`;
+  providerResponseError(
+    `S3 lifecycle rule '${lifecycleRuleLabel(rule)}' has unsupported Status ${status}.`,
+  );
+}
+
+function lifecycleRulePrefix(rule: AwsLifecycleRule): string | undefined {
+  const legacyPrefix = rule.Prefix;
+  if (legacyPrefix !== undefined && typeof legacyPrefix !== "string") {
+    providerResponseError(
+      `S3 lifecycle rule '${lifecycleRuleLabel(rule)}' has a non-string legacy Prefix.`,
+    );
+  }
+
+  if (rule.Filter === undefined) return legacyPrefix;
+
+  const filter = rule.Filter as Record<string, unknown>;
+  const unsupported = Object.entries(filter)
+    .filter(([key, value]) => key !== "Prefix" && value !== undefined)
+    .map(([key]) => key)
+    .sort();
+  if (unsupported.length > 0) {
+    providerResponseError(
+      `S3 lifecycle rule '${lifecycleRuleLabel(
+        rule,
+      )}' uses unsupported filter fields: ${unsupported.join(", ")}.`,
+    );
+  }
+
+  const filterPrefix = filter.Prefix;
+  if (filterPrefix !== undefined && typeof filterPrefix !== "string") {
+    providerResponseError(
+      `S3 lifecycle rule '${lifecycleRuleLabel(rule)}' has a non-string Filter.Prefix.`,
+    );
+  }
+  if (legacyPrefix !== undefined && filterPrefix !== undefined && legacyPrefix !== filterPrefix) {
+    providerResponseError(
+      `S3 lifecycle rule '${lifecycleRuleLabel(
+        rule,
+      )}' has conflicting Filter.Prefix and legacy Prefix values.`,
+    );
+  }
+  return filterPrefix ?? legacyPrefix;
+}
+
+function isNoSuchLifecycleConfiguration(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const e = err as {
+    name?: unknown;
+    Code?: unknown;
+    code?: unknown;
+    $metadata?: { httpStatusCode?: number };
+  };
+  return (
+    e.$metadata?.httpStatusCode === 404 &&
+    (e.name === "NoSuchLifecycleConfiguration" ||
+      e.Code === "NoSuchLifecycleConfiguration" ||
+      e.code === "NoSuchLifecycleConfiguration")
+  );
+}
+
+function lifecycleRuleFromAws(rule: AwsLifecycleRule): B2S3LifecycleReadRule {
+  const prefix = lifecycleRulePrefix(rule);
   const days = rule.Expiration?.Days;
   const deleteMarker = rule.Expiration?.ExpiredObjectDeleteMarker;
   const noncurrentDays = rule.NoncurrentVersionExpiration?.NoncurrentDays;
   const uploadDays = rule.AbortIncompleteMultipartUpload?.DaysAfterInitiation;
   return {
-    id: rule.ID ?? "",
-    status: rule.Status === "Disabled" ? "Disabled" : "Enabled",
+    ...(rule.ID === undefined ? {} : { id: rule.ID }),
+    status: lifecycleRuleStatus(rule),
     ...(prefix === undefined ? {} : { filter: { prefix } }),
     ...(days === undefined && deleteMarker === undefined
       ? {}
@@ -942,10 +1032,15 @@ export class B2S3PeerClient {
    * @returns Lifecycle rules.
    */
   async getBucketLifecycle(bucket: string): Promise<B2S3LifecycleConfigurationResult> {
-    const result = await this.sendWithCircuit(
-      new GetBucketLifecycleConfigurationCommand({ Bucket: bucket }),
-    );
-    return { rules: (result.Rules ?? []).map(lifecycleRuleFromAws) };
+    try {
+      const result = await this.sendWithCircuit(
+        new GetBucketLifecycleConfigurationCommand({ Bucket: bucket }),
+      );
+      return { rules: (result.Rules ?? []).map(lifecycleRuleFromAws) };
+    } catch (err) {
+      if (isNoSuchLifecycleConfiguration(err)) return { rules: [] };
+      throw err;
+    }
   }
 
   /**

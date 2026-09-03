@@ -39,6 +39,7 @@ const broadB2Capabilities = [
   "deleteBuckets",
   "listKeys",
   "deleteKeys",
+  "readBucketLifecycleRules",
   "readBucketNotifications",
   "writeBucketNotifications",
   "writeFileLegalHolds",

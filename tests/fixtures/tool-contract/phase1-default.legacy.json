@@ -18,6 +18,7 @@
     "listBuckets",
     "listFiles",
     "listKeys",
+    "readBucketLifecycleRules",
     "readBucketNotifications",
     "readFiles",
     "writeBucketNotifications",

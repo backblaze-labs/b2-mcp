@@ -90,6 +90,15 @@ a new replica can briefly send `resources/list` or `resources/read` to an old
 replica and receive method-not-found. Treat that as expected, bounded rollout
 skew; it self-heals once all replicas run the same version.
 
+Tool-profile changes are stricter because `tools/list` responses are cacheable
+for 30000 ms and `tools/call` may hit another stateless replica. Releases that
+add, remove, or narrow advertised tools must either ship an explicit
+expand-contract compatibility gate that keeps advertising the previous profile
+until the tool-list TTL has expired, or use an atomic/sticky rollout that
+prevents mixed-version `tools/list` and `tools/call` traffic. The deployment
+smoke must pin `B2_MCP_EXPECTED_TOOL_PROFILE` and fail on an unexpected profile
+hash before traffic shifts.
+
 The supported container operator runbook is
 [`deploy/customer-hosted/README.md`](../deploy/customer-hosted/README.md).
 Treat that README as the canonical source for build/run steps, secret injection,
