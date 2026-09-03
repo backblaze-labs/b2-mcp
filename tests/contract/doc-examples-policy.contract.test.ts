@@ -193,6 +193,19 @@ describe("documentation example validator policy", () => {
     expect(result.stderr).toContain("references package @attacker/b2-mcp@0.2.0");
   });
 
+  it("rejects a global npm add alias that drifts to another package", () => {
+    const readme = read("README.md").replace(
+      "npm install -g @backblaze-labs/b2-mcp@0.2.0",
+      "npm add -g @attacker/b2-mcp@latest",
+    );
+    const expectedLine = lineOf(readme, "npm add -g @attacker/b2-mcp@latest");
+    const result = runDocExamplesWithOverrides({ "README.md": readme });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(`README.md:${expectedLine}`);
+    expect(result.stderr).toContain("global npm install examples must install");
+  });
+
   it.each(["--location=global", "--location global"])(
     "rejects a global npm install using %s",
     (locationFlag) => {

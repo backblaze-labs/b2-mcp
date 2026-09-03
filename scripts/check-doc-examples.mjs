@@ -991,7 +991,8 @@ function npmInstallInvocation(segment) {
     if (!option.includes("=") && npmInstallValueOptions.has(option)) index += 1;
     index += 1;
   }
-  if (tokens[index] !== "install" && tokens[index] !== "i") return null;
+  // `install`, its `i` shorthand, and the `add` alias all install packages.
+  if (!["install", "i", "add"].includes(tokens[index])) return null;
   index += 1;
 
   const operands = [];
