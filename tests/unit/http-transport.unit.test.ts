@@ -3,14 +3,19 @@
  * MCP protocol-version and envelope assertions live under tests/protocol/.
  */
 
-import * as http from "http";
-import * as net from "net";
-import { AsyncLocalStorage } from "async_hooks";
-import { ReadableStream } from "node:stream/web";
 import type { ReadableStreamDefaultController } from "node:stream/web";
+import { ReadableStream } from "node:stream/web";
 import { S3Client } from "@aws-sdk/client-s3";
 import type { AuthInfo } from "@modelcontextprotocol/server";
+import { AsyncLocalStorage } from "async_hooks";
+import * as http from "http";
+import * as net from "net";
 import type { MockInstance } from "vitest";
+import {
+  CredentialProvider,
+  CredentialResolutionError,
+  DISCOVERY_MODE_CREDENTIAL,
+} from "../../src/credentials";
 import {
   buildHttpServer,
   configFromHeaders,
@@ -24,25 +29,20 @@ import {
   invalidateAuthManagerCache,
   invalidateCapabilityCache,
 } from "../../src/server";
-import { _resetRateLimiter } from "../../src/utils/rate-limiter";
-import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
-import {
-  CredentialProvider,
-  CredentialResolutionError,
-  DISCOVERY_MODE_CREDENTIAL,
-} from "../../src/credentials";
 import { logger } from "../../src/utils/logger";
+import { _resetRateLimiter } from "../../src/utils/rate-limiter";
 import {
-  JSON_HEADERS,
-  type Resp,
   closeHttpServer,
   creds,
+  JSON_HEADERS,
   listenOnLocalhost,
+  type Resp,
   request,
   restoreEnv,
   saveEnv,
   setDefaultHttpTestEnv,
 } from "../support/http";
+import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
 import {
   authorizeResponse,
   b2EndpointName,
@@ -641,6 +641,28 @@ describe("HTTP transport handler", () => {
 
     releaseCapabilities();
     await expect(first).resolves.toMatchObject({ status: 200 });
+  });
+
+  it("does not double-count fresh header verification against the global in-flight cap", async () => {
+    // Regression: verification held a second permit on the shared in-flight
+    // limiter, so one uncached credential consumed two of B2_MAX_SESSIONS and
+    // the very first fresh request was wrongly rejected with 503.
+    delete process.env.B2_REGISTER_ALL_TOOLS;
+    process.env.B2_MAX_SESSIONS = "1";
+    const fetchCapabilities = vi.fn(async () => ["listBuckets"]);
+    await replaceHandle(undefined, { fetchCapabilities });
+
+    const response = await request(port, "POST", "/mcp", {
+      headers: {
+        "x-b2-key-id": "fresh-valid-key",
+        "x-b2-key": "fresh-secret",
+        ...modernHeaders("tools/list"),
+      },
+      body: LIST_TOOLS,
+    });
+
+    expect(response.status).toBe(200);
+    expect(fetchCapabilities).toHaveBeenCalledTimes(1);
   });
 
   it("rate-limits invalid header verification before upstream auth", async () => {

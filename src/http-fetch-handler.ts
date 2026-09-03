@@ -8,31 +8,18 @@
  * security-sensitive transport behavior does not drift across runtimes.
  */
 
-import * as http from "http";
-import { AsyncLocalStorage } from "async_hooks";
 import { ReadableStream } from "node:stream/web";
 import {
+  type AuthInfo,
   classifyInboundRequest,
   createMcpHandler,
   isJsonContentType,
-  type AuthInfo,
   type McpHandlerRequestOptions,
   type McpHttpHandler,
   type McpRequestContext,
 } from "@modelcontextprotocol/server";
-import {
-  createServer as createMcpServerDefinition,
-  fetchCapabilities as fetchCredentialCapabilities,
-  requiresCapabilityDiscovery,
-  sweepAuthManagerCache,
-  sweepCapabilityCache,
-} from "./server.js";
-import { VERSION } from "./version.js";
-import { logger } from "./utils/logger.js";
-import { allowRequest, sweepIdleBuckets } from "./utils/rate-limiter.js";
-import { parseIntEnv } from "./utils/config.js";
-import { readCappedBodyBytes } from "./utils/http-body-limit.js";
-import { safeErrorText, webRequestSecrets } from "./utils/secret-sanitizer.js";
+import { AsyncLocalStorage } from "async_hooks";
+import * as http from "http";
 import {
   type AuthenticatedIncomingMessage,
   type CredentialProvider,
@@ -45,6 +32,19 @@ import {
   type SecretBroker,
   validateHttpCredentialConfiguration,
 } from "./credentials.js";
+import {
+  createServer as createMcpServerDefinition,
+  fetchCapabilities as fetchCredentialCapabilities,
+  requiresCapabilityDiscovery,
+  sweepAuthManagerCache,
+  sweepCapabilityCache,
+} from "./server.js";
+import { parseIntEnv } from "./utils/config.js";
+import { readCappedBodyBytes } from "./utils/http-body-limit.js";
+import { logger } from "./utils/logger.js";
+import { allowRequest, sweepIdleBuckets } from "./utils/rate-limiter.js";
+import { safeErrorText, webRequestSecrets } from "./utils/secret-sanitizer.js";
+import { VERSION } from "./version.js";
 
 const IDLE_SWEEP_INTERVAL_MS = 60 * 1000;
 const SHUTDOWN_DRAIN_MS = 10 * 1000;
@@ -897,6 +897,14 @@ function responseWithCleanup(response: Response, cleanup: () => Promise<void>): 
 export function createB2McpFetchHandler(options: HttpPipelineOptions = {}): B2McpFetchHandler {
   const sessions = new Map<string, never>();
   const inFlight = createInFlightLimiter();
+  // Fresh header-credential verification is bounded by its own limiter instance
+  // so it never counts against the global in-flight total (B2_MAX_SESSIONS) or
+  // the health inFlight gauge — reusing `inFlight` made one uncached request
+  // consume two global slots (rejecting the very first request under
+  // B2_MAX_SESSIONS=1). It keeps the same limits so the single shared
+  // verification key still saturates at the per-key cap (429), matching the
+  // prior effective concurrency, while staying isolated from real request slots.
+  const credentialVerificationInFlight = createInFlightLimiter();
   let shuttingDown = false;
   let mcpHandlerClosed = false;
   let forcedCloseTimer: NodeJS.Timeout | null = null;
@@ -1151,7 +1159,9 @@ export function createB2McpFetchHandler(options: HttpPipelineOptions = {}): B2Mc
       let verificationPermitHeld = false;
       try {
         if (useSharedCredentialVerificationLimit) {
-          const verificationPermit = inFlight.acquire(CREDENTIAL_VERIFICATION_LIMIT_KEY);
+          const verificationPermit = credentialVerificationInFlight.acquire(
+            CREDENTIAL_VERIFICATION_LIMIT_KEY,
+          );
           if (!verificationPermit.ok) {
             return responseWithCleanup(
               jsonResponse(
@@ -1166,7 +1176,7 @@ export function createB2McpFetchHandler(options: HttpPipelineOptions = {}): B2Mc
 
           const verificationRateKey = deriveRateKey(CREDENTIAL_VERIFICATION_LIMIT_KEY);
           if (!allowRequest(verificationRateKey)) {
-            inFlight.release(CREDENTIAL_VERIFICATION_LIMIT_KEY);
+            credentialVerificationInFlight.release(CREDENTIAL_VERIFICATION_LIMIT_KEY);
             verificationPermitHeld = false;
             return responseWithCleanup(
               jsonResponse(429, { error: "Rate limit exceeded" }, { "Retry-After": "1" }),
@@ -1193,7 +1203,8 @@ export function createB2McpFetchHandler(options: HttpPipelineOptions = {}): B2Mc
           finalize(limitKey, prepared),
         );
       } finally {
-        if (verificationPermitHeld) inFlight.release(CREDENTIAL_VERIFICATION_LIMIT_KEY);
+        if (verificationPermitHeld)
+          credentialVerificationInFlight.release(CREDENTIAL_VERIFICATION_LIMIT_KEY);
       }
 
       prepared = {
