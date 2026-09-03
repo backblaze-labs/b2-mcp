@@ -38,10 +38,12 @@ function linkTarget(rawTarget) {
   return `${REPO_BLOB_URL}${rawTarget.replace(/^\.\//, "")}`;
 }
 
+function supportedLinkPattern() {
+  return /\[([^\]\n]+)\]\(([^) \n]+)(?:\s+"([^"\n]+)")?\)/g;
+}
+
 function withoutSupportedInline(markdown) {
-  return markdown
-    .replace(/`[^`\n]+`/g, "")
-    .replace(/\[[^\]\n]+\]\([^) \n]+(?:\s+"[^"\n]+")?\)/g, "");
+  return markdown.replace(/`[^`\n]+`/g, "").replace(supportedLinkPattern(), "");
 }
 
 function unsupported(lineNumber, message) {
@@ -51,6 +53,14 @@ function unsupported(lineNumber, message) {
 function assertSupportedInline(markdown, lineNumber) {
   if (/!\[[^\]\n]*\]\([^)]+\)/.test(markdown)) {
     unsupported(lineNumber, "images are not supported");
+  }
+
+  for (const match of markdown.matchAll(supportedLinkPattern())) {
+    const label = match[1];
+    const unsupportedLabelChars = ["`", "*", "_", "~", "<", ">", "[", "]"];
+    if (unsupportedLabelChars.some((char) => label.includes(char))) {
+      unsupported(lineNumber, "link labels must be plain text");
+    }
   }
 
   const text = withoutSupportedInline(markdown);

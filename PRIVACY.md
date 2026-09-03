@@ -46,31 +46,39 @@ optional master keys to authenticate to Backblaze B2 on your behalf.
   operator-managed B2 credentials, which stay inside the operator's deployment
   except for outbound calls to Backblaze B2.
 
-Credentials are not written to disk by b2-mcp in HTTP mode. The HTTP transport
-keeps bounded, TTL-limited in-memory credential managers, B2 authorization
-state, and capability state for the running process. Raw credential values can
-therefore remain in process memory after a request until cache eviction, TTL
-expiry, or process exit, but cache keys and logs use non-secret fingerprints
-rather than raw credential values. B2 credentials are sent only to Backblaze B2
-API endpoints needed to authorize or perform the requested operation. They are
-never collected, sold, or transmitted to the publisher.
+Credentials supplied to authenticate b2-mcp HTTP requests are not written to
+disk by the HTTP transport. The HTTP transport keeps bounded, TTL-limited
+in-memory credential managers, B2 authorization state, and capability state for
+the running process. Raw credential values can therefore remain in process
+memory after a request until cache eviction, TTL expiry, or process exit, but
+cache keys and logs use non-secret fingerprints rather than raw credential
+values. B2 credentials are sent only to Backblaze B2 API endpoints needed to
+authorize or perform the requested operation. They are never collected, sold, or
+transmitted to the publisher.
+
+Generated application-key secrets from `b2_create_key` are handled separately by
+the operator-selected durable secret sink. By default the sink is off and the
+tool returns a compatibility stub. If an operator explicitly enables
+`B2_SECRET_SINK=file`, b2-mcp writes newly created application-key secrets to the
+configured operator-controlled JSONL file.
 
 ## Object Data
 
 b2-mcp is designed as a control-plane-first server. For ordinary object upload,
 download, and multipart transfer workflows, the server returns short-lived
 presigned URLs and the object bytes move directly between your client or worker
-and Backblaze B2. Those bytes do not pass through the b2-mcp server or the model
-context.
+and Backblaze B2. In those presigned workflows, object bytes do not pass through
+the b2-mcp server or the model context.
 
 The inline `s3_put_object` tool and response-inline `s3_get_object` reads are
-bounded to small control-plane objects of 1 MiB or less for manifests, sidecars,
-and tiny configuration files. When local filesystem access is enabled,
-`s3_get_object` can stream a requested object through the b2-mcp process to the
-configured `saveToPath`. HTTP transport disables local-file access by default
-and requires an operator-configured filesystem sandbox to enable it. Use
-presigned URL or multipart workflows for ordinary object data and bulk
-transfers.
+exceptions: they pass object bytes through the b2-mcp process and are bounded to
+small control-plane objects of 1 MiB or less for manifests, sidecars, and tiny
+configuration files. When local filesystem access is enabled, `s3_get_object`
+can also stream a requested object through the b2-mcp process to the configured
+`saveToPath` without buffering the full object in memory or returning it to the
+model context. HTTP transport disables local-file access by default and requires
+an operator-configured filesystem sandbox to enable it. Use presigned URL or
+multipart workflows for ordinary object data and bulk transfers.
 
 ## Logs
 
