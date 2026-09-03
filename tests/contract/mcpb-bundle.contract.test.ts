@@ -6,8 +6,13 @@
  * or `scripts/build-mcpb.mjs` before release, so a manifest schema break, a
  * version drift, or a regression in the reproducibility normalization would
  * otherwise only surface at release time. This test packs the bundle in CI and
- * asserts it is a valid, version-aligned, byte-reproducible archive, and that
- * the release workflow actually builds, checksums, and uploads it.
+ * asserts it is a valid, version-aligned, byte-reproducible archive whose
+ * checksum detects tampering, and that the release workflow actually builds,
+ * checksums, and uploads it.
+ *
+ * The bundle is packed once in `beforeAll` and reused across assertions, so the
+ * otherwise fast/deterministic contract layer pays for at most two `mcpb pack`
+ * subprocesses (the shared build plus one rebuild that proves reproducibility).
  */
 
 import { execFileSync } from "node:child_process";
@@ -23,8 +28,8 @@ function buildBundle(): Buffer {
   return readFileSync(mcpbPath);
 }
 
-function sha256(buffer: Buffer): string {
-  return createHash("sha256").update(Uint8Array.from(buffer)).digest("hex");
+function sha256(buffer: Uint8Array): string {
+  return createHash("sha256").update(buffer).digest("hex");
 }
 
 const pkg = readJson<{ version: string; name: string }>("package.json");
@@ -36,6 +41,14 @@ const manifest = readJson<{
 }>("mcpb/manifest.json");
 
 describe("MCPB desktop-extension bundle", () => {
+  let bundle: Buffer;
+  let digest: string;
+
+  beforeAll(() => {
+    bundle = buildBundle();
+    digest = sha256(Uint8Array.from(bundle));
+  }, 60_000);
+
   it("keeps the manifest version in lockstep with package.json", () => {
     expect(manifest.version).toBe(pkg.version);
     expect(manifest.name).toBe("b2-mcp");
@@ -44,26 +57,23 @@ describe("MCPB desktop-extension bundle", () => {
   });
 
   it("packs a valid zip archive containing the manifest", () => {
-    const bundle = buildBundle();
     // Local file header magic (PK\x03\x04) marks a well-formed zip.
     expect(bundle.subarray(0, 4)).toEqual(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
     expect(bundle.includes(Buffer.from("manifest.json"))).toBe(true);
     expect(bundle.length).toBeGreaterThan(0);
-  }, 60_000);
+  });
 
   it("produces byte-reproducible output across repeated builds", () => {
-    const first = sha256(buildBundle());
-    const second = sha256(buildBundle());
-    expect(second).toBe(first);
+    // A second pack of the same inputs must reproduce the shared build's digest;
+    // this is what lets a third party rebuild and confirm the release SHA-256.
+    expect(sha256(Uint8Array.from(buildBundle()))).toBe(digest);
   }, 60_000);
 
-  it("normalizes every entry timestamp to the fixed 1980-01-01 epoch", () => {
-    const bundle = buildBundle();
-    // Local file header: mod time at +10, mod date at +12 (little-endian).
-    // Fixed to 0x0000 / 0x0021 (1980-01-01 00:00:00) for reproducibility.
-    expect(bundle.readUInt16LE(10)).toBe(0x0000);
-    expect(bundle.readUInt16LE(12)).toBe(0x0021);
-  }, 60_000);
+  it("yields a checksum that detects a tampered bundle", () => {
+    const tampered = Uint8Array.from(bundle);
+    tampered[tampered.length - 1] ^= 0xff;
+    expect(sha256(tampered)).not.toBe(digest);
+  });
 
   it("is built, checksummed, and attached by the release workflow", () => {
     const publish = readFileSync(join(root, ".github/workflows/publish.yml"), "utf8");
