@@ -175,6 +175,20 @@ describe("documentation example validator policy", () => {
     expect(result.stderr).toContain("must install a pinned");
   });
 
+  it("rejects a valid global install chained before one with no operand", () => {
+    const command = "npm install -g @backblaze-labs/b2-mcp@0.2.0 && npm install -g";
+    const readme = read("README.md").replace(
+      "npm install -g @backblaze-labs/b2-mcp@0.2.0",
+      command,
+    );
+    const expectedLine = lineOf(readme, command);
+    const result = runDocExamplesWithOverrides({ "README.md": readme });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(`README.md:${expectedLine}`);
+    expect(result.stderr).toContain("must install a pinned");
+  });
+
   it("rejects unscoped global npm install package operands", () => {
     const readme = read("README.md").replace(
       "npm install -g @backblaze-labs/b2-mcp@0.2.0",

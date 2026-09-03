@@ -757,32 +757,36 @@ function validateMutablePackageLaunchers(file, text, startLine) {
   for (const { line, text: logicalLine } of foldShellContinuations(text)) {
     const lineNumber = startLine + line - 1;
     if (isGlobalNpmInstallLine(logicalLine)) {
-      const globalSpecs = globalNpmInstallPackageSpecs(logicalLine);
-      // Fail closed when no package operand parses (bare `npm install -g`, or a
-      // URL/file operand `parsePackageSpec` rejects). Without this the loop is a
-      // no-op and the off-policy install passes unchecked.
-      if (globalSpecs.length === 0) {
-        addFinding(
-          file,
-          lineNumber,
-          `global npm install examples must install a pinned ${pkg.name} package spec`,
-        );
-      }
-      for (const spec of globalSpecs) {
-        if (spec.name !== pkg.name) {
+      // Validate each chained global-install segment independently. Checking the
+      // aggregate let a valid first segment mask a malformed later one (a bare
+      // `npm install -g`, or a URL/file operand `parsePackageSpec` rejects),
+      // which fails open. Each segment must resolve at least one pinned package
+      // spec of its own.
+      for (const segment of globalNpmInstallSegments(logicalLine)) {
+        if (segment.specs.length === 0) {
           addFinding(
             file,
             lineNumber,
-            `global npm install examples must install ${pkg.name}, got ${spec.name}`,
+            `global npm install examples must install a pinned ${pkg.name} package spec`,
           );
           continue;
         }
-        if (!isExactPackageVersion(spec.version)) {
-          addFinding(
-            file,
-            lineNumber,
-            "global npm install examples in release docs must pin an exact version",
-          );
+        for (const spec of segment.specs) {
+          if (spec.name !== pkg.name) {
+            addFinding(
+              file,
+              lineNumber,
+              `global npm install examples must install ${pkg.name}, got ${spec.name}`,
+            );
+            continue;
+          }
+          if (!isExactPackageVersion(spec.version)) {
+            addFinding(
+              file,
+              lineNumber,
+              "global npm install examples in release docs must pin an exact version",
+            );
+          }
         }
       }
     }
@@ -866,28 +870,30 @@ function packageSpecsInText(text) {
     .filter(Boolean);
 }
 
-function globalNpmInstallPackageSpecs(line) {
+function globalNpmInstallSegments(line) {
   // Validate every chained global install, not just the first. Splitting on the
   // first operator (or matching only the first `npm install`) let a second
   // `npm install -g <attacker>` after `&&`/`;`/`|` slip through unchecked, and
   // let a non-global first install mask a later global one. Strip a trailing
-  // shell comment, split into command segments, and validate each segment that
-  // is itself a global `npm install`.
+  // shell comment, split into command segments, and return one entry per segment
+  // that is itself a global `npm install` so each can be validated on its own.
   const withoutComment = line.replace(/(?:^|\s)#.*$/, "");
-  const specs = [];
+  const segments = [];
   for (const segment of withoutComment.split(/\s*(?:&&|\|\||[;|])\s*/)) {
     const match = segment.match(/\bnpm\s+(?:install|i)\b(?<args>[^`\n]*)/);
     const args = match?.groups?.args;
     if (!args) continue;
     if (!/(?:^|\s)(?:-g|--global)(?:\s|$)/.test(args)) continue;
+    const specs = [];
     for (const arg of args.split(/\s+/)) {
       const cleaned = arg.replace(/^[`'"]+|[`'",\]]+$/g, "");
       if (!cleaned || cleaned.startsWith("-")) continue;
       const spec = parsePackageSpec(cleaned);
       if (spec) specs.push(spec);
     }
+    segments.push({ specs });
   }
-  return specs;
+  return segments;
 }
 
 function isExactPackageVersion(version) {
