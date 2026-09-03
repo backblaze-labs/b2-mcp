@@ -118,7 +118,11 @@ export function assertSupportedMarkdown(markdown) {
     if (/^\s+(?:[-*+]|\d+[.)])\s+/.test(line)) {
       unsupported(lineNumber, "nested lists are not supported");
     }
-    if (/^(?:-{3,}|={3,})$/.test(trimmed)) {
+    // Reject every CommonMark thematic break (3+ of -, *, or _, optionally
+    // space-separated: `---`, `- - -`, `***`, `___`, `_ _ _`) plus setext
+    // underlines (`===`). Matching only the compact `---` let a spaced `- - -`
+    // fall through to the bullet rule and render as `<ul><li>- -</li></ul>`.
+    if (/^([-*_])(?:[ \t]*\1){2,}$/.test(trimmed) || /^={3,}$/.test(trimmed)) {
       unsupported(lineNumber, "horizontal rules and alternate headings are not supported");
     }
 

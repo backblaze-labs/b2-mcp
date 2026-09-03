@@ -65,6 +65,16 @@ stub unless the operator explicitly enables a sink mode. If an operator enables
 `B2_SECRET_SINK=file` for HTTP or serverless, b2-mcp writes newly created
 application-key secrets to the configured operator-controlled JSONL file.
 
+An operator may instead set `B2_SECRET_SINK=inline`, which is the least private
+option: it returns the newly generated secret directly in the tool's MCP
+response, so the secret enters the model's context and may be retained by your
+MCP client. Because of that exposure it is never a default and is refused on
+HTTP or serverless deployments unless the operator also sets
+`B2_ALLOW_INLINE_SECRETS=true`. The same `file`, `off`, and `inline` sink
+behavior governs every credential-producing tool, including the Partner API
+tools `b2_create_group_member` and `b2_reserve_trial_create_account`, not just
+`b2_create_key`.
+
 ## Object Data
 
 b2-mcp is designed as a control-plane-first server. For ordinary object upload,

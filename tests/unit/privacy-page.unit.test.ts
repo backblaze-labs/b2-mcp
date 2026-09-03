@@ -44,6 +44,7 @@ describe("privacy page generator", () => {
       </ul>
       <p>Credentials supplied to authenticate b2-mcp HTTP requests are not written to disk by the HTTP transport. The HTTP transport keeps bounded, TTL-limited in-memory credential managers, B2 authorization state, and capability state for the running process. Raw credential values can therefore remain in process memory after a request until cache eviction, TTL expiry, or process exit, but cache keys and logs use non-secret fingerprints rather than raw credential values. B2 credentials are sent only to Backblaze B2 API endpoints needed to authorize or perform the requested operation. They are never collected, sold, or transmitted to the publisher.</p>
       <p>Generated application-key secrets from <code>b2_create_key</code> are handled separately by the durable secret sink. In local stdio mode on supported POSIX systems, the default sink is <code>file</code>, which writes newly created application-key secrets to <code>~/.b2-mcp/secrets.jsonl</code> unless configured differently. In HTTP and serverless deployments, the default sink is <code>off</code> and the tool returns a compatibility stub unless the operator explicitly enables a sink mode. If an operator enables <code>B2_SECRET_SINK=file</code> for HTTP or serverless, b2-mcp writes newly created application-key secrets to the configured operator-controlled JSONL file.</p>
+      <p>An operator may instead set <code>B2_SECRET_SINK=inline</code>, which is the least private option: it returns the newly generated secret directly in the tool's MCP response, so the secret enters the model's context and may be retained by your MCP client. Because of that exposure it is never a default and is refused on HTTP or serverless deployments unless the operator also sets <code>B2_ALLOW_INLINE_SECRETS=true</code>. The same <code>file</code>, <code>off</code>, and <code>inline</code> sink behavior governs every credential-producing tool, including the Partner API tools <code>b2_create_group_member</code> and <code>b2_reserve_trial_create_account</code>, not just <code>b2_create_key</code>.</p>
       "
     `);
     expect(list).not.toContain("<p>");
@@ -74,6 +75,11 @@ describe("privacy page generator", () => {
     ["angle-delimited link target", "[Policy](<https://example.com/privacy>)"],
     ["indented continuation fence", "- item\n    ```text\n    secret\n    ```"],
     ["indented continuation quote", "- item\n    > quote"],
+    ["compact thematic break", "---"],
+    ["spaced thematic break", "- - -"],
+    ["asterisk thematic break", "* * *"],
+    ["underscore thematic break", "___"],
+    ["setext heading underline", "==="],
   ])("rejects unsupported Markdown: %s", async (_name, markdown) => {
     const { renderMarkdown } = await privacyPageModule();
 
@@ -131,7 +137,7 @@ describe("privacy page generator", () => {
     expect(packageJson.scripts["docs:watch"]).toContain("--cleanOutputDir false");
     expect(mcpb.privacy_policies).toEqual([HOSTED_PRIVACY_URL]);
     expect(read("README.md")).toContain(HOSTED_PRIVACY_URL);
-    expect(read("docs/DISCOVERABILITY.md")).toContain(HOSTED_PRIVACY_URL);
+    expect(read("docs/references/discoverability.md")).toContain(HOSTED_PRIVACY_URL);
     expect(pageHtml(read("PRIVACY.md"))).toContain(HOSTED_PRIVACY_URL);
   });
 });
