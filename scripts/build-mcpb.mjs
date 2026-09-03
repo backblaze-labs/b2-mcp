@@ -9,12 +9,14 @@
  * artifact a maintainer uploads through Smithery's Local (MCPB Bundle) publish
  * tab. See docs/references/discoverability.md.
  *
- * The packer stamps each zip entry with the current wall-clock time, which would
- * make the `.mcpb` bytes differ on every build and defeat a meaningful release
- * checksum. After packing we normalize every entry timestamp to a fixed epoch so
- * the artifact is byte-for-byte reproducible from identical inputs.
+ * The packer stamps each zip entry with the current wall-clock time and the
+ * build host's system/permission metadata, which would make the `.mcpb` bytes
+ * differ across builds and OSes and defeat a meaningful release checksum. After
+ * packing we normalize those fields (see `normalizeZipMetadata`) so the artifact
+ * is byte-for-byte reproducible from identical inputs on any supported build OS.
  */
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
@@ -26,6 +28,17 @@ const outFile = path.join(outDir, "b2-mcp.mcpb");
 // 1980-01-01 00:00:00 (the earliest value the DOS timestamp format can encode).
 const FIXED_DOS_TIME = 0x0000;
 const FIXED_DOS_DATE = 0x0021;
+
+// Fixed host/permission metadata so the artifact is byte-identical regardless of
+// the build OS. The mcpb packer records the host system in `version made by`
+// (Unix `0x03..` on macOS/Linux vs FAT `0x00..` on Windows) and the file mode in
+// the central-directory `external attributes` (Unix mode in the high bytes vs
+// DOS attribute bits on Windows). Left untouched, a Windows rebuild of the same
+// manifest would not match the Linux release checksum. We pin both to the values
+// the Linux CI packer already emits — Unix host, zip spec 2.0, regular file 0644
+// — so every platform produces the exact release bytes.
+const FIXED_VERSION_MADE_BY = 0x0314;
+const FIXED_EXTERNAL_ATTRS = 0x01a40000;
 
 // Named byte offsets into the ZIP records we touch, per the PKWARE APPNOTE
 // (.ZIP File Format Specification). Naming each field keeps the offset→field
@@ -43,32 +56,41 @@ const ZIP = {
   EOCD_COMMENT_LENGTH: 20, // archive comment length (2 bytes)
   // Central-directory file header.
   CENTRAL_HEADER_SIZE: 46, // fixed-size prefix before name/extra/comment
+  CENTRAL_VERSION_MADE_BY: 4, // host system + zip spec version (2 bytes)
   CENTRAL_MODTIME: 12, // last-mod file time (2 bytes)
   CENTRAL_MODDATE: 14, // last-mod file date (2 bytes)
   CENTRAL_NAME_LENGTH: 28, // file-name length (2 bytes)
   CENTRAL_EXTRA_LENGTH: 30, // extra-field length (2 bytes)
   CENTRAL_COMMENT_LENGTH: 32, // file-comment length (2 bytes)
+  CENTRAL_EXTERNAL_ATTRS: 38, // external file attributes / Unix mode (4 bytes)
   CENTRAL_LOCAL_OFFSET: 42, // offset of matching local header (4 bytes)
   // Local file header.
   LOCAL_MODTIME: 10, // last-mod file time (2 bytes)
   LOCAL_MODDATE: 12, // last-mod file date (2 bytes)
+  LOCAL_NAME_LENGTH: 26, // file-name length (2 bytes)
+  LOCAL_EXTRA_LENGTH: 28, // extra-field length (2 bytes)
 };
 
 /**
- * Rewrite every local-file-header and central-directory-header timestamp in a
- * zip buffer to a fixed value, so packing identical inputs yields identical
- * bytes. Parses the archive from its End Of Central Directory record rather than
- * scanning for signatures, so byte sequences inside compressed data are never
- * mistaken for headers.
+ * Rewrite every host- and time-dependent field in a zip buffer to a fixed value,
+ * so packing identical inputs yields identical bytes on any build OS. Normalizes
+ * each entry's DOS mod time/date, the central-directory `version made by` (which
+ * encodes the packing host) and `external attributes` (which encode the Unix
+ * mode on macOS/Linux vs DOS attribute bits on Windows). Parses the archive from
+ * its End Of Central Directory record rather than scanning for signatures, so
+ * byte sequences inside compressed data are never mistaken for headers.
  *
- * The mcpb packer emits a plain, single-disk, comment-less zip well under the
- * 4 GiB ZIP64 threshold, so this normalizer assumes that shape and fails loud if
- * an input ever violates it — a non-zero archive comment (which could contain a
- * spurious EOCD signature and defeat the backward scan) or a ZIP64 sentinel
- * central-directory offset (which would make the offset field unreadable as a
- * plain 32-bit value). It never silently corrupts bytes.
+ * The mcpb packer emits a plain, single-disk, comment-less, extra-field-less zip
+ * well under the 4 GiB ZIP64 threshold, so this normalizer assumes that shape
+ * and fails loud if an input ever violates it — a non-zero archive comment
+ * (which could contain a spurious EOCD signature and defeat the backward scan),
+ * a ZIP64 sentinel central-directory offset (which would make the offset field
+ * unreadable as a plain 32-bit value), or any extra/comment field (which could
+ * carry host-dependent uid/gid or extended-timestamp bytes this normalizer does
+ * not touch, silently breaking cross-platform reproducibility). It never
+ * silently corrupts bytes and never leaves an unnormalized field behind.
  */
-function normalizeZipTimestamps(buffer) {
+function normalizeZipMetadata(buffer) {
   let eocd = -1;
   for (let offset = buffer.length - ZIP.EOCD_MIN_SIZE; offset >= 0; offset -= 1) {
     if (buffer.readUInt32LE(offset) === ZIP.EOCD_SIGNATURE) {
@@ -88,14 +110,16 @@ function normalizeZipTimestamps(buffer) {
   const entryCount = buffer.readUInt16LE(eocd + ZIP.EOCD_ENTRY_COUNT);
   let central = buffer.readUInt32LE(eocd + ZIP.EOCD_CENTRAL_OFFSET);
   if (central === ZIP.ZIP64_SENTINEL) {
-    throw new Error("build-mcpb: ZIP64 archives are not supported by the timestamp normalizer");
+    throw new Error("build-mcpb: ZIP64 archives are not supported by the metadata normalizer");
   }
   for (let index = 0; index < entryCount; index += 1) {
     if (buffer.readUInt32LE(central) !== ZIP.CENTRAL_SIGNATURE) {
       throw new Error(`build-mcpb: malformed central directory header at offset ${central}`);
     }
+    buffer.writeUInt16LE(FIXED_VERSION_MADE_BY, central + ZIP.CENTRAL_VERSION_MADE_BY);
     buffer.writeUInt16LE(FIXED_DOS_TIME, central + ZIP.CENTRAL_MODTIME);
     buffer.writeUInt16LE(FIXED_DOS_DATE, central + ZIP.CENTRAL_MODDATE);
+    buffer.writeUInt32LE(FIXED_EXTERNAL_ATTRS, central + ZIP.CENTRAL_EXTERNAL_ATTRS);
 
     const localOffset = buffer.readUInt32LE(central + ZIP.CENTRAL_LOCAL_OFFSET);
     if (buffer.readUInt32LE(localOffset) !== ZIP.LOCAL_SIGNATURE) {
@@ -103,10 +127,22 @@ function normalizeZipTimestamps(buffer) {
     }
     buffer.writeUInt16LE(FIXED_DOS_TIME, localOffset + ZIP.LOCAL_MODTIME);
     buffer.writeUInt16LE(FIXED_DOS_DATE, localOffset + ZIP.LOCAL_MODDATE);
+    if (buffer.readUInt16LE(localOffset + ZIP.LOCAL_EXTRA_LENGTH) !== 0) {
+      throw new Error(
+        "build-mcpb: refusing to normalize a zip whose local header carries extra fields " +
+          "(possible host-dependent uid/gid or timestamp bytes)",
+      );
+    }
 
     const fileNameLength = buffer.readUInt16LE(central + ZIP.CENTRAL_NAME_LENGTH);
     const extraLength = buffer.readUInt16LE(central + ZIP.CENTRAL_EXTRA_LENGTH);
     const commentLength = buffer.readUInt16LE(central + ZIP.CENTRAL_COMMENT_LENGTH);
+    if (extraLength !== 0 || commentLength !== 0) {
+      throw new Error(
+        "build-mcpb: refusing to normalize a zip whose central header carries extra/comment " +
+          "fields (possible host-dependent uid/gid or timestamp bytes)",
+      );
+    }
     central += ZIP.CENTRAL_HEADER_SIZE + fileNameLength + extraLength + commentLength;
   }
 
@@ -134,12 +170,29 @@ if (manifestVersion !== packageVersion) {
 // Invoke the lockfile-resolved mcpb binary (pinned as an exact dev dependency)
 // so the packer's full dependency graph is frozen with the rest of the repo,
 // rather than re-resolving transitive deps via `npx -y` on each release.
-execFileSync("pnpm", ["exec", "mcpb", "pack", "mcpb", outFile], {
-  cwd: root,
-  stdio: "inherit",
-});
+//
+// The packer prints its own SHA-1 of the bytes it writes, but we mutate those
+// bytes below to normalize metadata, so that digest never matches the final
+// artifact. Capture (rather than inherit) the packer's chatty output so its
+// misleading digest cannot be mistaken for the release checksum, and surface it
+// only if the pack fails.
+try {
+  execFileSync("pnpm", ["exec", "mcpb", "pack", "mcpb", outFile], {
+    cwd: root,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+} catch (error) {
+  if (error.stdout) process.stderr.write(error.stdout);
+  if (error.stderr) process.stderr.write(error.stderr);
+  throw error;
+}
 
-// Normalize entry timestamps in place so the release artifact is reproducible.
-writeFileSync(outFile, normalizeZipTimestamps(readFileSync(outFile)));
+// Normalize host/time metadata in place so the release artifact is reproducible,
+// then emit the authoritative post-normalization SHA-256 that the release
+// `SHA256SUMS` records.
+const normalized = normalizeZipMetadata(readFileSync(outFile));
+writeFileSync(outFile, normalized);
+const sha256 = createHash("sha256").update(normalized).digest("hex");
 
 console.log(`build-mcpb: packed ${outFile} (b2-mcp@${packageVersion})`);
+console.log(`build-mcpb: sha256 ${sha256}  ${path.basename(outFile)}`);
