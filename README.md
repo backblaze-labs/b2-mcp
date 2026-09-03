@@ -259,11 +259,15 @@ shown in [Quick start](#quick-start).
 
 For normal storage work, set `B2_APPLICATION_KEY_ID` and `B2_APPLICATION_KEY` to
 a non-master B2 application key. That one key covers native B2, S3-compatible,
-and key-management tools. If startup fails with `capability_auth_failed`, check
-that the key ID/secret pair is correct, active, not copied with extra
-whitespace, and grants enough capability for startup discovery. Operation-level
-authorization failures are retried once after reauthorization; if they continue,
-check the B2 error payload and key scope. Missing-capability messages mean the
+and key-management tools. On the stdio transport, invalid credentials do not
+stop the server from connecting: startup capability discovery catches
+`capability_auth_failed` and starts a connected discovery-mode surface, so the
+client still attaches, and later tool calls return `missing_credentials`. On the
+HTTP transport that same failure fails startup closed. Either way, check that the
+key ID/secret pair is correct, active, not copied with extra whitespace, and
+grants enough capability for startup discovery. Operation-level authorization
+failures are retried once after reauthorization; if they continue, check the B2
+error payload and key scope. Missing-capability messages mean the
 key does not grant the operation you asked for, and capability-aware
 registration may hide tools that key cannot use. Partner/Groups tools are the
 exception: they require `B2_MASTER_KEY_ID` / `B2_MASTER_KEY` on a
