@@ -35,7 +35,19 @@ A [Model Context Protocol](https://modelcontextprotocol.io) server for [Backblaz
 
 Destructive actions are gated, durable B2 secrets stay out of the model's context in the default/file/off modes, and registration is capability-aware so a key only ever sees tools it can use. The server also exposes read-only MCP resources: `b2://server-config` (non-secret, registered even during credential-less discovery), plus capability-gated `b2://capabilities` and `b2://bucket/{bucketName}`.
 
-**Contents:** [Quick start](#quick-start) · [B2 Skills pack](#b2-skills-pack) · [Configuration](#configuration) · [Tools](#tools) · [Package API](#package-api-surface) · [CLI](#cli-reference) · [Resources](#resources) · [Security & self-hosting](#security--self-hosting) · [Privacy](#privacy) · [Development](#development) · [Documentation](#documentation)
+**Contents**
+
+- [Quick start](#quick-start)
+- [B2 Skills pack](#b2-skills-pack)
+- [Configuration](#configuration)
+- [Tools](#tools)
+- [Package API Surface](#package-api-surface)
+- [CLI Reference](#cli-reference)
+- [Resources](#resources)
+- [Security & self-hosting](#security--self-hosting)
+- [Privacy](#privacy)
+- [Development](#development)
+- [Documentation](#documentation)
 
 ---
 
