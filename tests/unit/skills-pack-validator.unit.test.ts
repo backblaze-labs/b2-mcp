@@ -17,8 +17,8 @@ function copyValidatorFixture(): string {
   const fixtureRoot = mkdtempSync(join(tmpdir(), "b2-mcp-skills-pack-"));
   mkdirSync(join(fixtureRoot, "docs", "generated"), { recursive: true });
   const packManifest = JSON.parse(readFileSync(join(root, "skills", "pack.json"), "utf8"));
-  const packagedFiles: string[] = packManifest.packageFiles;
-  for (const relativePath of packagedFiles) {
+  const packageFiles: string[] = packManifest.packageFiles;
+  for (const relativePath of packageFiles) {
     const destination = join(fixtureRoot, relativePath);
     mkdirSync(dirname(destination), { recursive: true });
     cpSync(join(root, relativePath), destination);
