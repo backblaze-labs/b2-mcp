@@ -3,8 +3,8 @@
 This file is the production contract for every hosted deployment guide. A
 provider guide may add stricter controls, but it must not weaken these rules.
 
-Last verified: 2026-08-23. Repository baseline commit: `89e911d`. Package
-version: `0.1.1`. MCP revision: 2026-07-28. Documentation owner: Gonza.
+Last verified: 2026-09-03. Repository baseline commit: `01cf471`. Package
+version: `0.2.0`. MCP revision: 2026-07-28. Documentation owner: Gonza.
 
 ## Credential Contract
 

@@ -613,7 +613,7 @@ Running it safely:
 - **MCP SDK v2 packages are pinned.** HTTP and stdio use the official `@modelcontextprotocol/server` v2 package from `github.com/modelcontextprotocol/typescript-sdk`; opt-in TOON output uses a reviewed repo-owned encoder for spec `4.1`, with `@toon-format/toon@4.1.1` retained only as a dev/test decoder oracle.
 - **Never commit credentials** — use env vars / a secrets manager. `.env*` is gitignored.
 
-Full hosted runbook (nginx, Let's Encrypt, hardened systemd, fail2ban, monitoring, and a security baseline checklist): [`docs/DEPLOY.md`](docs/DEPLOY.md).
+Full hosted runbook (nginx, Let's Encrypt, hardened systemd, fail2ban, monitoring, and a security baseline checklist): [`deploy/customer-hosted/README.md`](deploy/customer-hosted/README.md) (indexed from the [`docs/DEPLOY.md`](docs/DEPLOY.md) matrix).
 
 Authentication, credential custody, OAuth metadata, and B2 credential-mode
 details are documented in [`docs/AUTHENTICATION.md`](docs/AUTHENTICATION.md).

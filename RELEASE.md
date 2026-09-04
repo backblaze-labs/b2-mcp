@@ -179,6 +179,14 @@ exists. For the first public package only:
    npx launcher) — required, or the `verify-mcp-registry-manifest` contract test,
    the manifest version contracts, and `Publish Package` fail on a version
    mismatch. The `version` lifecycle command stages all of these together.
+
+   - [ ] **Refresh the deployment verification baselines (manual — not scripted).**
+     Update the `Package version`, `Last verified`, and `Repository baseline commit`
+     footers in `docs/DEPLOY.md` (the "Verification baseline" line under
+     `## Deployment Matrix`) and in all eleven `docs/references/deployment/*.md`
+     guides to the version, date, and `main` commit being released. These are
+     hand-maintained; if skipped, the deployment matrix and provider guides ship
+     claiming they were verified against a prior release.
 3. Commit the bump and create the signed tag (`git config --get tag.gpgSign`
    should report `true`, or pass `-s` to `git tag`):
 

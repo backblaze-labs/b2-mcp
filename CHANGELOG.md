@@ -32,6 +32,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   capability/tool profile, and a capability-gated `b2://bucket/{bucketName}`
   template with notification webhook secrets redacted. The server now advertises
   the MCP `resources` capability. (#165)
+- Opt-in MCP workflow prompts (`prompts/list` / `prompts/get`), gated behind
+  `B2_ENABLE_MCP_PROMPTS=true`. Prompts return structured message templates only
+  and never execute B2 tools, so the destructive gate and elicitation remain
+  authoritative; availability is derived from the committed tool registry and
+  resolved capability set. (#362)
 
 ### Changed
 - **BREAKING:** Renamed four tools to the standard `<prefix>_<verb>_<noun>`
