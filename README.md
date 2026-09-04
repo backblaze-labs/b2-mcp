@@ -33,7 +33,7 @@ A [Model Context Protocol](https://modelcontextprotocol.io) server for [Backblaz
 - **AWS S3 SDK (`@aws-sdk/client-s3`) (19)** — the S3-compatible data plane: object upload/download/copy/list/delete, multipart, bucket reachability, lifecycle, and presigned URL paths.
 - **Neither SDK (custom MCP code) (4)** — repository-owned analytics over B2 reports and bounded live listings: storage growth, egress leaders, largest files, and abandoned uploads.
 
-Destructive actions are gated, durable B2 secrets stay out of the model's context in the default/file/off modes, and registration is capability-aware so a key only ever sees tools it can use. The server also exposes read-only MCP resources (`b2://server-config`, `b2://capabilities`, `b2://bucket/{bucketName}`) under the same capability policy.
+Destructive actions are gated, durable B2 secrets stay out of the model's context in the default/file/off modes, and registration is capability-aware so a key only ever sees tools it can use. The server also exposes read-only MCP resources: `b2://server-config` (non-secret, registered even during credential-less discovery), plus capability-gated `b2://capabilities` and `b2://bucket/{bucketName}`.
 
 **Contents:** [Quick start](#quick-start) · [B2 Skills pack](#b2-skills-pack) · [Configuration](#configuration) · [Tools](#tools) · [Package API](#package-api-surface) · [CLI](#cli-reference) · [Resources](#resources) · [Security & self-hosting](#security--self-hosting) · [Privacy](#privacy) · [Development](#development) · [Documentation](#documentation)
 
@@ -76,7 +76,7 @@ The canonical package name is `@backblaze-labs/b2-mcp` and the canonical binary 
 
 ### Option B — Claude Desktop extension (MCPB)
 
-Prefer no JSON editing and no npx cache? Download **`b2-mcp.mcpb`** from the [latest release](https://github.com/backblaze-labs/b2-mcp/releases/latest), then in Claude Desktop open **Settings → Extensions** and install it from that file. Claude Desktop prompts for your **Application Key ID** and **Application Key** (Region and Master keys optional) — no config file, no npx re-resolution. The bundle pins the exact published version and runs the same server. A one-click [Claude Connectors Directory](https://github.com/backblaze-labs/b2-mcp/issues/385) listing is in progress.
+Prefer no JSON editing? Download **`b2-mcp.mcpb`** from the [latest release](https://github.com/backblaze-labs/b2-mcp/releases/latest), then in Claude Desktop open **Settings → Extensions** and install it from that file. Claude Desktop prompts for your **Application Key ID** and **Application Key** (Region and Master keys optional) — no config file to hand-edit. The bundle launches a version-pinned `npx -y @backblaze-labs/b2-mcp@<version>` (npm resolves the server on first run) so it always runs the exact published version. A one-click [Claude Connectors Directory](https://github.com/backblaze-labs/b2-mcp/issues/385) listing is in progress.
 
 **Then just ask:**
 
@@ -145,7 +145,7 @@ pnpm run validate:skills
 | `B2_ENABLE_MCP_PROMPTS`                                       | —                     | `false`               | MCP workflow prompts (`prompts/list`, `prompts/get`) are off by default; set `true` once every replica runs prompt-capable code. Gates registration and advertisement together, so flip it atomically across the fleet (or use sticky routing) |
 | `B2_MCP_TRANSPORT`                                            | —                     | `stdio`               | CLI default transport when no `stdio` / `http` argument or `--transport` flag is passed; Docker images set this to `http`  |
 | `B2_HTTP_HOST`                                                 | HTTP only             | Node listen default   | Standalone Node HTTP listen host; set to `127.0.0.1` when binding behind a same-host reverse proxy                         |
-| `B2_LOG_FILE`                                                 | —                     | stderr                | Optional absolute path for redacted structured JSON logs (POSIX only). When set, the file replaces stderr; stdout is never used for logs. See [`docs/AUTHENTICATION.md`](docs/AUTHENTICATION.md) for rotation guidance |
+| `B2_LOG_FILE`                                                 | —                     | stderr                | Optional absolute path for redacted structured JSON logs (POSIX only). When set, the file replaces stderr; stdout is never used for logs. See [`docs/product-specs/clients.md`](docs/product-specs/clients.md) for rename/create + `SIGHUP` rotation guidance |
 | `B2_SECRET_SINK`                                              | —                     | stdio: `file`; HTTP: `off` | Durable-secret output mode: `file`, `inline`, or `off`. File mode supports `b2_create_key` and `b2_create_group_member`; `b2_reserve_trial_create_account` requires explicit inline mode because it has no file-mode recovery path |
 | `B2_SECRET_SINK_FILE`                                         | `file` override       | `~/.b2-mcp/secrets.jsonl` on stdio | Append-only plaintext JSONL credential ledger for file sink mode. HTTP/serverless file mode requires this explicit absolute path and `B2_ALLOW_LOCAL_FILES=true` |
 | `B2_ALLOW_INLINE_SECRETS`                                     | HTTP inline only      | `false`               | Dedicated HTTP/serverless opt-in required before `B2_SECRET_SINK=inline` can return durable secrets in MCP responses       |
@@ -170,13 +170,13 @@ pnpm run validate:skills
 | `B2_CAPABILITY_CACHE_TTL_MS` / `B2_CAPABILITY_CACHE_MAX_ENTRIES` | `300000` / `10000` | Bounded capability-discovery cache TTL and size; cache identity is secret-bound, log labels are non-secret fingerprints    |
 | `B2_S3_SAVE_TO_PATH_IDLE_TIMEOUT_MS`                             | `60000`            | Idle timeout while streaming `s3_get_object` results to `saveToPath`                                                      |
 
-A ready-to-copy [`.env.example`](.env.example) lists the local variables, and [`deploy/customer-hosted/b2-mcp.env.example`](deploy/customer-hosted/b2-mcp.env.example) lists the hosted container baseline. HTTP-only file-access vars (`B2_ALLOW_LOCAL_FILES`, `B2_FILE_ROOT`) and the remaining capability/cache tuning knobs are covered in [`docs/DEPLOY.md`](docs/DEPLOY.md) and [`docs/AUTHENTICATION.md`](docs/AUTHENTICATION.md).
+A ready-to-copy [`.env.example`](.env.example) lists the local variables, and [`deploy/customer-hosted/b2-mcp.env.example`](deploy/customer-hosted/b2-mcp.env.example) lists the hosted container baseline. HTTP-only file-access vars (`B2_ALLOW_LOCAL_FILES`, `B2_FILE_ROOT`) are covered in [`docs/DEPLOY.md`](docs/DEPLOY.md); the capability/cache tuning knobs above are documented inline here.
 
 ---
 
 ## Tools
 
-The server exposes **40 tools** (registration is capability-aware, so a given key sees only the subset it can use). **40 total — 17 Native B2 SDK + 19 AWS S3 SDK + 4 Neither SDK/custom MCP tools.** Prefix counts remain 21 native `b2_*` names + 19 data-plane `s3_*` names. Under stdio's default `confirm` policy, fifteen destructive, durable-secret-producing, or protection-weakening tools require confirmation before execution; HTTP defaults to `block`. Full per-tool availability, the exact destructive-gate list, and durable-secret handling live in the generated [`docs/generated/tool-profiles.md`](docs/generated/tool-profiles.md).
+The server exposes **40 tools** (registration is capability-aware, so a given key sees only the subset it can use). **40 total — 17 Native B2 SDK + 19 AWS S3 SDK + 4 Neither SDK/custom MCP tools.** Prefix counts remain 21 native `b2_*` names + 19 data-plane `s3_*` names. Under stdio's default `confirm` policy, fifteen destructive, durable-secret-producing, or protection-weakening tools require confirmation before execution; HTTP defaults to `block`. Full per-tool availability and durable-secret handling live in the generated [`docs/generated/tool-profiles.md`](docs/generated/tool-profiles.md); the destructive-gate policy is described in [`docs/AUTHENTICATION.md`](docs/AUTHENTICATION.md).
 
 **Native B2 SDK (17):**
 
@@ -269,8 +269,8 @@ Options:
 
 Tool results carry the lossless value in `structuredContent`; the LLM-facing
 text block is selected by `B2_MCP_OUTPUT_FORMAT` (`json` default, or opt-in
-`toon`). See [`docs/product-specs/clients.md`](docs/product-specs/clients.md) for
-the output-format details and examples.
+`toon`). See [`docs/design-docs/tool-contract.md#structured-result-text-contract`](docs/design-docs/tool-contract.md#structured-result-text-contract)
+for the output-format contract.
 
 ---
 
@@ -292,7 +292,7 @@ Built-in safeguards (on by default): destructive-action gating (`B2_DESTRUCTIVE_
 
 - **Local use → stdio.** Credentials stay in your client config / environment; the default `confirm` policy asks before destructive actions.
 - **Internet-facing HTTP → `B2_DESTRUCTIVE_POLICY=block`** is the required wall (the HTTP default). Elicitation is relayed by the client, so it is human-in-the-loop friction, not an independent authorization boundary.
-- **Choose a credential mode.** `headers` (default, compatibility), `server` (one B2 credential held in the process / a secret manager), or `principal` (map verified MCP `authInfo` to customer-held credentials). Credential-free discovery (`initialize`, `tools/list`, `resources/list`, `prompts/list`, `ping`) runs without keys so scanners can enumerate; real `tools/call` still requires credentials.
+- **Choose a credential mode.** `headers` (default, compatibility), `server` (one B2 credential held in the process / a secret manager), or `principal` (map verified MCP `authInfo` to customer-held credentials). Credential-free discovery (`initialize`, `tools/list`, `resources/list`, `prompts/list`, `server/discover`, `ping`) runs without keys so scanners can enumerate; real `tools/call` still requires credentials.
 - **Use a least-privilege key.** A non-master key is correct for normal storage. `b2_create_key` refuses key-management grants, unscoped write/delete grants, and over-long or non-expiring keys unless the matching override is set.
 - **Presigned URLs are not durable secrets.** `s3_get_presigned_url` / `s3_get_presigned_upload_part_url` return short-lived bearer capabilities (`expiresIn` / `expiresAt`) — sensitive until expiry, but not long-lived B2 keys.
 - **Never commit credentials** — use env vars / a secrets manager. `.env*` is gitignored.
@@ -339,7 +339,7 @@ The full script list (diagnostics, slow tests, provider-comparison evals, inspec
 - [API reference](https://backblaze-labs.github.io/b2-mcp/) — generated TypeDoc for the public `src` surface
 - [Privacy policy](https://backblaze-labs.github.io/b2-mcp/privacy/) / [`PRIVACY.md`](PRIVACY.md) — runtime data-handling policy
 - [`docs/product-specs/clients.md`](docs/product-specs/clients.md) — per-client setup + compatibility matrix
-- [`docs/AUTHENTICATION.md`](docs/AUTHENTICATION.md) — OAuth, credential custody, logging, and auth boundary
+- [`docs/AUTHENTICATION.md`](docs/AUTHENTICATION.md) — OAuth, credential custody, and auth boundary
 - [`docs/DEPLOY.md`](docs/DEPLOY.md) — deployment matrix and supported-host links
 - [`docs/references/deployment/security-and-credentials.md`](docs/references/deployment/security-and-credentials.md) — shared hosted security contract
 - [`docs/generated/tool-profiles.md`](docs/generated/tool-profiles.md) — generated per-tool availability reference
