@@ -4,20 +4,39 @@
   "display_name": "Backblaze B2 MCP Server",
   "version": "0.2.0",
   "description": "Official Backblaze B2 MCP server for buckets, files, keys, Object Lock, and S3 storage.",
-  "author": { "name": "Backblaze", "url": "https://github.com/backblaze-labs/b2-mcp" },
-  "repository": { "type": "git", "url": "https://github.com/backblaze-labs/b2-mcp.git" },
+  "icon": "icon.png",
+  "author": {
+    "name": "Backblaze",
+    "url": "https://github.com/backblaze-labs/b2-mcp"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/backblaze-labs/b2-mcp.git"
+  },
   "homepage": "https://github.com/backblaze-labs/b2-mcp#readme",
   "documentation": "https://github.com/backblaze-labs/b2-mcp#readme",
   "support": "https://github.com/backblaze-labs/b2-mcp/issues",
   "license": "MIT",
-  "privacy_policies": ["https://backblaze-labs.github.io/b2-mcp/privacy/"],
-  "keywords": ["backblaze", "b2", "storage", "object-storage", "s3", "mcp"],
+  "privacy_policies": [
+    "https://backblaze-labs.github.io/b2-mcp/privacy/"
+  ],
+  "keywords": [
+    "backblaze",
+    "b2",
+    "storage",
+    "object-storage",
+    "s3",
+    "mcp"
+  ],
   "server": {
     "type": "node",
     "entry_point": "npx",
     "mcp_config": {
       "command": "npx",
-      "args": ["-y", "@backblaze-labs/b2-mcp@0.2.0"],
+      "args": [
+        "-y",
+        "@backblaze-labs/b2-mcp@0.2.0"
+      ],
       "env": {
         "B2_APPLICATION_KEY_ID": "${user_config.b2_application_key_id}",
         "B2_APPLICATION_KEY": "${user_config.b2_application_key}",
