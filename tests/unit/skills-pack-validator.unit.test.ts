@@ -1,15 +1,28 @@
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
-import { join } from "path";
+import { dirname, join } from "path";
 import { spawnSync } from "child_process";
 
 const root = join(__dirname, "../..");
 const validator = join(root, "scripts", "validate-pack.mjs");
 
+// Copy only the files declared in skills/pack.json rather than the entire
+// skills/ tree. A recursive copy picks up whatever ambient junk the working
+// tree happens to hold (macOS `.DS_Store`, editor swap files, etc.), which the
+// validator then flags as an "unexpected" packaged file. That made this suite
+// pass on a fresh CI checkout but fail on developer machines. Copying the exact
+// manifest set reproduces the clean-checkout state deterministically; the
+// individual cases below add their own extra files when they need them.
 function copyValidatorFixture(): string {
   const fixtureRoot = mkdtempSync(join(tmpdir(), "b2-mcp-skills-pack-"));
   mkdirSync(join(fixtureRoot, "docs", "generated"), { recursive: true });
-  cpSync(join(root, "skills"), join(fixtureRoot, "skills"), { recursive: true });
+  const packManifest = JSON.parse(readFileSync(join(root, "skills", "pack.json"), "utf8"));
+  const packagedFiles: string[] = packManifest.packageFiles;
+  for (const relativePath of packagedFiles) {
+    const destination = join(fixtureRoot, relativePath);
+    mkdirSync(dirname(destination), { recursive: true });
+    cpSync(join(root, relativePath), destination);
+  }
   cpSync(
     join(root, "docs", "generated", "tool-profile-contract.json"),
     join(fixtureRoot, "docs", "generated", "tool-profile-contract.json"),

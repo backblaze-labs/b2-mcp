@@ -1,6 +1,15 @@
-import * as http from "http";
+import { createRequire } from "module";
 import { join } from "path";
 import { pathToFileURL } from "url";
+
+// The guard mutates the CJS `http` singleton via `require("node:http")`. Observe
+// that exact object here rather than the ESM `import * as http from "http"`
+// namespace: whether the ESM namespace reflects a CJS property reassignment is
+// environment-dependent (it does not under raw Node, and only happens to under
+// some test-runner module loaders). When it does not reflect, `http.get(...)`
+// runs the real implementation, makes an actual outbound request, and the
+// assertion fails — passing in CI but flaking on developer machines.
+const http = createRequire(__filename)("node:http") as typeof import("http");
 
 interface LocalSmokeModule {
   NETWORK_GUARD_SIGNAL: string;
