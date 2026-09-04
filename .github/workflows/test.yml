@@ -539,7 +539,10 @@ jobs:
     name: supply-chain audit
     needs: runtime-policy
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # 5 audit attempts x 120s + backoff sleeps can reach ~10.5 min on a
+    # persistent transient failure; 20 min leaves headroom for checkout,
+    # install, and the denylist scan so the fail-closed result is not cut off.
+    timeout-minutes: 20
     steps:
       # actions/checkout v7, reviewed 2026-08-25.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
