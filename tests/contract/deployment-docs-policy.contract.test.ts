@@ -125,7 +125,7 @@ describe("deployment documentation policy", () => {
       ]) {
         expect(text, `${fileName} troubleshooting is missing ${term}`).toMatch(term);
       }
-      expect(text).toContain("Last verified: 2026-09-03");
+      expect(text).toContain("Last verified: 2026-09-04");
       expect(text).toContain("MCP revision: 2026-07-28");
     }
   });
