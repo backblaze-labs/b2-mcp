@@ -76,6 +76,8 @@ The canonical package name is `@backblaze-labs/b2-mcp` and the canonical binary 
 
 ### Option B — Claude Desktop extension (MCPB)
 
+> Available once a release publishes the `b2-mcp.mcpb` asset (0.2.1 onward); earlier releases carry no bundle, so use Option A until the asset appears on the [releases page](https://github.com/backblaze-labs/b2-mcp/releases).
+
 Prefer no JSON editing? Download **`b2-mcp.mcpb`** from the [latest release](https://github.com/backblaze-labs/b2-mcp/releases/latest), then in Claude Desktop open **Settings → Extensions** and install it from that file. Claude Desktop prompts for your **Application Key ID** and **Application Key** (Region and Master keys optional) — no config file to hand-edit. The bundle launches a version-pinned `npx -y @backblaze-labs/b2-mcp@<version>` (npm resolves the server on first run) so it always runs the exact published version. A one-click [Claude Connectors Directory](https://github.com/backblaze-labs/b2-mcp/issues/385) listing is in progress.
 
 **Then just ask:**
