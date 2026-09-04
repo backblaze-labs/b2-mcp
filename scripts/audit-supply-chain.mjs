@@ -203,7 +203,7 @@ function runPackageAudit() {
       encoding: "utf8",
       env: auditEnv(),
       stdio: ["ignore", "pipe", "pipe"],
-      timeout: 120_000,
+      timeout: 45_000,
     },
   });
 
