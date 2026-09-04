@@ -54,11 +54,19 @@ function runCommandWithRetries(command, args, options = {}) {
     (({ attempt, attempts: totalAttempts }) =>
       `${command}: retrying ${label} after transient registry failure (${attempt}/${totalAttempts})`);
 
+  // Exponential backoff with jitter, capped, so a brief registry/DNS blip has a
+  // wider window to clear before the attempts are exhausted (a plain linear
+  // 1s/2s backoff was too shallow for real npm-registry timeouts). Still fully
+  // fail-closed: a persistent failure after every attempt is returned to the
+  // caller unchanged.
+  const maxDelayMs = options.maxRetryDelayMs ?? 30_000;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     const result = spawnSync(invocation.command, invocation.args, options.spawnOptions ?? {});
     if (attempt < attempts && shouldRetry(result, attempt)) {
       console.warn(retryMessage({ label, attempt, attempts, result }));
-      sleep(delayMs * attempt);
+      const backoff = Math.min(delayMs * 2 ** (attempt - 1), maxDelayMs);
+      const jitter = Math.floor(Math.random() * Math.min(backoff, 1_000));
+      sleep(backoff + jitter);
       continue;
     }
     return result;

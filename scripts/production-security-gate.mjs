@@ -459,8 +459,8 @@ function evaluateAuditReport(report) {
 function runNpmAudit(target) {
   const args = ["audit", "--json", "--omit=dev", `--audit-level=${auditLevel}`];
   const result = runCommandWithRetries("npm", args, {
-    attempts: 3,
-    retryDelayMs: 1_000,
+    attempts: 5,
+    retryDelayMs: 2_000,
     retryLabel: "npm production audit",
     shouldRetry: (audit) => npmAuditRetryReason(audit) !== null,
     retryMessage: ({ result: audit, attempt, attempts }) =>
