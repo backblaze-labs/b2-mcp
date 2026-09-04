@@ -19,9 +19,9 @@
      name (io.github.backblaze-labs/b2-mcp) and repo path, so they activate automatically
      once the package is published to the MCP Registry and ingested by Glama/LobeHub. -->
 [![MCP Registry](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fregistry.modelcontextprotocol.io%2Fv0%2Fservers%3Fsearch%3Dio.github.backblaze-labs%2Fb2-mcp&query=%24.servers%5B0%5D.server.version&prefix=v&label=MCP%20Registry&color=5b5fc7&logo=modelcontextprotocol&logoColor=white)](https://registry.modelcontextprotocol.io/v0/servers?search=io.github.backblaze-labs/b2-mcp)
-[![LobeHub](https://img.shields.io/badge/LobeHub-b2--mcp-5b5fc7?logo=lobehub&logoColor=white)](https://lobehub.com/mcp/backblaze-labs-b2-mcp)
 [![Glama](https://glama.ai/mcp/servers/@backblaze-labs/b2-mcp/badges/score.svg)](https://glama.ai/mcp/servers/@backblaze-labs/b2-mcp)
 [![Verified by M8ven](https://m8ven.ai/badge/mcp/backblaze-labs-b2-mcp-92j1t6)](https://m8ven.ai/verified?check=https%3A%2F%2Fgithub.com%2Fbackblaze-labs%2Fb2-mcp)
+[![LobeHub](https://img.shields.io/badge/LobeHub-b2--mcp-5b5fc7?logo=lobehub&logoColor=white)](https://lobehub.com/mcp/backblaze-labs-b2-mcp)
 
 A [Model Context Protocol](https://modelcontextprotocol.io) server for [Backblaze B2 Cloud Storage](https://www.backblaze.com/cloud-storage). It lets any MCP-compatible AI client (Claude, and others) operate B2 through a focused, safe set of tools, currently incubating in Backblaze-Labs.
 
