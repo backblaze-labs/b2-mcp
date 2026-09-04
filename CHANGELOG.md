@@ -8,20 +8,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- `smithery.yaml` so Smithery can offer a one-click stdio install of the
-  official server. (#300)
 - `glama.json` repo-root maintainer manifest for the Glama org server claim,
   plus a README Glama score badge. (#300)
 - `lhm.plugin.json` LobeHub marketplace manifest and a README LobeHub badge;
   the release version lifecycle now stamps its version alongside `server.json`.
   (#300)
 - `mcpb/manifest.json` (MCPB 0.3) plus a `pnpm run build:mcpb` pack script for
-  Smithery's Local publish path; the release version-sync now stamps the MCPB
-  manifest alongside `server.json` and `lhm.plugin.json`. (#300)
+  the Claude Desktop extension bundle; the release version-sync now stamps the
+  MCPB manifest alongside `server.json` and `lhm.plugin.json`. (#300)
+- Reproducible `b2-mcp.mcpb` desktop-extension bundle built and attached to every
+  GitHub Release: `publish.yml` runs `build:mcpb`, records the bundle SHA-256 in
+  `SHA256SUMS`, and the release job verifies it; a contract test gates manifest
+  version parity, the pinned npx launcher, `privacy_policies`, and archive
+  reproducibility across OSes. This is the artifact the Claude Connectors
+  Directory submission (#385) consumes. (#387)
 - Flat, visible `## Tools` list of all 40 tools in the README so directory
   auto-extractors (mcp.so, Glama, ...) can populate the tool section. (#300)
 - `docs/references/discoverability.md` runbook documenting the registry/directory listings
-  and per-release steps (Glama, Smithery, LobeHub, mcp.so). (#300)
+  and per-release steps (Glama, LobeHub, mcp.so). (#300)
 - Privacy policy surface: root `PRIVACY.md`, hosted GitHub Pages
   `privacy.html` / `privacy/`, README and discoverability links, and MCPB
   `privacy_policies` metadata for Claude and OpenAI directory submissions.
@@ -39,6 +43,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   resolved capability set. (#362)
 
 ### Changed
+- Deferred Smithery from the discoverability roadmap: removed the README Smithery
+  badge and reframed `docs/references/discoverability.md` so the MCPB bundle now
+  targets the Claude Connectors Directory / GitHub Release. `smithery.yaml` is
+  retained (and kept in sync by the release-scripts contract) for a possible
+  future submission if a hosted Backblaze MCP endpoint ever exists. (#300)
 - **BREAKING:** Renamed four tools to the standard `<prefix>_<verb>_<noun>`
   naming convention for server coherence; the old names are removed with no
   aliases, so existing integrations must switch to the new names. Old → new:

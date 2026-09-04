@@ -4,8 +4,15 @@
   "display_name": "Backblaze B2 MCP Server",
   "version": "0.2.0",
   "description": "Official Backblaze B2 MCP server for buckets, files, keys, Object Lock, and S3 storage.",
-  "author": { "name": "Backblaze", "url": "https://github.com/backblaze-labs/b2-mcp" },
-  "repository": { "type": "git", "url": "https://github.com/backblaze-labs/b2-mcp.git" },
+  "icon": "icon.png",
+  "author": {
+    "name": "Backblaze",
+    "url": "https://github.com/backblaze-labs/b2-mcp"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/backblaze-labs/b2-mcp.git"
+  },
   "homepage": "https://github.com/backblaze-labs/b2-mcp#readme",
   "documentation": "https://github.com/backblaze-labs/b2-mcp#readme",
   "support": "https://github.com/backblaze-labs/b2-mcp/issues",

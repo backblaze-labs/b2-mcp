@@ -45,15 +45,13 @@ const releaseDocs = [
 const validatedFenceManifest = [
   ["README.md", 1, "client-json", "Claude Desktop JSON config"],
   ["README.md", 2, "json", "fallback region env JSON"],
-  ["README.md", 3, "shell", "source install commands"],
-  ["README.md", 4, "shell", "skills validation command"],
-  ["README.md", 5, "shell", "HTTP container command"],
-  ["README.md", 6, "shell", "stdio container command"],
-  ["README.md", 7, "typescript-package-api", "supported package import API"],
-  ["README.md", 8, "cli-help", "checked-in CLI help text"],
-  ["README.md", 9, "shell", "CLI examples"],
-  ["README.md", 10, "json-text", "JSON output example"],
-  ["README.md", 12, "shell", "local verification commands"],
+  ["README.md", 3, "shell", "HTTP container command"],
+  ["README.md", 4, "shell", "stdio container command"],
+  ["README.md", 5, "shell", "skills validation command"],
+  ["README.md", 6, "typescript-package-api", "supported package import API"],
+  ["README.md", 7, "cli-help", "checked-in CLI help text"],
+  ["README.md", 8, "shell", "source checkout bootstrap commands"],
+  ["README.md", 9, "shell", "local verification commands"],
   ["deploy/vercel/README.md", 2, "shell", "Vercel smoke commands"],
   ["deploy/customer-hosted/README.md", 1, "shell", "customer-hosted build commands"],
   ["deploy/customer-hosted/README.md", 2, "shell", "customer-hosted update commands"],
@@ -103,7 +101,6 @@ const validatedFenceManifest = [
 ];
 
 const illustrativeFenceManifest = [
-  ["README.md", 11, "toon output example"],
   ["deploy/vercel/README.md", 1, "architecture diagram"],
   ["deploy/customer-hosted/README.md", 4, "base-image inspection command with placeholder"],
   ["docs/AUTHENTICATION.md", 1, "stdio credential-flow diagram"],
@@ -152,7 +149,7 @@ const requiredServerModeEnv = [
 
 const requiredSafeEnvByFence = new Map(
   [
-    ["README.md", 5],
+    ["README.md", 3],
     ["docs/references/deployment/security-and-credentials.md", 2],
     ["docs/references/deployment/vercel.md", 2],
   ].map(([file, fence]) => [manifestKey(file, fence), requiredServerModeEnv]),

@@ -139,8 +139,26 @@ describe("MCPB desktop-extension bundle", () => {
     // so any corruption of the central directory or payload from the hand-rolled
     // record rewriting fails here rather than shipping a broken bundle.
     const entries = readZipEntries(bundle);
-    expect(entries.map((entry) => entry.name)).toEqual(["manifest.json"]);
-    expect(JSON.parse(entries[0].content.toString("utf8"))).toEqual(readJson("mcpb/manifest.json"));
+    expect([...entries.map((entry) => entry.name)].sort()).toEqual(["icon.png", "manifest.json"]);
+    const manifestEntry = entries.find((entry) => entry.name === "manifest.json");
+    expect(manifestEntry).toBeDefined();
+    expect(JSON.parse(manifestEntry!.content.toString("utf8"))).toEqual(
+      readJson("mcpb/manifest.json"),
+    );
+    // The bundled icon is the declared 512x512 PNG and matches the source. Assert
+    // the PNG signature and the IHDR width/height (a valid PNG of any other size
+    // must fail here, not just a non-PNG), then byte-equality with the source.
+    const iconEntry = entries.find((entry) => entry.name === "icon.png");
+    expect(iconEntry).toBeDefined();
+    expect(iconEntry!.content.subarray(0, 8)).toEqual(
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    );
+    // IHDR is the first chunk: 8-byte signature, 4-byte length, 4-byte "IHDR"
+    // type, then width (BE u32 at offset 16) and height (BE u32 at offset 20).
+    expect(iconEntry!.content.readUInt32BE(12)).toBe(0x49484452); // "IHDR"
+    expect(iconEntry!.content.readUInt32BE(16)).toBe(512); // width
+    expect(iconEntry!.content.readUInt32BE(20)).toBe(512); // height
+    expect(iconEntry!.content).toEqual(readFileSync(join(root, "mcpb", "icon.png")));
   });
 
   it("normalizes every entry's timestamp and host metadata to fixed values", () => {
