@@ -186,9 +186,10 @@ exists. For the first public package only:
      `## Deployment Matrix`) and in all eleven `docs/references/deployment/*.md`
      guides to the version, date, and `main` commit being released. These are
      hand-maintained; if skipped, the deployment matrix and provider guides ship
-     claiming they were verified against a prior release. Update the hardcoded
-     `Last verified:` date in `tests/contract/deployment-docs-policy.contract.test.ts`
-     in lockstep, or that contract test fails on the refreshed footers.
+     claiming they were verified against a prior release. Keep the date consistent
+     across `DEPLOY.md` and all guides — the deployment-docs contract test derives
+     the expected date from `DEPLOY.md` and checks the guides agree, so a mismatch
+     (not a specific value) is what fails.
 3. Commit the bump and create the signed tag (`git config --get tag.gpgSign`
    should report `true`, or pass `-s` to `git tag`):
 
