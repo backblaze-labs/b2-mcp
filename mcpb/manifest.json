@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "b2-mcp",
   "display_name": "Backblaze B2 MCP Server",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Official Backblaze B2 MCP server for buckets, files, keys, Object Lock, and S3 storage.",
   "icon": "icon.png",
   "author": {
@@ -24,7 +24,7 @@
     "entry_point": "npx",
     "mcp_config": {
       "command": "npx",
-      "args": ["-y", "@backblaze-labs/b2-mcp@0.2.0"],
+      "args": ["-y", "@backblaze-labs/b2-mcp@0.2.1"],
       "env": {
         "B2_APPLICATION_KEY_ID": "${user_config.b2_application_key_id}",
         "B2_APPLICATION_KEY": "${user_config.b2_application_key}",

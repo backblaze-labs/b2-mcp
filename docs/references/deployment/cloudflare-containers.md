@@ -127,9 +127,9 @@ Use the shared security contract first:
 
 ## Verification Record
 
-- Last verified: 2026-09-03
-- Repository baseline commit: `01cf471`
-- Package version: `0.2.0`
+- Last verified: 2026-09-04
+- Repository baseline commit: `19d8eed`
+- Package version: `0.2.1`
 - MCP revision: 2026-07-28
 - Runtime: Worker isolate plus Cloudflare Container, `linux/amd64` image
 - Documentation owner: Gonza
