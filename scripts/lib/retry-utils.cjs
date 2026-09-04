@@ -64,9 +64,11 @@ function runCommandWithRetries(command, args, options = {}) {
     const result = spawnSync(invocation.command, invocation.args, options.spawnOptions ?? {});
     if (attempt < attempts && shouldRetry(result, attempt)) {
       console.warn(retryMessage({ label, attempt, attempts, result }));
-      const backoff = Math.min(delayMs * 2 ** (attempt - 1), maxDelayMs);
-      const jitter = Math.floor(Math.random() * Math.min(backoff, 1_000));
-      sleep(backoff + jitter);
+      const backoff = delayMs * 2 ** (attempt - 1);
+      const jitter = Math.floor(Math.random() * 1_000);
+      // Cap the final jittered delay so the total sleep never exceeds
+      // maxRetryDelayMs (jitter must not push it past the caller's ceiling).
+      sleep(Math.min(backoff + jitter, maxDelayMs));
       continue;
     }
     return result;

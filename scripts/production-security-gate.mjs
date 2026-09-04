@@ -470,7 +470,7 @@ function runNpmAudit(target) {
       encoding: "utf8",
       env: npmAuditEnv(),
       stdio: ["ignore", "pipe", "pipe"],
-      timeout: 45_000,
+      timeout: 120_000,
     },
   });
 
