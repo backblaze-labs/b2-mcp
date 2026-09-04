@@ -111,6 +111,16 @@ describe("deployment documentation policy", () => {
     const baselineDate = doc("DEPLOY.md").match(/last verified `(\d{4}-\d{2}-\d{2})`/)?.[1];
     expect(baselineDate, "DEPLOY.md must state a `last verified` baseline date").toBeTruthy();
 
+    // The shared security guide is one of the eleven deployment guides whose
+    // footer must track DEPLOY.md, but it has no "## Verification Record"
+    // section, so it is excluded from the provider loop below. Assert its footer
+    // date separately so a stale shared-security baseline cannot pass unnoticed.
+    const security = doc(`${deploymentGuideDir}/security-and-credentials.md`);
+    expect(security, "security-and-credentials.md footer date must match DEPLOY.md").toContain(
+      `Last verified: ${baselineDate}`,
+    );
+    expect(security).toContain("MCP revision: 2026-07-28");
+
     for (const fileName of providerGuides) {
       const text = doc(`${deploymentGuideDir}/${fileName}`);
       expect(text).toContain("docs/references/deployment/security-and-credentials.md");
