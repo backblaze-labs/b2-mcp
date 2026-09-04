@@ -71,12 +71,11 @@ describe("README tool-surface drift", () => {
   });
 
   it("keeps the flat `## Tools` list in exact sync with the full contract", () => {
-    // The flat list under `## Tools` (before `### Tool details and availability`)
-    // is what registry/directory auto-extractors read. Isolate it so a deleted or
-    // mistyped bullet is caught here even though the name also appears in the
-    // detailed tables below.
+    // The flat list under `## Tools` is what registry/directory auto-extractors
+    // read. Isolate it (up to the next top-level `##` section) so a deleted or
+    // mistyped bullet is caught here.
     const start = readme.indexOf("\n## Tools\n");
-    const end = readme.indexOf("### Tool details and availability");
+    const end = readme.indexOf("\n## ", start + 1);
     expect(start).toBeGreaterThan(-1);
     expect(end).toBeGreaterThan(start);
     const section = readme.slice(start, end);
