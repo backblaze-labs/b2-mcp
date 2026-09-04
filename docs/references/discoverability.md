@@ -187,13 +187,14 @@ launcher version are kept in lockstep with `package.json` by
 `scripts/update-server-json-version.mjs`, and `scripts/build-mcpb.mjs` normalizes
 the archive timestamps, so the advertised bundle is byte-for-byte reproducible.
 
-> **Scope of the `.mcpb` checksum.** The bundle contains only
-> `mcpb/manifest.json` — a launcher that runs `npx -y @backblaze-labs/b2-mcp@<version>`.
-> The reproducible SHA-256 therefore attests to the *launcher manifest*, not
-> to the server code, which npx resolves from npm at runtime by version tag
-> (no integrity/provenance pin). It is not an end-to-end supply-chain
-> guarantee over the executed code; assurance for the npm package itself comes
-> from the npm publish pipeline (`publish.yml`), not from this digest.
+> **Scope of the `.mcpb` checksum.** The bundle contains `mcpb/manifest.json` —
+> a launcher that runs `npx -y @backblaze-labs/b2-mcp@<version>` — plus the
+> bundled `icon.png` used by Claude Desktop. The reproducible SHA-256 therefore
+> attests to the *launcher manifest and icon*, not to the server code, which npx
+> resolves from npm at runtime by version tag (no integrity/provenance pin). It
+> is not an end-to-end supply-chain guarantee over the executed code; assurance
+> for the npm package itself comes from the npm publish pipeline (`publish.yml`),
+> not from this digest.
 
 ## Smithery (deferred)
 

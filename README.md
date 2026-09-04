@@ -78,7 +78,7 @@ The canonical package name is `@backblaze-labs/b2-mcp` and the canonical binary 
 
 > Available once a release publishes the `b2-mcp.mcpb` asset (0.2.1 onward); earlier releases carry no bundle, so use Option A until the asset appears on the [releases page](https://github.com/backblaze-labs/b2-mcp/releases).
 
-Prefer no JSON editing? Download **`b2-mcp.mcpb`** from the [latest release](https://github.com/backblaze-labs/b2-mcp/releases/latest), then in Claude Desktop open **Settings → Extensions** and install it from that file. Claude Desktop prompts for your **Application Key ID** and **Application Key** (Region and Master keys optional) — no config file to hand-edit. The bundle launches a version-pinned `npx -y @backblaze-labs/b2-mcp@<version>` (npm resolves the server on first run) so it always runs the exact published version. A one-click [Claude Connectors Directory](https://github.com/backblaze-labs/b2-mcp/issues/385) listing is in progress.
+Prefer no JSON editing? Download **`b2-mcp.mcpb`** from the [latest release](https://github.com/backblaze-labs/b2-mcp/releases/latest), then in Claude Desktop open **Settings → Extensions → Advanced settings → Extension Developer → Install Extension…** and select the downloaded file. Claude Desktop prompts for your **Application Key ID** and **Application Key** (Region and Master keys optional) — no config file to hand-edit. The bundle launches a version-pinned `npx -y @backblaze-labs/b2-mcp@<version>` (npm resolves the server on first run) so it always runs the exact published version. A one-click [Claude Connectors Directory](https://github.com/backblaze-labs/b2-mcp/issues/385) listing is in progress.
 
 **Then just ask:**
 
@@ -178,7 +178,7 @@ A ready-to-copy [`.env.example`](.env.example) lists the local variables, and [`
 
 ## Tools
 
-The server exposes **40 tools** (registration is capability-aware, so a given key sees only the subset it can use). **40 total — 17 Native B2 SDK + 19 AWS S3 SDK + 4 Neither SDK/custom MCP tools.** Prefix counts remain 21 native `b2_*` names + 19 data-plane `s3_*` names. Under stdio's default `confirm` policy, fifteen destructive, durable-secret-producing, or protection-weakening tools require confirmation before execution; HTTP defaults to `block`. Full per-tool availability and durable-secret handling live in the generated [`docs/generated/tool-profiles.md`](docs/generated/tool-profiles.md); the destructive-gate policy is described in [`docs/AUTHENTICATION.md`](docs/AUTHENTICATION.md).
+The server exposes **40 tools** (registration is capability-aware, so a given key sees only the subset it can use). **40 total — 17 Native B2 SDK + 19 AWS S3 SDK + 4 Neither SDK/custom MCP tools.** Prefix counts remain 21 native `b2_*` names + 19 data-plane `s3_*` names. Under stdio's default `confirm` policy, fifteen destructive, durable-secret-producing, or protection-weakening tools require confirmation before execution; HTTP defaults to `block`. The per-profile, availability-annotated tool lists (per capability set) live in the generated [`docs/generated/tool-profiles.md`](docs/generated/tool-profiles.md); the destructive-gate policy and durable-secret handling (secret sinks, idempotency keys, POSIX vs. Windows behavior) are documented in [`docs/AUTHENTICATION.md`](docs/AUTHENTICATION.md).
 
 **Native B2 SDK (17):**
 
@@ -315,7 +315,14 @@ Read the canonical [`PRIVACY.md`](PRIVACY.md) source or the hosted [privacy poli
 
 ## Development
 
-From a source checkout, enable the pinned package manager with `corepack prepare 'pnpm@11.20.0+sha256.34e198cb1e43237517ecedfd31f9ae26a6c0a3e5366ce58a2d05f4b21fb5f19a' --activate`, then:
+From a fresh source checkout, enable the pinned package manager and install
+dependencies first, then run any of the scripts below:
+
+```bash
+corepack enable pnpm
+corepack prepare 'pnpm@11.20.0+sha256.34e198cb1e43237517ecedfd31f9ae26a6c0a3e5366ce58a2d05f4b21fb5f19a' --activate
+pnpm install --frozen-lockfile
+```
 
 ```bash
 pnpm run build              # clean + compile to dist/
