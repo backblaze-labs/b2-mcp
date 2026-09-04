@@ -54,11 +54,26 @@ function runCommandWithRetries(command, args, options = {}) {
     (({ attempt, attempts: totalAttempts }) =>
       `${command}: retrying ${label} after transient registry failure (${attempt}/${totalAttempts})`);
 
+  // Exponential backoff with jitter, capped, so a brief registry/DNS blip has a
+  // wider window to clear before the attempts are exhausted (a plain linear
+  // 1s/2s backoff was too shallow for real npm-registry timeouts). Still fully
+  // fail-closed: a persistent failure after every attempt is returned to the
+  // caller unchanged.
+  const maxDelayMs = options.maxRetryDelayMs ?? 30_000;
+  // Injectable seams so unit tests can exercise the backoff/jitter math
+  // deterministically; production callers get the real spawn/sleep/random.
+  const spawn = options.spawn ?? spawnSync;
+  const sleepFor = options.sleep ?? sleep;
+  const random = options.random ?? Math.random;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    const result = spawnSync(invocation.command, invocation.args, options.spawnOptions ?? {});
+    const result = spawn(invocation.command, invocation.args, options.spawnOptions ?? {});
     if (attempt < attempts && shouldRetry(result, attempt)) {
       console.warn(retryMessage({ label, attempt, attempts, result }));
-      sleep(delayMs * attempt);
+      const backoff = delayMs * 2 ** (attempt - 1);
+      const jitter = Math.floor(random() * 1_000);
+      // Cap the final jittered delay so the total sleep never exceeds
+      // maxRetryDelayMs (jitter must not push it past the caller's ceiling).
+      sleepFor(Math.min(backoff + jitter, maxDelayMs));
       continue;
     }
     return result;

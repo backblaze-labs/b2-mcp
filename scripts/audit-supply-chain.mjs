@@ -192,9 +192,9 @@ function auditRetryReason(audit) {
 
 function runPackageAudit() {
   const audit = runCommandWithRetries("pnpm", ["audit", "--json"], {
-    attempts: 3,
+    attempts: 5,
     retryLabel: "pnpm audit",
-    retryDelayMs: 1_000,
+    retryDelayMs: 2_000,
     shouldRetry: (result) => auditRetryReason(result) !== null,
     retryMessage: ({ result, attempt, attempts }) =>
       `audit-policy: ${auditRetryReason(result)} on attempt ${attempt}/${attempts}; retrying`,
