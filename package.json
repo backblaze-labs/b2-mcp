@@ -119,7 +119,7 @@
     "jose": "6.2.10",
     "opossum": "10.0.0",
     "pino": "10.3.1",
-    "zod": "4.4.3"
+    "zod": "4.5.4"
   },
   "devDependencies": {
     "@anthropic-ai/mcpb": "2.1.2",
