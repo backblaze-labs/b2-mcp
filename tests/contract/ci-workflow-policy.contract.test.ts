@@ -371,9 +371,13 @@ describe("CI workflow policy", () => {
     expect(workflowSecurity).toContain("upload: never");
     expect(workflowSecurity).toContain("persist-credentials: false");
     expect(workflowSecurity).not.toContain("zizmor-action");
-    expect(workflowSecurity).toContain(
-      "ghcr.io/zizmorcore/zizmor:1.29.0@sha256:863026d54f91271b10b60b67ad8054cb37120167e162482597db102b3026a284",
-    );
+    // The zizmor image digest is defined exactly once, at workflow level, so
+    // the gate and advisory jobs can never drift onto different versions.
+    const zizmorPin =
+      "ghcr.io/zizmorcore/zizmor:1.29.0@sha256:863026d54f91271b10b60b67ad8054cb37120167e162482597db102b3026a284";
+    expect(ci).toContain(`ZIZMOR_IMAGE: ${zizmorPin}`);
+    expect(ci.split(zizmorPin).length - 1).toBe(1);
+    expect(workflowSecurity).toContain('"${ZIZMOR_IMAGE}"');
     // Offline gate: locked down (no network), pedantic, SARIF-emitting, and
     // gated deterministically by the SARIF result count.
     expect(workflowSecurity).toContain("--network=none");

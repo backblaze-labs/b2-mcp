@@ -9,6 +9,12 @@ on:
 permissions:
   contents: read
 
+env:
+  # Single source of truth for the digest-pinned zizmor image, shared by every
+  # zizmor job/step. Track any bump by digest (Track 3 of issue #405), never by
+  # a floating tag. zizmor 1.29.0, reviewed 2026-09-07.
+  ZIZMOR_IMAGE: ghcr.io/zizmorcore/zizmor:1.29.0@sha256:863026d54f91271b10b60b67ad8054cb37120167e162482597db102b3026a284
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -580,11 +586,6 @@ jobs:
       actions: read # CodeQL reads the Actions run graph during analysis.
       contents: read # Checkout of the repository under analysis.
       security-events: write # Upload zizmor SARIF to the code scanning tab.
-    env:
-      # Digest-pinned zizmor image, shared by every scan step. Track any bump by
-      # digest (Track 3 of issue #405), never by a floating tag.
-      # zizmor 1.29.0, reviewed 2026-09-07.
-      ZIZMOR_IMAGE: ghcr.io/zizmorcore/zizmor:1.29.0@sha256:863026d54f91271b10b60b67ad8054cb37120167e162482597db102b3026a284
     steps:
       # actions/checkout v7, reviewed 2026-08-25.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -689,9 +690,6 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read # Read-only token: the networked container gets no write scope.
-    env:
-      # zizmor 1.29.0, reviewed 2026-09-07.
-      ZIZMOR_IMAGE: ghcr.io/zizmorcore/zizmor:1.29.0@sha256:863026d54f91271b10b60b67ad8054cb37120167e162482597db102b3026a284
     steps:
       # actions/checkout v7, reviewed 2026-08-25.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
