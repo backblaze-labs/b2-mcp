@@ -69,9 +69,14 @@ try {
   if (!strykerAlreadyInstalled) {
     console.log(`[run-mutation] installing ephemeral tooling: ${STRYKER_PACKAGES.join(" ")}`);
     // `-w` makes the workspace-root add explicit (pnpm rejects it otherwise on a
-    // clean checkout). `restoreGuardedFiles()` in `finally` reverts the manifest
-    // and lockfile so the committed files stay byte-for-byte unchanged.
+    // clean checkout).
     const addStatus = run("pnpm", ["add", "-D", "-w", ...STRYKER_PACKAGES]);
+    // Restore the manifest and lockfile immediately: the installed binaries stay
+    // in node_modules, but the committed files must be byte-for-byte unchanged
+    // before Stryker runs the unit suite, which includes the
+    // package-surface-policy lockfile-mirror test. `finally` repeats this as a
+    // fallback for any earlier exit.
+    restoreGuardedFiles();
     if (addStatus === 0) {
       installed = true;
     } else {
