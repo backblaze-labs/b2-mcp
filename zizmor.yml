@@ -15,4 +15,9 @@ rules:
       # publishes behind protected environments — it never runs
       # attacker-controllable head code. The privileged-trigger risk this audit
       # flags is mitigated by that design, so the finding is accepted.
-      - publish.yml
+      #
+      # Scoped to the specific `on:` trigger block (publish.yml:9) rather than
+      # the whole file, so the exception only covers today's known-safe design.
+      # Re-review whenever publish.yml's triggers change: a new dangerous
+      # trigger on a different line will NOT be pre-suppressed by this entry.
+      - publish.yml:9
