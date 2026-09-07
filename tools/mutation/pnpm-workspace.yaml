@@ -1,0 +1,10 @@
+# Isolated single-package workspace for the advisory mutation toolchain
+# (issue #397). Its own workspace file makes this project self-contained under
+# the repo root: the root `pnpm install` never descends into it, and this file
+# carries the security overrides the root workspace applies. The root
+# pnpm-workspace.yaml overrides do not reach here, so the security-relevant ones
+# are mirrored to keep the advisory job off versions the root policy excludes.
+overrides:
+  qs: '>=6.16.0'
+  fast-uri: '>=3.1.6 <4'
+  nanoid: 3.3.18
