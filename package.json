@@ -48,6 +48,7 @@
     "test:observability": "pnpm run build && node scripts/run-vitest-layer.mjs observability",
     "test:slow": "node scripts/run-vitest-layer.mjs slow",
     "test:coverage": "pnpm run build && node scripts/run-vitest-layer.mjs coverage",
+    "test:mutation": "node scripts/run-mutation.mjs",
     "test:diagnostics": "pnpm run build && node scripts/run-leak-diagnostics.mjs",
     "perf:baseline": "pnpm run build && node --expose-gc scripts/performance-baseline.mjs",
     "perf:baseline:enforce": "pnpm run build && node --expose-gc scripts/performance-baseline.mjs --enforce",

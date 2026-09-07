@@ -1,0 +1,131 @@
+name: Mutation testing (advisory)
+
+# Advisory StrykerJS mutation baseline (issue #397). High line/branch coverage
+# does not prove the tests *assert* the right behavior; mutation testing does.
+# This job is intentionally NON-BLOCKING:
+#   - It is a standalone workflow, so it is not part of the required CI gate
+#     (`conformance summary` / `ci-green marker` in test.yml).
+#   - The Stryker step uses `continue-on-error: true`, and the config sets
+#     `thresholds.break: null`, so a low score never fails the run.
+# It runs on a weekly schedule and on demand rather than on every PR, because a
+# full mutation run is far slower than the unit suite. Promote it to a required
+# gate (and set `thresholds.break`) only once the baseline is stable.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "23 6 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mutation-${{ github.repository }}-${{ github.ref_name || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  mutation:
+    name: Stryker mutation score
+    if: github.repository == 'backblaze-labs/b2-mcp'
+    runs-on: ubuntu-latest
+    # Generous headroom: Stryker runs the suite under Babel instrumentation from
+    # the isolated tools/mutation toolchain, which is slower than a plain unit
+    # run. The job is advisory and the summary step reports an incomplete run.
+    timeout-minutes: 90
+    steps:
+      # actions/checkout v7, reviewed 2026-08-25.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+        with:
+          run_install: false
+      # actions/setup-node v7, reviewed 2026-08-06.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22.23.1
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Run Stryker mutation baseline (advisory)
+        id: mutation
+        continue-on-error: true
+        run: pnpm run test:mutation
+      - name: Publish mutation score summary
+        # Runs on success or Stryker failure. Note: a job cancelled at
+        # `timeout-minutes` may skip even `if: always()` steps, so keep the
+        # `mutate` scope well under the timeout. When the report exists but is
+        # truncated/corrupt (interrupted mid-write), the parser below degrades
+        # to a note instead of aborting the step.
+        if: always()
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          echo "## Mutation testing (advisory)" >> "$GITHUB_STEP_SUMMARY"
+          if [ ! -f reports/mutation/mutation.json ]; then
+            echo '(reports/mutation/mutation.json not found — run did not complete)' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          node -e "
+            const { readFileSync } = require('node:fs');
+            let r;
+            try {
+              r = JSON.parse(readFileSync('./reports/mutation/mutation.json', 'utf8'));
+            } catch (err) {
+              console.log('(mutation.json unreadable or partial — run likely incomplete: ' + err.message + ')');
+              process.exit(0);
+            }
+            const files = r.files || {};
+            let killed=0, survived=0, timeout=0, noCov=0, ignored=0, runtimeErr=0, compileErr=0, other=0, total=0;
+            for (const f of Object.values(files)) {
+              for (const m of f.mutants || []) {
+                total++;
+                if (m.status === 'Killed') killed++;
+                else if (m.status === 'Survived') survived++;
+                else if (m.status === 'Timeout') timeout++;
+                else if (m.status === 'NoCoverage') noCov++;
+                else if (m.status === 'Ignored') ignored++;
+                else if (m.status === 'RuntimeError') runtimeErr++;
+                else if (m.status === 'CompileError') compileErr++;
+                // Catch-all so the metric rows always sum to Total mutants even if
+                // Stryker adds a new status; without it, unknown statuses would
+                // silently inflate Total without appearing in any row.
+                else other++;
+              }
+            }
+            const detected = killed + timeout;
+            const valid = detected + survived + noCov;
+            // RuntimeError/CompileError/other are invalid mutants: excluded from the
+            // score by convention, but a large count means the run is broken and the
+            // score is misleading. The step is continue-on-error, so surface it here.
+            const invalid = runtimeErr + compileErr + other;
+            const score = valid ? ((detected / valid) * 100).toFixed(2) : 'n/a';
+            console.log('Mutation score: ' + score + '%');
+            if (invalid > 0) {
+              console.log('');
+              console.log('> ⚠️ ' + invalid + ' mutant(s) produced no valid result (RuntimeError/CompileError/other) and are excluded from the score. A large count usually means the mutation run is broken, so the score above may be misleading — check the job logs and the uploaded HTML report.');
+            }
+            console.log('');
+            console.log('| Metric | Count |');
+            console.log('| --- | --- |');
+            console.log('| Killed | ' + killed + ' |');
+            console.log('| Timeout | ' + timeout + ' |');
+            console.log('| Survived | ' + survived + ' |');
+            console.log('| No coverage | ' + noCov + ' |');
+            console.log('| Ignored | ' + ignored + ' |');
+            console.log('| Runtime errors | ' + runtimeErr + ' |');
+            console.log('| Compile errors | ' + compileErr + ' |');
+            if (other > 0) console.log('| Other/unknown | ' + other + ' |');
+            console.log('| Total mutants | ' + total + ' |');
+          " >> "$GITHUB_STEP_SUMMARY" || echo '(mutation summary generation failed — see job logs)' >> "$GITHUB_STEP_SUMMARY"
+      # actions/upload-artifact v7, reviewed 2026-08-25.
+      - name: Upload mutation reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: mutation-reports
+          path: |
+            reports/mutation/mutation.html
+            reports/mutation/mutation.json
+          if-no-files-found: warn
+          retention-days: 14

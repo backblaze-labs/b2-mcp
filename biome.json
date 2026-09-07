@@ -12,6 +12,7 @@
       "**",
       "!dist/**",
       "!node_modules/**",
+      "!tools/mutation/node_modules/**",
       "!coverage/**",
       "!reports/**",
       "!package-lock.json",

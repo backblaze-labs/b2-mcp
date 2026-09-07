@@ -120,6 +120,36 @@ placement latency stay outside this deterministic local baseline. Once the
 reviewed baseline is stable, `pnpm run perf:baseline:enforce` is the blocking
 form to promote into CI.
 
+## Advisory Mutation Testing
+
+Issue [#397](https://github.com/backblaze-labs/b2-mcp/issues/397) tracks
+advisory [StrykerJS](https://stryker-mutator.io/) mutation testing. High
+line/branch coverage does not prove the tests *assert* the right behavior;
+mutation testing does, by breaking the source and checking that a test fails.
+It targets the security-critical modules first (destructive gate/elicitation,
+secret sanitizer, credential routing, auth, capability filtering).
+
+Run it with:
+
+```bash
+pnpm run test:mutation                            # full prioritized baseline
+pnpm run test:mutation -- --mutate=src/auth.ts    # scope to one module (equals form)
+```
+
+StrykerJS is intentionally not a root dependency; it lives in an isolated,
+checked-in toolchain under `tools/mutation/` (its own `package.json` and
+`pnpm-lock.yaml`) that the `test:mutation` wrapper installs with
+`--frozen-lockfile`, keeping the Babel instrumenter tree pinned and reviewable
+but out of the shipped root lockfile (see the design doc for why). Like the
+performance baseline, it is advisory first:
+`thresholds.break` is `null`, and CI runs it in a standalone non-blocking
+workflow
+([`.github/workflows/mutation.yml`](../.github/workflows/mutation.yml)) on a
+weekly schedule and on demand, not on every PR and not in the required gate.
+Reports land in `reports/mutation/`. The baseline score and the highest-value
+surviving mutants to fix are documented in
+[`design-docs/mutation-testing.md`](design-docs/mutation-testing.md).
+
 Local scripts can call each deterministic layer independently. Required PR jobs
 keep the major evidence classes distinct so coverage regression, contract drift,
 protocol failure, production-audit findings, package-budget drift, and broken
