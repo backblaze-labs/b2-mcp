@@ -31,6 +31,22 @@ pnpm run test:mutation -- --mutate src/auth.ts          # scope to one module (n
 - Reports land in the gitignored `reports/mutation/` (`mutation.html` for
   browsing surviving mutants; `mutation.json` for tooling).
 
+### Static mutants are ignored (performance tradeoff)
+
+The config sets `ignoreStatic: true`. Static mutants are those only executed
+while a module loads (static initialization), never re-run inside a test.
+Stryker's own planner flags them as ~17% of mutants but ~73% of runtime here
+and recommends ignoring them, which keeps the advisory run well inside the CI
+`timeout-minutes` budget. This does **not** hide the capability-map gaps in
+`tool-capabilities.ts`: those constants are read again per test, so their
+mutants are runtime-covered and still scored (see the 33.76% below). To include
+static mutants in an occasional deep run, drop `ignoreStatic` (expect a roughly
+4x slower run):
+
+```bash
+pnpm run test:mutation -- --ignoreStatic=false
+```
+
 ## Advisory by design (non-blocking)
 
 This is a baseline-establishing gate, **not** a merge gate:
