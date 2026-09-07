@@ -20,9 +20,11 @@
  * `tools/mutation/node_modules`, out of the root lockfile and shipped package.
  *
  * Stryker runs from the repo root (so it reads `./stryker.config.mjs` and
- * mutates `./src`). It resolves its runner plugin from the tooling
- * `node_modules` and its `typescript`/`vitest` peers from the root
- * `node_modules`, which is an ancestor directory of `tools/mutation/`.
+ * mutates `./src`). It resolves its runner plugin and `vitest` (pinned in the
+ * tooling manifest to the exact root version, so mutation testing uses the same
+ * runner major as the suite) from the tooling `node_modules`, and its
+ * `typescript` peer from the root `node_modules`, an ancestor of
+ * `tools/mutation/`.
  *
  * Cross-platform: pnpm and Stryker are launched Windows-safely. pnpm is invoked
  * through `cmd.exe` on Windows (its shim is a `.cmd`), and Stryker runs as its

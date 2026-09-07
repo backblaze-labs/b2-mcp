@@ -61,9 +61,12 @@ and then runs Stryker from the repo root. This:
 - keeps `@babel/core` out of the root lockfile and the shipped package (the
   Babel tree stays in the gitignored `tools/mutation/node_modules`).
 
-`pnpm dlx` cannot be used because Stryker resolves its runner plugin from its own
-`node_modules` and its `typescript`/`vitest` peers from an ancestor
-`node_modules`; dlx isolation provides neither. Running under Babel
+`vitest` is pinned in the tooling manifest to the exact root version, so mutation
+testing runs against the same test-runner major as the suite it assesses; the
+`typescript` peer resolves from the root `node_modules`, an ancestor of
+`tools/mutation/`. `pnpm dlx` cannot be used because Stryker resolves its runner
+plugin from its own `node_modules` and its peers from that node_modules /
+ancestor chain, which dlx isolation does not provide. Running under Babel
 instrumentation from a separate toolchain is slower than a plain unit run, which
 is why `vitest.mutation.config.mts` uses a generous `testTimeout` and the CI job
 allows extra wall-clock.
