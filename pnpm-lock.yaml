@@ -84,10 +84,10 @@ importers:
         specifier: 2.0.0
         version: 2.0.0(@modelcontextprotocol/server@2.0.0)(hono@4.13.7)
       '@stryker-mutator/core':
-        specifier: ^10.0.0
+        specifier: 10.0.0
         version: 10.0.0(@types/node@22.20.1)
       '@stryker-mutator/vitest-runner':
-        specifier: ^10.0.0
+        specifier: 10.0.0
         version: 10.0.0(@stryker-mutator/core@10.0.0(@types/node@22.20.1))(vitest@4.1.11)
       '@toon-format/toon':
         specifier: 4.1.1

@@ -56,8 +56,10 @@ const config = {
   tempDirName: ".stryker-tmp",
   cleanTempDir: true,
   timeoutMS: 60_000,
-  // Fail loudly if a module in `mutate` has zero coverage rather than silently
-  // reporting it as a "no coverage" gap only in the HTML report.
+  // Skip static mutants — those only executed during module load / static
+  // initialization rather than inside a test. They run once, cannot be isolated
+  // per test, and otherwise inflate runtime and produce false survivors; Stryker
+  // reports them with status `Ignored`.
   ignoreStatic: true,
 };
 
