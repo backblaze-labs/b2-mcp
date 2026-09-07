@@ -4,6 +4,8 @@ dist-mcpb/
 api-docs/
 coverage/
 reports/
+# StrykerJS mutation-testing scratch (reports land under reports/)
+.stryker-tmp/
 *.log
 *.tsbuildinfo
 # Built package tarballs from `npm pack` / `pnpm pack`

@@ -23,6 +23,7 @@ corepack
 cosign
 cspell
 CycloneDX
+stryker
 envrc
 evals
 flyctl

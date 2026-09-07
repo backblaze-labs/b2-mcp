@@ -1,0 +1,98 @@
+name: Mutation testing (advisory)
+
+# Advisory StrykerJS mutation baseline (issue #397). High line/branch coverage
+# does not prove the tests *assert* the right behavior; mutation testing does.
+# This job is intentionally NON-BLOCKING:
+#   - It is a standalone workflow, so it is not part of the required CI gate
+#     (`conformance summary` / `ci-green marker` in test.yml).
+#   - The Stryker step uses `continue-on-error: true`, and the config sets
+#     `thresholds.break: null`, so a low score never fails the run.
+# It runs on a weekly schedule and on demand rather than on every PR, because a
+# full mutation run is far slower than the unit suite. Promote it to a required
+# gate (and set `thresholds.break`) only once the baseline is stable.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "23 6 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mutation-${{ github.repository }}-${{ github.ref_name || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  mutation:
+    name: Stryker mutation score
+    if: github.repository == 'backblaze-labs/b2-mcp'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      # actions/checkout v7, reviewed 2026-08-25.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+        with:
+          run_install: false
+      # actions/setup-node v7, reviewed 2026-08-06.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22.23.1
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Run Stryker mutation baseline (advisory)
+        id: mutation
+        continue-on-error: true
+        run: pnpm run test:mutation
+      - name: Publish mutation score summary
+        if: always()
+        run: |
+          set -euo pipefail
+          echo "## Mutation testing (advisory)" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f reports/mutation/mutation.json ]; then
+            node -e "
+              const r = require('./reports/mutation/mutation.json');
+              const files = r.files || {};
+              let killed=0, survived=0, timeout=0, noCov=0, ignored=0, total=0;
+              for (const f of Object.values(files)) {
+                for (const m of f.mutants || []) {
+                  total++;
+                  if (m.status === 'Killed') killed++;
+                  else if (m.status === 'Survived') survived++;
+                  else if (m.status === 'Timeout') timeout++;
+                  else if (m.status === 'NoCoverage') noCov++;
+                  else if (m.status === 'Ignored') ignored++;
+                }
+              }
+              const detected = killed + timeout;
+              const valid = detected + survived + noCov;
+              const score = valid ? ((detected / valid) * 100).toFixed(2) : 'n/a';
+              console.log('Mutation score: ' + score + '%');
+              console.log('');
+              console.log('| Metric | Count |');
+              console.log('| --- | --- |');
+              console.log('| Killed | ' + killed + ' |');
+              console.log('| Timeout | ' + timeout + ' |');
+              console.log('| Survived | ' + survived + ' |');
+              console.log('| No coverage | ' + noCov + ' |');
+              console.log('| Ignored | ' + ignored + ' |');
+              console.log('| Total mutants | ' + total + ' |');
+            " >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '(reports/mutation/mutation.json not found)' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      # actions/upload-artifact v7, reviewed 2026-08-25.
+      - name: Upload mutation reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: mutation-reports
+          path: |
+            reports/mutation/mutation.html
+            reports/mutation/mutation.json
+          if-no-files-found: warn
+          retention-days: 14
