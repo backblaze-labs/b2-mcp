@@ -138,7 +138,7 @@ pnpm run test:mutation -- --mutate src/auth.ts    # scope to one module
 
 Like the performance baseline, it is advisory first: `thresholds.break` is
 `null`, and CI runs it in a standalone non-blocking workflow
-([`.github/workflows/mutation.yml`](../../.github/workflows/mutation.yml)) on a
+([`.github/workflows/mutation.yml`](../.github/workflows/mutation.yml)) on a
 weekly schedule and on demand, not on every PR and not in the required gate.
 Reports land in `reports/mutation/`. The baseline score and the highest-value
 surviving mutants to fix are documented in
