@@ -1,0 +1,18 @@
+# zizmor (GitHub Actions static analysis) configuration.
+#
+# This is the single, checked-in source of truth for zizmor suppressions.
+# Every entry MUST carry a rationale so an auditor can see why a finding is
+# accepted rather than fixed. Inline `# zizmor: ignore[...]` comments have been
+# migrated here so suppressions live in one reviewable place.
+#
+# Docs: https://docs.zizmor.sh/configuration/
+rules:
+  dangerous-triggers:
+    ignore:
+      # Publish Package runs on `workflow_run` from the unprivileged "Release
+      # Tag Request" workflow. It only consumes an inert tag artifact, checks
+      # out trusted `ci-green` resolver code, validates protected refs, and
+      # publishes behind protected environments — it never runs
+      # attacker-controllable head code. The privileged-trigger risk this audit
+      # flags is mitigated by that design, so the finding is accepted.
+      - publish.yml

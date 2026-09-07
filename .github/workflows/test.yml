@@ -575,11 +575,19 @@ jobs:
     name: CodeQL/workflow security
     needs: runtime-policy
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     permissions:
+      # CodeQL reads the Actions run graph during analysis.
       actions: read
+      # Checkout of the repository under analysis.
       contents: read
+      # Upload zizmor SARIF to the Security -> Code scanning tab.
       security-events: write
+    env:
+      # Digest-pinned zizmor image, shared by every scan step. Track any bump by
+      # digest (Track 3 of issue #405), never by a floating tag.
+      # zizmor 1.29.0, reviewed 2026-09-07.
+      ZIZMOR_IMAGE: ghcr.io/zizmorcore/zizmor:1.29.0@sha256:863026d54f91271b10b60b67ad8054cb37120167e162482597db102b3026a284
     steps:
       # actions/checkout v7, reviewed 2026-08-25.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -595,27 +603,80 @@ jobs:
         with:
           category: "/language:javascript-typescript"
           upload: never
-      - name: Run digest-pinned offline zizmor
-        env:
-          ZIZMOR_IMAGE: ghcr.io/zizmorcore/zizmor:1.29.0@sha256:863026d54f91271b10b60b67ad8054cb37120167e162482597db102b3026a284
+      - name: Pull digest-pinned zizmor image
+        run: docker pull "${ZIZMOR_IMAGE}"
+      # Gate pass: offline (`--network=none`), stricter `pedantic` persona, SARIF
+      # output. `--format=sarif` always exits 0, so the gate is enforced by the
+      # dedicated result-count step below rather than the process exit code.
+      # Suppressions are centralized in the checked-in `zizmor.yml`.
+      - name: Run offline zizmor gate (SARIF)
         run: |
           set -euo pipefail
-          docker pull "${ZIZMOR_IMAGE}"
           docker run \
             --rm \
             --network=none \
             --volume "${GITHUB_WORKSPACE}:/workspace:ro" \
             --workdir /workspace \
             "${ZIZMOR_IMAGE}" \
-            --persona=regular \
-            --format=github \
+            --config zizmor.yml \
+            --persona=pedantic \
+            --format=sarif \
             --collect=default \
             --no-online-audits \
             --min-severity=medium \
             --min-confidence=medium \
             --color=never \
             -- \
-            .
+            . > "${RUNNER_TEMP}/zizmor-offline.sarif"
+      - name: Upload offline zizmor SARIF to code scanning
+        if: always()
+        # github/codeql-action/upload-sarif v4.37.9, reviewed 2026-09-07.
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938
+        with:
+          sarif_file: ${{ runner.temp }}/zizmor-offline.sarif
+          category: zizmor-offline
+      - name: Gate on offline zizmor findings
+        run: |
+          set -euo pipefail
+          count="$(jq '[.runs[].results[]] | length' "${RUNNER_TEMP}/zizmor-offline.sarif")"
+          echo "offline zizmor findings at gate threshold: ${count}"
+          if [ "${count}" -ne 0 ]; then
+            echo "::error::zizmor gate failed with ${count} finding(s) at medium severity/confidence (pedantic). Fix the workflow or add a documented suppression to zizmor.yml."
+            exit 1
+          fi
+      # Advisory pass: online audits enabled (network + GITHUB_TOKEN for GitHub
+      # API lookups), broadest `auditor`/low bar. Non-gating — its findings are
+      # tracked in the Security -> Code scanning tab for triage, never block CI.
+      - name: Run online zizmor audit (SARIF, advisory)
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          docker run \
+            --rm \
+            --volume "${GITHUB_WORKSPACE}:/workspace:ro" \
+            --workdir /workspace \
+            --env GH_TOKEN \
+            "${ZIZMOR_IMAGE}" \
+            --config zizmor.yml \
+            --persona=auditor \
+            --format=sarif \
+            --collect=default \
+            --min-severity=low \
+            --min-confidence=low \
+            --color=never \
+            -- \
+            . > "${RUNNER_TEMP}/zizmor-online.sarif"
+      - name: Upload online zizmor SARIF to code scanning
+        if: always()
+        # Advisory: a failed online scan/upload must never gate CI.
+        continue-on-error: true
+        # github/codeql-action/upload-sarif v4.37.9, reviewed 2026-09-07.
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938
+        with:
+          sarif_file: ${{ runner.temp }}/zizmor-online.sarif
+          category: zizmor-online
 
   slow-lifecycle:
     name: slow/lifecycle
