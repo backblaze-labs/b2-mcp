@@ -386,12 +386,26 @@ describe("CI workflow policy", () => {
       "github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938",
     );
     expect(workflowSecurity).toContain("category: zizmor-offline");
-    // Advisory online pass: uses only the read-scoped default GITHUB_TOKEN,
-    // runs the broadest auditor bar, and is continue-on-error so it never gates.
-    expect(workflowSecurity).toContain("--persona=auditor");
-    expect(workflowSecurity).toContain("GH_TOKEN: ${{ github.token }}");
-    expect(workflowSecurity).toContain("continue-on-error: true");
-    expect(workflowSecurity).toContain("category: zizmor-online");
+    // The gate job runs the container with no network and no token.
+    expect(workflowSecurity).not.toContain("--persona=auditor");
+    expect(workflowSecurity).not.toContain("GH_TOKEN");
+
+    // Advisory online audit is split: a read-only scan job runs the networked
+    // container (so it only gets a read-scoped token) and a separate
+    // upload-only job forwards the SARIF artifact to code scanning.
+    const onlineScan = workflowJob("zizmor-online-scan");
+    expect(onlineScan).toContain("--persona=auditor");
+    expect(onlineScan).toContain("GH_TOKEN: ${{ github.token }}");
+    expect(onlineScan).toContain("continue-on-error: true");
+    expect(onlineScan).toContain("contents: read");
+    expect(onlineScan).not.toContain("security-events: write");
+    expect(onlineScan).toContain("name: zizmor-online-sarif");
+
+    const onlineUpload = workflowJob("zizmor-online-upload");
+    expect(onlineUpload).toContain("security-events: write");
+    expect(onlineUpload).toContain("category: zizmor-online");
+    expect(onlineUpload).not.toContain("docker run");
+    expect(onlineUpload).not.toContain("GH_TOKEN");
   });
 
   it("keeps the cross-platform fast suite on the minimum Node runtime", () => {

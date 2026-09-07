@@ -677,16 +677,38 @@ jobs:
         with:
           sarif_file: ${{ runner.temp }}/zizmor-offline.sarif
           category: zizmor-offline
-      # Advisory pass: online audits enabled (network + GITHUB_TOKEN for GitHub
-      # API lookups), broadest `auditor`/low bar. Non-gating — its findings are
-      # tracked in the Security -> Code scanning tab for triage, never block CI.
-      # The default read-scoped GITHUB_TOKEN is only used for read-only API
-      # lookups; the pass is advisory/continue-on-error and cannot upload with a
-      # write token (that happens in the separate, code-scanning upload step).
+
+  # Advisory online zizmor audit, deliberately split into a read-only scan job
+  # and a separate upload job. GitHub Actions permissions are job-scoped, so the
+  # network-facing container must live in a job that holds NO `security-events:
+  # write` — otherwise it would receive a write-capable GITHUB_TOKEN. The scan
+  # job produces a SARIF artifact; the upload job (which never runs the
+  # container) forwards it to code scanning. Both are non-gating: not required
+  # checks, continue-on-error, and time-bounded, so they can never block merges.
+  zizmor-online-scan:
+    name: zizmor online audit (advisory)
+    needs: runtime-policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      # Read-only. The container receives only a read-scoped GITHUB_TOKEN for
+      # GitHub API lookups and cannot write code scanning from here.
+      contents: read
+    env:
+      # zizmor 1.29.0, reviewed 2026-09-07.
+      ZIZMOR_IMAGE: ghcr.io/zizmorcore/zizmor:1.29.0@sha256:863026d54f91271b10b60b67ad8054cb37120167e162482597db102b3026a284
+    steps:
+      # actions/checkout v7, reviewed 2026-08-25.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Pull digest-pinned zizmor image
+        run: docker pull "${ZIZMOR_IMAGE}"
+      # Broadest `auditor`/low bar with online audits enabled. Advisory only:
+      # findings are tracked in code scanning via the upload job below.
       - name: Run online zizmor audit (SARIF, advisory)
         continue-on-error: true
-        # Bounded well below the job's 20-minute budget so a hung network scan
-        # cannot consume the gate job's time and cancel the build.
+        # Bounded below the job budget so a hung network scan never stalls CI.
         timeout-minutes: 8
         env:
           GH_TOKEN: ${{ github.token }}
@@ -698,7 +720,7 @@ jobs:
             --workdir /workspace \
             --env GH_TOKEN \
             "${ZIZMOR_IMAGE}" \
-            --config "${ZIZMOR_CONFIG}" \
+            --config zizmor.yml \
             --persona=auditor \
             --format=sarif \
             --collect=default \
@@ -707,16 +729,47 @@ jobs:
             --color=never \
             -- \
             . > "${RUNNER_TEMP}/zizmor-online.sarif"
-      - name: Upload online zizmor SARIF to code scanning
+      - name: Upload online zizmor SARIF artifact
         if: always()
-        # Advisory: a failed online scan/upload must never gate CI.
+        continue-on-error: true
+        # actions/upload-artifact v7, reviewed 2026-08-25.
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: zizmor-online-sarif
+          path: ${{ runner.temp }}/zizmor-online.sarif
+          if-no-files-found: warn
+          retention-days: 7
+
+  zizmor-online-upload:
+    name: zizmor online audit upload (advisory)
+    needs: zizmor-online-scan
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      # Upload-only. This job never runs the untrusted container; it only
+      # forwards the already-produced SARIF artifact to code scanning.
+      security-events: write
+      actions: read
+    steps:
+      - name: Download online zizmor SARIF artifact
+        id: download
+        continue-on-error: true
+        # actions/download-artifact v8, reviewed 2026-08-25.
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: zizmor-online-sarif
+          path: online-sarif
+      - name: Upload online zizmor SARIF to code scanning
+        if: always() && steps.download.outcome == 'success'
+        # Advisory: a failed upload must never gate CI.
         continue-on-error: true
         # Bounded so a stuck code-scanning upload cannot exhaust the job budget.
         timeout-minutes: 5
         # github/codeql-action/upload-sarif v4.37.9, reviewed 2026-09-07.
         uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938
         with:
-          sarif_file: ${{ runner.temp }}/zizmor-online.sarif
+          sarif_file: online-sarif/zizmor-online.sarif
           category: zizmor-online
 
   slow-lifecycle:
