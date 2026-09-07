@@ -1,0 +1,11 @@
+{
+  "name": "b2-mcp-mutation-tooling",
+  "version": "0.0.0",
+  "private": true,
+  "packageManager": "pnpm@11.20.0+sha256.34e198cb1e43237517ecedfd31f9ae26a6c0a3e5366ce58a2d05f4b21fb5f19a",
+  "description": "Isolated, checked-in manifest for advisory StrykerJS mutation testing (issue #397). Kept outside the root workspace so the Babel instrumenter tree is pinned and reviewed with integrity hashes (its own committed pnpm-lock.yaml, installed --frozen-lockfile) but never enters the shipped root lockfile or dependency budget. typescript/vitest peers resolve from the root node_modules (an ancestor of this directory).",
+  "devDependencies": {
+    "@stryker-mutator/core": "10.0.0",
+    "@stryker-mutator/vitest-runner": "10.0.0"
+  }
+}

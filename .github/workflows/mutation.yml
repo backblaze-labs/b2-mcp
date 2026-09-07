@@ -28,7 +28,10 @@ jobs:
     name: Stryker mutation score
     if: github.repository == 'backblaze-labs/b2-mcp'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # Generous headroom: Stryker runs the suite under Babel instrumentation from
+    # the isolated tools/mutation toolchain, which is slower than a plain unit
+    # run. The job is advisory and the summary step reports an incomplete run.
+    timeout-minutes: 90
     steps:
       # actions/checkout v7, reviewed 2026-08-25.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1

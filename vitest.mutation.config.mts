@@ -14,6 +14,10 @@ import { defineConfig } from "vitest/config";
  * - No `projects` — Stryker's runner drives a single project directly.
  * - No coverage thresholds — a mutated run legitimately changes which lines
  *   execute, and Stryker measures mutant kills, not line coverage.
+ * - A generous `testTimeout` (matching the repo's slow layer): Stryker runs
+ *   the suite under Babel instrumentation from the isolated `tools/mutation`
+ *   toolchain, which is measurably slower than a plain unit run, so the tighter
+ *   30s default can trip on the heaviest serializer tests.
  */
 export default defineConfig({
   test: {
@@ -21,6 +25,6 @@ export default defineConfig({
     environment: "node",
     passWithNoTests: false,
     include: ["tests/unit/**/*.unit.test.ts"],
-    testTimeout: 30_000,
+    testTimeout: 120_000,
   },
 });

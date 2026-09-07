@@ -4,50 +4,46 @@
 /**
  * Runs the advisory StrykerJS mutation baseline (issue #397).
  *
- * StrykerJS is intentionally NOT a committed dependency. Its Babel-based
+ * StrykerJS is intentionally NOT a root dependency. Its Babel-based
  * instrumenter pulls in `@babel/core` and a large transitive tree that the
  * `security-remediation` contract (no reintroduced Babel/Jest transform stack)
- * and the package-budget gate deliberately keep out of the shipped lockfile.
- * So this wrapper installs Stryker ephemerally into `node_modules` (where its
- * `typescript` and `vitest` peers already live, which `pnpm dlx` isolation
- * cannot provide), runs it, then restores `package.json` and `pnpm-lock.yaml`
- * so the working tree is left byte-for-byte clean. `node_modules` keeps the
- * ephemeral packages, but that is gitignored and dropped by the next
- * `pnpm install --frozen-lockfile`.
+ * and the package-budget gate deliberately keep out of the shipped root
+ * lockfile.
+ *
+ * Instead the toolchain lives in its own checked-in, isolated project under
+ * `tools/mutation/` (its own `package.json` + `pnpm-lock.yaml`, outside the root
+ * workspace). This wrapper installs it with `--frozen-lockfile`, so every run
+ * executes the exact reviewed versions with pinned integrity hashes rather than
+ * newly resolved code. It never modifies any tracked file, so there is nothing
+ * to clean up and no interrupt-safety hazard. The Babel tree stays in the
+ * gitignored `tools/mutation/node_modules`, out of the root lockfile and the
+ * shipped package.
+ *
+ * Stryker runs from the repo root (so it reads `./stryker.config.mjs` and
+ * mutates `./src`). It resolves its runner plugin from the tooling
+ * `node_modules` and its `typescript`/`vitest` peers from the root
+ * `node_modules`, which is an ancestor directory of `tools/mutation/`.
  *
  * Pass Stryker flags through, e.g.:
  *   pnpm run test:mutation
  *   pnpm run test:mutation -- --mutate=src/auth.ts
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const STRYKER_PACKAGES = ["@stryker-mutator/core@10.0.0", "@stryker-mutator/vitest-runner@10.0.0"];
-
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+const toolingDir = join(root, "tools", "mutation");
+const strykerBin = join(toolingDir, "node_modules", ".bin", "stryker");
 // Drop the `--` separator that `pnpm run test:mutation -- <flags>` forwards, so
 // Stryker's `run` command sees only real flags. Use the `--mutate=<file>` form
 // (equals sign); Stryker's `run` rejects the space-separated form as a stray
 // positional argument.
 const strykerArgs = process.argv.slice(2).filter((arg) => arg !== "--");
 
-// Files pnpm may rewrite when adding the ephemeral packages. Snapshot them so
-// the working tree is restored no matter how the run exits.
-const guardedFiles = ["package.json", "pnpm-lock.yaml"].map((relative) => {
-  const absolute = join(root, relative);
-  return { relative, absolute, original: existsSync(absolute) ? readFileSync(absolute) : null };
-});
-
-function restoreGuardedFiles() {
-  for (const { absolute, original } of guardedFiles) {
-    if (original !== null) writeFileSync(absolute, original);
-  }
-}
-
-function run(command, args) {
-  const result = spawnSync(command, args, { cwd: root, stdio: "inherit", shell: false });
+function run(command, args, options = {}) {
+  const result = spawnSync(command, args, { stdio: "inherit", shell: false, ...options });
   if (result.error) {
     console.error(`\n[run-mutation] failed to spawn: ${command} ${args.join(" ")}`);
     throw result.error;
@@ -61,38 +57,22 @@ function run(command, args) {
   return result.status;
 }
 
-const strykerAlreadyInstalled = existsSync(join(root, "node_modules/@stryker-mutator/core"));
-
-let exitCode = 1;
-try {
-  let installed = strykerAlreadyInstalled;
-  if (!strykerAlreadyInstalled) {
-    console.log(`[run-mutation] installing ephemeral tooling: ${STRYKER_PACKAGES.join(" ")}`);
-    // `-w` makes the workspace-root add explicit (pnpm rejects it otherwise on a
-    // clean checkout).
-    const addStatus = run("pnpm", ["add", "-D", "-w", ...STRYKER_PACKAGES]);
-    // Restore the manifest and lockfile immediately: the installed binaries stay
-    // in node_modules, but the committed files must be byte-for-byte unchanged
-    // before Stryker runs the unit suite, which includes the
-    // package-surface-policy lockfile-mirror test. `finally` repeats this as a
-    // fallback for any earlier exit.
-    restoreGuardedFiles();
-    if (addStatus === 0) {
-      installed = true;
-    } else {
-      console.error("[run-mutation] ephemeral Stryker install failed");
-      exitCode = addStatus || 1;
-    }
-  } else {
-    console.log("[run-mutation] Stryker already present in node_modules; skipping install");
-  }
-
-  if (installed) {
-    exitCode = run("pnpm", ["exec", "stryker", "run", ...strykerArgs]);
-  }
-} finally {
-  restoreGuardedFiles();
-  console.log("[run-mutation] restored package.json and pnpm-lock.yaml to committed state");
+console.log("[run-mutation] installing isolated mutation toolchain (frozen lockfile)");
+const installStatus = run("pnpm", [
+  "install",
+  "--dir",
+  toolingDir,
+  "--ignore-workspace",
+  "--frozen-lockfile",
+]);
+if (installStatus !== 0) {
+  console.error("[run-mutation] mutation toolchain install failed");
+  process.exit(installStatus || 1);
 }
 
-process.exit(exitCode);
+if (!existsSync(strykerBin)) {
+  console.error(`[run-mutation] Stryker binary not found at ${strykerBin}`);
+  process.exit(1);
+}
+
+process.exit(run(strykerBin, ["run", ...strykerArgs], { cwd: root }));
