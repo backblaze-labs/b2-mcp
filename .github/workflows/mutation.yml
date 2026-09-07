@@ -76,7 +76,7 @@ jobs:
               process.exit(0);
             }
             const files = r.files || {};
-            let killed=0, survived=0, timeout=0, noCov=0, ignored=0, total=0;
+            let killed=0, survived=0, timeout=0, noCov=0, ignored=0, runtimeErr=0, compileErr=0, other=0, total=0;
             for (const f of Object.values(files)) {
               for (const m of f.mutants || []) {
                 total++;
@@ -85,12 +85,26 @@ jobs:
                 else if (m.status === 'Timeout') timeout++;
                 else if (m.status === 'NoCoverage') noCov++;
                 else if (m.status === 'Ignored') ignored++;
+                else if (m.status === 'RuntimeError') runtimeErr++;
+                else if (m.status === 'CompileError') compileErr++;
+                // Catch-all so the metric rows always sum to Total mutants even if
+                // Stryker adds a new status; without it, unknown statuses would
+                // silently inflate Total without appearing in any row.
+                else other++;
               }
             }
             const detected = killed + timeout;
             const valid = detected + survived + noCov;
+            // RuntimeError/CompileError/other are invalid mutants: excluded from the
+            // score by convention, but a large count means the run is broken and the
+            // score is misleading. The step is continue-on-error, so surface it here.
+            const invalid = runtimeErr + compileErr + other;
             const score = valid ? ((detected / valid) * 100).toFixed(2) : 'n/a';
             console.log('Mutation score: ' + score + '%');
+            if (invalid > 0) {
+              console.log('');
+              console.log('> ⚠️ ' + invalid + ' mutant(s) produced no valid result (RuntimeError/CompileError/other) and are excluded from the score. A large count usually means the mutation run is broken, so the score above may be misleading — check the job logs and the uploaded HTML report.');
+            }
             console.log('');
             console.log('| Metric | Count |');
             console.log('| --- | --- |');
@@ -99,6 +113,9 @@ jobs:
             console.log('| Survived | ' + survived + ' |');
             console.log('| No coverage | ' + noCov + ' |');
             console.log('| Ignored | ' + ignored + ' |');
+            console.log('| Runtime errors | ' + runtimeErr + ' |');
+            console.log('| Compile errors | ' + compileErr + ' |');
+            if (other > 0) console.log('| Other/unknown | ' + other + ' |');
             console.log('| Total mutants | ' + total + ' |');
           " >> "$GITHUB_STEP_SUMMARY" || echo '(mutation summary generation failed — see job logs)' >> "$GITHUB_STEP_SUMMARY"
       # actions/upload-artifact v7, reviewed 2026-08-25.
