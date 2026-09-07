@@ -37,6 +37,7 @@ opossum
 pino
 presigner
 QEMU
+SARIF
 SLSA
 spdxjson
 slsaprovenance
