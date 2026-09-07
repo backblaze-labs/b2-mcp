@@ -49,42 +49,55 @@ jobs:
         continue-on-error: true
         run: pnpm run test:mutation
       - name: Publish mutation score summary
+        # Runs on success or Stryker failure. Note: a job cancelled at
+        # `timeout-minutes` may skip even `if: always()` steps, so keep the
+        # `mutate` scope well under the timeout. When the report exists but is
+        # truncated/corrupt (interrupted mid-write), the parser below degrades
+        # to a note instead of aborting the step.
         if: always()
+        continue-on-error: true
         run: |
-          set -euo pipefail
+          set -uo pipefail
           echo "## Mutation testing (advisory)" >> "$GITHUB_STEP_SUMMARY"
-          if [ -f reports/mutation/mutation.json ]; then
-            node -e "
-              const r = require('./reports/mutation/mutation.json');
-              const files = r.files || {};
-              let killed=0, survived=0, timeout=0, noCov=0, ignored=0, total=0;
-              for (const f of Object.values(files)) {
-                for (const m of f.mutants || []) {
-                  total++;
-                  if (m.status === 'Killed') killed++;
-                  else if (m.status === 'Survived') survived++;
-                  else if (m.status === 'Timeout') timeout++;
-                  else if (m.status === 'NoCoverage') noCov++;
-                  else if (m.status === 'Ignored') ignored++;
-                }
-              }
-              const detected = killed + timeout;
-              const valid = detected + survived + noCov;
-              const score = valid ? ((detected / valid) * 100).toFixed(2) : 'n/a';
-              console.log('Mutation score: ' + score + '%');
-              console.log('');
-              console.log('| Metric | Count |');
-              console.log('| --- | --- |');
-              console.log('| Killed | ' + killed + ' |');
-              console.log('| Timeout | ' + timeout + ' |');
-              console.log('| Survived | ' + survived + ' |');
-              console.log('| No coverage | ' + noCov + ' |');
-              console.log('| Ignored | ' + ignored + ' |');
-              console.log('| Total mutants | ' + total + ' |');
-            " >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo '(reports/mutation/mutation.json not found)' >> "$GITHUB_STEP_SUMMARY"
+          if [ ! -f reports/mutation/mutation.json ]; then
+            echo '(reports/mutation/mutation.json not found — run did not complete)' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
           fi
+          node -e "
+            const { readFileSync } = require('node:fs');
+            let r;
+            try {
+              r = JSON.parse(readFileSync('./reports/mutation/mutation.json', 'utf8'));
+            } catch (err) {
+              console.log('(mutation.json unreadable or partial — run likely incomplete: ' + err.message + ')');
+              process.exit(0);
+            }
+            const files = r.files || {};
+            let killed=0, survived=0, timeout=0, noCov=0, ignored=0, total=0;
+            for (const f of Object.values(files)) {
+              for (const m of f.mutants || []) {
+                total++;
+                if (m.status === 'Killed') killed++;
+                else if (m.status === 'Survived') survived++;
+                else if (m.status === 'Timeout') timeout++;
+                else if (m.status === 'NoCoverage') noCov++;
+                else if (m.status === 'Ignored') ignored++;
+              }
+            }
+            const detected = killed + timeout;
+            const valid = detected + survived + noCov;
+            const score = valid ? ((detected / valid) * 100).toFixed(2) : 'n/a';
+            console.log('Mutation score: ' + score + '%');
+            console.log('');
+            console.log('| Metric | Count |');
+            console.log('| --- | --- |');
+            console.log('| Killed | ' + killed + ' |');
+            console.log('| Timeout | ' + timeout + ' |');
+            console.log('| Survived | ' + survived + ' |');
+            console.log('| No coverage | ' + noCov + ' |');
+            console.log('| Ignored | ' + ignored + ' |');
+            console.log('| Total mutants | ' + total + ' |');
+          " >> "$GITHUB_STEP_SUMMARY" || echo '(mutation summary generation failed — see job logs)' >> "$GITHUB_STEP_SUMMARY"
       # actions/upload-artifact v7, reviewed 2026-08-25.
       - name: Upload mutation reports
         if: always()
