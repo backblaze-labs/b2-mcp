@@ -46,32 +46,45 @@ function restoreGuardedFiles() {
   }
 }
 
-function run(command, args, { optional = false } = {}) {
+function run(command, args) {
   const result = spawnSync(command, args, { cwd: root, stdio: "inherit", shell: false });
   if (result.error) {
-    if (optional) return null;
     console.error(`\n[run-mutation] failed to spawn: ${command} ${args.join(" ")}`);
     throw result.error;
   }
-  return result.status ?? 0;
+  // `status` is null when the child was killed by a signal (e.g. OOM). Treat
+  // that as failure so an incomplete run is never reported as success.
+  if (result.status === null) {
+    console.error(`\n[run-mutation] ${command} terminated by signal ${result.signal ?? "unknown"}`);
+    return 1;
+  }
+  return result.status;
 }
 
 const strykerAlreadyInstalled = existsSync(join(root, "node_modules/@stryker-mutator/core"));
 
 let exitCode = 1;
 try {
+  let installed = strykerAlreadyInstalled;
   if (!strykerAlreadyInstalled) {
     console.log(`[run-mutation] installing ephemeral tooling: ${STRYKER_PACKAGES.join(" ")}`);
-    const addStatus = run("pnpm", ["add", "-D", ...STRYKER_PACKAGES]);
-    if (addStatus !== 0) {
+    // `-w` makes the workspace-root add explicit (pnpm rejects it otherwise on a
+    // clean checkout). `restoreGuardedFiles()` in `finally` reverts the manifest
+    // and lockfile so the committed files stay byte-for-byte unchanged.
+    const addStatus = run("pnpm", ["add", "-D", "-w", ...STRYKER_PACKAGES]);
+    if (addStatus === 0) {
+      installed = true;
+    } else {
       console.error("[run-mutation] ephemeral Stryker install failed");
-      process.exit(addStatus ?? 1);
+      exitCode = addStatus || 1;
     }
   } else {
     console.log("[run-mutation] Stryker already present in node_modules; skipping install");
   }
 
-  exitCode = run("pnpm", ["exec", "stryker", "run", ...strykerArgs]) ?? 1;
+  if (installed) {
+    exitCode = run("pnpm", ["exec", "stryker", "run", ...strykerArgs]);
+  }
 } finally {
   restoreGuardedFiles();
   console.log("[run-mutation] restored package.json and pnpm-lock.yaml to committed state");
