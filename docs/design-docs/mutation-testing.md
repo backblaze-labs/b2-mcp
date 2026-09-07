@@ -42,15 +42,20 @@ the package-budget gate keep out of the shipped root lockfile.
 
 Instead the toolchain lives in its own isolated project under
 [`tools/mutation/`](../../tools/mutation/) with its **own committed
-`package.json` and `pnpm-lock.yaml`**, outside the root workspace.
+`package.json`, `pnpm-workspace.yaml`, and `pnpm-lock.yaml`**. That nested
+workspace file makes the project self-contained under the repo root (the root
+`pnpm install` never descends into it) and carries the security overrides the
+root workspace applies (for example `qs >=6.16.0`).
 [`scripts/run-mutation.mjs`](../../scripts/run-mutation.mjs) installs it with
-`pnpm install --dir tools/mutation --ignore-workspace --frozen-lockfile`, so
-every run executes the exact reviewed versions with pinned integrity hashes
-(not newly resolved code), and then runs Stryker from the repo root. This:
+`pnpm install --dir tools/mutation --frozen-lockfile`, so every run executes the
+exact reviewed versions with pinned integrity hashes (not newly resolved code),
+and then runs Stryker from the repo root. This:
 
 - keeps the full transitive tree **pinned and reviewable** (its lockfile is
   scanned by the supply-chain denylist like any other), rather than resolved
   fresh on each weekly run;
+- applies the same **security overrides** as the root workspace, since the
+  nested `pnpm-workspace.yaml` mirrors the relevant ones;
 - **never modifies any tracked file**, so there is nothing to restore and no
   interrupt/cleanup hazard;
 - keeps `@babel/core` out of the root lockfile and the shipped package (the
