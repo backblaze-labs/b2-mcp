@@ -116,10 +116,10 @@ describe("README project badges", () => {
     // server path (which both the image and the link URL share). Guard the exact
     // score-image target so reverting it away from /badges/score.svg fails CI.
     expect(readme).toContain("glama.ai/mcp/servers/@backblaze-labs/b2-mcp/badges/score.svg");
-    // The LobeHub badge must keep both its shields image and its deterministic
-    // per-server listing URL, so dropping either fails CI rather than silently
-    // shipping a broken/absent badge.
-    expect(readme).toContain("img.shields.io/badge/LobeHub-b2--mcp");
+    // The LobeHub badge must keep both its official live-grade image and its
+    // deterministic per-server listing URL, so dropping either fails CI rather
+    // than silently shipping a broken/absent badge.
+    expect(readme).toContain("lobehub.com/badge/mcp/backblaze-labs-b2-mcp");
     expect(readme).toContain("lobehub.com/mcp/backblaze-labs-b2-mcp");
     // The MCP Registry badge must query the nested `$.servers[0].server.version`
     // path (encoded), matching the 2025-12-11 registry response shape. Guard
