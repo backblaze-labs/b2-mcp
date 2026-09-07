@@ -605,10 +605,37 @@ jobs:
           upload: never
       - name: Pull digest-pinned zizmor image
         run: docker pull "${ZIZMOR_IMAGE}"
+      # Source the gate's suppression config from the TRUSTED base ref, not the
+      # PR head, so a fork PR cannot add its own `ignore:` entry to suppress the
+      # finding that would flag its own dangerous workflow change (issue #405
+      # review). For push builds base==head, which is already trusted. Sparse so
+      # only zizmor.yml lands, in a sibling path outside the analyzed tree.
+      # actions/checkout v7, reviewed 2026-08-25.
+      - name: Checkout trusted zizmor config from base ref
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
+          persist-credentials: false
+          sparse-checkout: |
+            zizmor.yml
+          sparse-checkout-cone-mode: false
+          path: .zizmor-trusted
+      - name: Resolve trusted zizmor config
+        run: |
+          set -euo pipefail
+          if [ -f "${GITHUB_WORKSPACE}/.zizmor-trusted/zizmor.yml" ]; then
+            echo "ZIZMOR_CONFIG=.zizmor-trusted/zizmor.yml" >> "${GITHUB_ENV}"
+            echo "Gate config: trusted base-ref zizmor.yml."
+          else
+            # Bootstrap only: the base ref predates zizmor.yml (e.g. the PR that
+            # introduces it). Once merged, the base copy always governs the gate,
+            # so PR-head suppressions can never weaken it after this point.
+            echo "ZIZMOR_CONFIG=zizmor.yml" >> "${GITHUB_ENV}"
+            echo "::notice::Base ref has no zizmor.yml (bootstrap); using PR-head config for this run only."
+          fi
       # Gate pass: offline (`--network=none`), stricter `pedantic` persona, SARIF
       # output. `--format=sarif` always exits 0, so the gate is enforced by the
       # dedicated result-count step below rather than the process exit code.
-      # Suppressions are centralized in the checked-in `zizmor.yml`.
       - name: Run offline zizmor gate (SARIF)
         run: |
           set -euo pipefail
@@ -618,7 +645,7 @@ jobs:
             --volume "${GITHUB_WORKSPACE}:/workspace:ro" \
             --workdir /workspace \
             "${ZIZMOR_IMAGE}" \
-            --config zizmor.yml \
+            --config "${ZIZMOR_CONFIG}" \
             --persona=pedantic \
             --format=sarif \
             --collect=default \
@@ -628,13 +655,9 @@ jobs:
             --color=never \
             -- \
             . > "${RUNNER_TEMP}/zizmor-offline.sarif"
-      - name: Upload offline zizmor SARIF to code scanning
-        if: always()
-        # github/codeql-action/upload-sarif v4.37.9, reviewed 2026-09-07.
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938
-        with:
-          sarif_file: ${{ runner.temp }}/zizmor-offline.sarif
-          category: zizmor-offline
+      # Gate is decided SOLELY by the deterministic result count over the offline
+      # SARIF, and runs BEFORE the best-effort upload so a read-only fork token,
+      # network error, or rate limit on the upload can never fail the build.
       - name: Gate on offline zizmor findings
         run: |
           set -euo pipefail
@@ -644,9 +667,22 @@ jobs:
             echo "::error::zizmor gate failed with ${count} finding(s) at medium severity/confidence (pedantic). Fix the workflow or add a documented suppression to zizmor.yml."
             exit 1
           fi
+      - name: Upload offline zizmor SARIF to code scanning
+        if: always()
+        # Best-effort tracking: fork PRs get a read-only token that cannot write
+        # code scanning, so this must never gate the build (the step above does).
+        continue-on-error: true
+        # github/codeql-action/upload-sarif v4.37.9, reviewed 2026-09-07.
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938
+        with:
+          sarif_file: ${{ runner.temp }}/zizmor-offline.sarif
+          category: zizmor-offline
       # Advisory pass: online audits enabled (network + GITHUB_TOKEN for GitHub
       # API lookups), broadest `auditor`/low bar. Non-gating — its findings are
       # tracked in the Security -> Code scanning tab for triage, never block CI.
+      # The default read-scoped GITHUB_TOKEN is only used for read-only API
+      # lookups; the pass is advisory/continue-on-error and cannot upload with a
+      # write token (that happens in the separate, code-scanning upload step).
       - name: Run online zizmor audit (SARIF, advisory)
         continue-on-error: true
         env:
@@ -659,7 +695,7 @@ jobs:
             --workdir /workspace \
             --env GH_TOKEN \
             "${ZIZMOR_IMAGE}" \
-            --config zizmor.yml \
+            --config "${ZIZMOR_CONFIG}" \
             --persona=auditor \
             --format=sarif \
             --collect=default \
