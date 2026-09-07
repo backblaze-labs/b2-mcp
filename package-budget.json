@@ -23,23 +23,23 @@
     "packedTarballBytes": 660000,
     "unpackedPackageBytes": 2962000,
     "packedEntryCount": 280,
-    "cleanConsumerInstallFootprintBytes": 33500000
+    "cleanConsumerInstallFootprintBytes": 33850000
   },
   "directProductionDependencies": {
     "@aws-sdk/client-s3": {
       "purpose": "Permanent primary AWS S3 SDK dependency for B2's S3-compatible s3_* data-plane tools and usage-report object reads.",
       "policy": "Must remain isolated behind src/s3/aws-sdk-adapter.ts; tool handlers must not construct AWS clients directly.",
-      "version": "3.1119.0",
-      "resolved": "https://registry.npmjs.org/@aws-sdk/client-s3/-/client-s3-3.1119.0.tgz",
-      "integrity": "sha512-8+UH1uBWwjbRu0ugTBhJ/cu3rL/vzf1tm9/3+xZGf1uybIO3HTF2xLJJaTKkRPvzxz8/n/w+YrwoHGZ2Q/a2Zg==",
+      "version": "3.1125.0",
+      "resolved": "https://registry.npmjs.org/@aws-sdk/client-s3/-/client-s3-3.1125.0.tgz",
+      "integrity": "sha512-l0npObtjYgqDfUHiifnWGFuAuMVq5r4AVf4C+jY+thJ/2iAr/eHqAjBR4clbmXxSoJ5w3+ZFGRPyci/CCkUoyg==",
       "owner": "@goanpeca"
     },
     "@aws-sdk/s3-request-presigner": {
       "purpose": "Permanent primary presigning dependency for B2 S3-compatible GetObject, PutObject, and UploadPart bearer URLs.",
       "policy": "Must remain isolated behind src/s3/aws-sdk-adapter.ts; presigned URL tool handlers use the repository-owned adapter contract.",
-      "version": "3.1119.0",
-      "resolved": "https://registry.npmjs.org/@aws-sdk/s3-request-presigner/-/s3-request-presigner-3.1119.0.tgz",
-      "integrity": "sha512-yEqb0ispm9uXZ7nk5stErMB7yn43j3XCAaHM15MsdWaCk7RvEmGjYdbyHZcH86JpUg7mk1v1m2xwzLj2o+3uCg==",
+      "version": "3.1125.0",
+      "resolved": "https://registry.npmjs.org/@aws-sdk/s3-request-presigner/-/s3-request-presigner-3.1125.0.tgz",
+      "integrity": "sha512-WGK4s9XWk57ZvzfUw0j1m9xgKqCElZHVp5P80MQJCGV8A3Rpy2fAjDKrfauXQvBRHdECpijXpajpI/+X8Tsv+A==",
       "owner": "@goanpeca"
     },
     "@backblaze-labs/b2-sdk": {
@@ -88,9 +88,9 @@
     "zod": {
       "purpose": "MCP tool input schemas supplied to the server runtime.",
       "policy": "Schema package additions require review; do not duplicate validation stacks.",
-      "version": "4.4.3",
-      "resolved": "https://registry.npmjs.org/zod/-/zod-4.4.3.tgz",
-      "integrity": "sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ=="
+      "version": "4.5.4",
+      "resolved": "https://registry.npmjs.org/zod/-/zod-4.5.4.tgz",
+      "integrity": "sha512-sC95tT5iHHH9gtpj6A81kh+NEaRAUFN+qlUPDUbRfOMvNf5QCBqsb3WgvnpVtK5Y+4UfA6KqufotuTvMGiTlsA=="
     }
   },
   "runtimeImportPolicy": {

@@ -1176,15 +1176,8 @@
                 "description": "Retention mode. null clears the retention policy (governance mode only, with bypassGovernance)."
               },
               "retainUntilTimestamp": {
-                "anyOf": [
-                  {
-                    "type": "number"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "description": "Unix timestamp (ms) until which the file is retained. null when mode is null."
+                "description": "Unix timestamp (ms) until which the file is retained. null when mode is null.",
+                "type": ["number", "null"]
               }
             },
             "required": ["mode", "retainUntilTimestamp"],
@@ -2078,5 +2071,5 @@
       "resultType": "complete"
     }
   },
-  "hash": "22f0627f1427f86eeb354c917cd6c009b26df85668c0e721da364fc4090e1aa5"
+  "hash": "a8b631d6b87d8fbe6956cc558ab760efbc5f37eca9350577869d5ce6c292eba3"
 }

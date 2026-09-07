@@ -353,7 +353,7 @@ pnpm run start:http --port 3000   # MCP 2026-07-28 HTTP transport
 pnpm run smoke:local        # deterministic local MCP smoke; no endpoint or B2 credentials
 ```
 
-The full script list (diagnostics, slow tests, provider-comparison evals, inspector smoke) is in [`docs/TESTING.md`](docs/TESTING.md). Compatible MCP Inspector: `@modelcontextprotocol/inspector@2.4.0` (Node.js 22.19.0+), run via `pnpm run smoke:inspector`.
+The full script list (diagnostics, slow tests, provider-comparison evals, inspector smoke) is in [`docs/TESTING.md`](docs/TESTING.md). Compatible MCP Inspector: `@modelcontextprotocol/inspector@2.5.0` (Node.js 22.19.0+), run via `pnpm run smoke:inspector`.
 
 ## Documentation
 
