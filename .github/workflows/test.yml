@@ -577,12 +577,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
-      # CodeQL reads the Actions run graph during analysis.
-      actions: read
-      # Checkout of the repository under analysis.
-      contents: read
-      # Upload zizmor SARIF to the Security -> Code scanning tab.
-      security-events: write
+      actions: read # CodeQL reads the Actions run graph during analysis.
+      contents: read # Checkout of the repository under analysis.
+      security-events: write # Upload zizmor SARIF to the code scanning tab.
     env:
       # Digest-pinned zizmor image, shared by every scan step. Track any bump by
       # digest (Track 3 of issue #405), never by a floating tag.
@@ -691,9 +688,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
-      # Read-only. The container receives only a read-scoped GITHUB_TOKEN for
-      # GitHub API lookups and cannot write code scanning from here.
-      contents: read
+      contents: read # Read-only token: the networked container gets no write scope.
     env:
       # zizmor 1.29.0, reviewed 2026-09-07.
       ZIZMOR_IMAGE: ghcr.io/zizmorcore/zizmor:1.29.0@sha256:863026d54f91271b10b60b67ad8054cb37120167e162482597db102b3026a284
@@ -747,10 +742,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      # Upload-only. This job never runs the untrusted container; it only
-      # forwards the already-produced SARIF artifact to code scanning.
-      security-events: write
-      actions: read
+      security-events: write # Upload-only (no container): forward SARIF to code scanning.
+      actions: read # Read the workflow run graph during the SARIF upload.
     steps:
       - name: Download online zizmor SARIF artifact
         id: download
@@ -964,7 +957,7 @@ jobs:
       group: ci-green-${{ github.repository }}-main
       cancel-in-progress: false
     permissions:
-      contents: write
+      contents: write # Force-advance the owned ci-green marker ref on main.
     steps:
       # actions/checkout v7, reviewed 2026-08-25.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1

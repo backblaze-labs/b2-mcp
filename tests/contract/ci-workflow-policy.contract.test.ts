@@ -396,10 +396,16 @@ describe("CI workflow policy", () => {
     const onlineScan = workflowJob("zizmor-online-scan");
     expect(onlineScan).toContain("--persona=auditor");
     expect(onlineScan).toContain("GH_TOKEN: ${{ github.token }}");
-    expect(onlineScan).toContain("continue-on-error: true");
     expect(onlineScan).toContain("contents: read");
     expect(onlineScan).not.toContain("security-events: write");
     expect(onlineScan).toContain("name: zizmor-online-sarif");
+    // The audit step itself must be advisory: scope continue-on-error to the
+    // named audit step so it stays non-gating even if other steps change.
+    const auditStep =
+      onlineScan.match(/- name: Run online zizmor audit[\s\S]*?(?=\n {6}- name:|\n {4}\S)/)?.[0] ??
+      "";
+    expect(auditStep).toContain("continue-on-error: true");
+    expect(auditStep).toContain("--persona=auditor");
 
     const onlineUpload = workflowJob("zizmor-online-upload");
     expect(onlineUpload).toContain("security-events: write");
