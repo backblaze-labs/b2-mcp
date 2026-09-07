@@ -64,7 +64,16 @@ and then runs Stryker from the repo root. This:
 `vitest` is pinned in the tooling manifest to the exact root version, so mutation
 testing runs against the same test-runner major as the suite it assesses; the
 `typescript` peer resolves from the root `node_modules`, an ancestor of
-`tools/mutation/`. `pnpm dlx` cannot be used because Stryker resolves its runner
+`tools/mutation/`.
+
+The mutation toolchain declares its own, narrower `engines.node`
+(`^22.18.0 || >=24.11.0`), because the Stryker/Babel 8 instrumenter requires it.
+This is a deliberate subset of the shipped package's supported range
+(`^22.22.2 || ^24 || ^26`): on Node 24.0-24.10 the advisory tooling cannot run.
+[`scripts/run-mutation.mjs`](../../scripts/run-mutation.mjs) preflights the
+current Node against that declared range and fails fast with a clear message
+instead of a cryptic mid-install `engine-strict` abort. CI pins Node 22.23.1,
+which is inside the range. `pnpm dlx` cannot be used because Stryker resolves its runner
 plugin from its own `node_modules` and its peers from that node_modules /
 ancestor chain, which dlx isolation does not provide. Running under Babel
 instrumentation from a separate toolchain is slower than a plain unit run, which

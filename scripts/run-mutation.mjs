@@ -36,13 +36,60 @@
  *   pnpm run test:mutation -- --mutate=src/auth.ts
  */
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const toolingDir = join(root, "tools", "mutation");
+
+// The Stryker/Babel 8 instrumenter requires a narrower Node range than the
+// shipped package (`@babel/core` needs `^22.18.0 || >=24.11.0`). The repo's own
+// `engines` allow `^24`, so a supported Node 24.0-24.10 would otherwise abort
+// the frozen install mid-flight with a cryptic engine-strict error. Read the
+// tooling's declared requirement and fail fast with a clear, documented message
+// instead. Supports the `^x.y.z` and `>=x.y.z` clauses joined by `||`.
+function parseVersion(version) {
+  return version
+    .replace(/^v/, "")
+    .split(".")
+    .map((part) => Number.parseInt(part, 10));
+}
+
+function compareVersion(a, b) {
+  for (let i = 0; i < 3; i += 1) {
+    if ((a[i] ?? 0) !== (b[i] ?? 0)) return (a[i] ?? 0) - (b[i] ?? 0);
+  }
+  return 0;
+}
+
+function satisfies(version, range) {
+  const current = parseVersion(version);
+  return range.split("||").some((rawClause) => {
+    const clause = rawClause.trim();
+    if (clause.startsWith(">=")) {
+      return compareVersion(current, parseVersion(clause.slice(2).trim())) >= 0;
+    }
+    if (clause.startsWith("^")) {
+      const min = parseVersion(clause.slice(1).trim());
+      // Caret allows changes that do not modify the left-most non-zero major.
+      return compareVersion(current, min) >= 0 && current[0] === min[0];
+    }
+    return false;
+  });
+}
+
+const toolingEngines =
+  JSON.parse(readFileSync(join(toolingDir, "package.json"), "utf8")).engines?.node ?? "";
+if (toolingEngines && !satisfies(process.version, toolingEngines)) {
+  console.error(
+    `[run-mutation] Node ${process.version} is outside the mutation toolchain's ` +
+      `supported range (${toolingEngines}). The Stryker/Babel 8 instrumenter ` +
+      `requires it; use a Node in that range (CI pins 22.23.1) and re-run.`,
+  );
+  process.exit(1);
+}
 // Drop the `--` separator that `pnpm run test:mutation -- <flags>` forwards, so
 // Stryker's `run` command sees only real flags. Use the `--mutate=<file>` form
 // (equals sign); Stryker's `run` rejects the space-separated form as a stray
