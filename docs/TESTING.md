@@ -133,11 +133,15 @@ Run it with:
 
 ```bash
 pnpm run test:mutation                            # full prioritized baseline
-pnpm run test:mutation -- --mutate src/auth.ts    # scope to one module
+pnpm run test:mutation -- --mutate=src/auth.ts    # scope to one module (equals form)
 ```
 
-Like the performance baseline, it is advisory first: `thresholds.break` is
-`null`, and CI runs it in a standalone non-blocking workflow
+StrykerJS is intentionally not a committed dependency; the `test:mutation`
+wrapper installs it into `node_modules` on demand and restores the manifest
+afterward, keeping the Babel instrumenter tree out of the shipped lockfile (see
+the design doc for why). Like the performance baseline, it is advisory first:
+`thresholds.break` is `null`, and CI runs it in a standalone non-blocking
+workflow
 ([`.github/workflows/mutation.yml`](../.github/workflows/mutation.yml)) on a
 weekly schedule and on demand, not on every PR and not in the required gate.
 Reports land in `reports/mutation/`. The baseline score and the highest-value

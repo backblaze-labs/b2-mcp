@@ -21,7 +21,7 @@ code broken: a hole in the assertions.
 
 ```bash
 pnpm run test:mutation                                  # full prioritized baseline
-pnpm run test:mutation -- --mutate src/auth.ts          # scope to one module (note the -- for extra flags)
+pnpm run test:mutation -- --mutate=src/auth.ts          # scope to one module (equals form required)
 ```
 
 - Config: [`stryker.config.mjs`](../../stryker.config.mjs). Test runner is the
@@ -30,6 +30,23 @@ pnpm run test:mutation -- --mutate src/auth.ts          # scope to one module (n
   credential-free, unit-only view — no build step, no coverage thresholds).
 - Reports land in the gitignored `reports/mutation/` (`mutation.html` for
   browsing surviving mutants; `mutation.json` for tooling).
+- Scope a single module with `--mutate=<file>` (the equals form; Stryker's
+  `run` command rejects the space-separated form as a stray argument).
+
+### Stryker is an ephemeral, non-committed dependency
+
+`pnpm run test:mutation` runs [`scripts/run-mutation.mjs`](../../scripts/run-mutation.mjs),
+which installs `@stryker-mutator/core` and `@stryker-mutator/vitest-runner`
+(pinned to `10.0.0`) into `node_modules` on demand, runs Stryker, then restores
+`package.json` and `pnpm-lock.yaml` so the working tree is left byte-for-byte
+clean. Stryker is **deliberately not** a committed dependency: its Babel-based
+instrumenter pulls in `@babel/core` and a large transitive tree that the
+`security-remediation` contract (no reintroduced Babel/Jest transform stack) and
+the package-budget gate keep out of the shipped lockfile. `pnpm dlx` cannot be
+used because Stryker resolves its runner plugin and `typescript`/`vitest` peers
+relative to its own location, which dlx isolation does not provide. The ephemeral
+packages remain in the gitignored `node_modules` and are dropped by the next
+`pnpm install --frozen-lockfile`.
 
 ### Static mutants are ignored (performance tradeoff)
 
