@@ -363,10 +363,10 @@ describe("CI workflow policy", () => {
     expect(workflowSecurity).toContain("actions: read");
     expect(workflowSecurity).toContain("security-events: write");
     expect(workflowSecurity).toContain(
-      "github/codeql-action/init@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28",
+      "github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938",
     );
     expect(workflowSecurity).toContain(
-      "github/codeql-action/analyze@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28",
+      "github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938",
     );
     expect(workflowSecurity).toContain("upload: never");
     expect(workflowSecurity).toContain("persist-credentials: false");
