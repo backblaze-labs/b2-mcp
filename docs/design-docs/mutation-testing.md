@@ -33,20 +33,35 @@ pnpm run test:mutation -- --mutate=src/auth.ts          # scope to one module (e
 - Scope a single module with `--mutate=<file>` (the equals form; Stryker's
   `run` command rejects the space-separated form as a stray argument).
 
-### Stryker is an ephemeral, non-committed dependency
+### Stryker lives in an isolated, checked-in toolchain
 
-`pnpm run test:mutation` runs [`scripts/run-mutation.mjs`](../../scripts/run-mutation.mjs),
-which installs `@stryker-mutator/core` and `@stryker-mutator/vitest-runner`
-(pinned to `10.0.0`) into `node_modules` on demand, runs Stryker, then restores
-`package.json` and `pnpm-lock.yaml` so the working tree is left byte-for-byte
-clean. Stryker is **deliberately not** a committed dependency: its Babel-based
-instrumenter pulls in `@babel/core` and a large transitive tree that the
+Stryker is **deliberately not** a root dependency: its Babel-based instrumenter
+pulls in `@babel/core` and a large transitive tree that the
 `security-remediation` contract (no reintroduced Babel/Jest transform stack) and
-the package-budget gate keep out of the shipped lockfile. `pnpm dlx` cannot be
-used because Stryker resolves its runner plugin and `typescript`/`vitest` peers
-relative to its own location, which dlx isolation does not provide. The ephemeral
-packages remain in the gitignored `node_modules` and are dropped by the next
-`pnpm install --frozen-lockfile`.
+the package-budget gate keep out of the shipped root lockfile.
+
+Instead the toolchain lives in its own isolated project under
+[`tools/mutation/`](../../tools/mutation/) with its **own committed
+`package.json` and `pnpm-lock.yaml`**, outside the root workspace.
+[`scripts/run-mutation.mjs`](../../scripts/run-mutation.mjs) installs it with
+`pnpm install --dir tools/mutation --ignore-workspace --frozen-lockfile`, so
+every run executes the exact reviewed versions with pinned integrity hashes
+(not newly resolved code), and then runs Stryker from the repo root. This:
+
+- keeps the full transitive tree **pinned and reviewable** (its lockfile is
+  scanned by the supply-chain denylist like any other), rather than resolved
+  fresh on each weekly run;
+- **never modifies any tracked file**, so there is nothing to restore and no
+  interrupt/cleanup hazard;
+- keeps `@babel/core` out of the root lockfile and the shipped package (the
+  Babel tree stays in the gitignored `tools/mutation/node_modules`).
+
+`pnpm dlx` cannot be used because Stryker resolves its runner plugin from its own
+`node_modules` and its `typescript`/`vitest` peers from an ancestor
+`node_modules`; dlx isolation provides neither. Running under Babel
+instrumentation from a separate toolchain is slower than a plain unit run, which
+is why `vitest.mutation.config.mts` uses a generous `testTimeout` and the CI job
+allows extra wall-clock.
 
 ### Static mutants are ignored (performance tradeoff)
 
