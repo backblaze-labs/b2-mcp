@@ -371,16 +371,27 @@ describe("CI workflow policy", () => {
     expect(workflowSecurity).toContain("upload: never");
     expect(workflowSecurity).toContain("persist-credentials: false");
     expect(workflowSecurity).not.toContain("zizmor-action");
-    expect(workflowSecurity).not.toContain("GH_TOKEN");
-    expect(workflowSecurity).not.toContain("github.token");
     expect(workflowSecurity).toContain(
       "ghcr.io/zizmorcore/zizmor:1.29.0@sha256:863026d54f91271b10b60b67ad8054cb37120167e162482597db102b3026a284",
     );
+    // Offline gate: locked down (no network), pedantic, SARIF-emitting, and
+    // gated deterministically by the SARIF result count.
     expect(workflowSecurity).toContain("--network=none");
-    expect(workflowSecurity).toContain("--format=github");
+    expect(workflowSecurity).toContain("--format=sarif");
     expect(workflowSecurity).toContain("--no-online-audits");
+    expect(workflowSecurity).toContain("--persona=pedantic");
     expect(workflowSecurity).toContain("--min-severity=medium");
     expect(workflowSecurity).toContain("--min-confidence=medium");
+    expect(workflowSecurity).toContain(
+      "github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938",
+    );
+    expect(workflowSecurity).toContain("category: zizmor-offline");
+    // Advisory online pass: uses only the read-scoped default GITHUB_TOKEN,
+    // runs the broadest auditor bar, and is continue-on-error so it never gates.
+    expect(workflowSecurity).toContain("--persona=auditor");
+    expect(workflowSecurity).toContain("GH_TOKEN: ${{ github.token }}");
+    expect(workflowSecurity).toContain("continue-on-error: true");
+    expect(workflowSecurity).toContain("category: zizmor-online");
   });
 
   it("keeps the cross-platform fast suite on the minimum Node runtime", () => {
