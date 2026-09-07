@@ -13,7 +13,7 @@
  * `thresholds.break` (and gate the CI job) only after the baseline is stable.
  *
  * Run: `pnpm run test:mutation`
- * Scope a single file: `pnpm run test:mutation -- --mutate src/auth.ts`
+ * Scope a single file: `pnpm run test:mutation -- --mutate=src/auth.ts`
  *
  * @type {import('@stryker-mutator/api/core').PartialStrykerOptions}
  */
