@@ -135,7 +135,7 @@
     "@vercel/node": "10.0.0",
     "@vitest/coverage-v8": "^4.1.11",
     "commonmark": "0.31.2",
-    "cspell": "^10.1.1",
+    "cspell": "^10.2.1",
     "eslint": "10.9.1",
     "eslint-plugin-jsdoc": "64.3.4",
     "eslint-plugin-tsdoc": "0.5.2",
