@@ -4,8 +4,166 @@
   "homepage": "https://github.com/backblaze-labs/b2-mcp#readme",
   "identifier": "backblaze-labs-b2-mcp",
   "name": "Backblaze B2 MCP Server",
-  "prompts": [],
-  "resources": [],
+  "prompts": [
+    {
+      "name": "b2_audit_public_exposure",
+      "title": "Audit public B2 exposure",
+      "description": "List public B2 buckets directly and produce a read-only exposure summary with remediation options.",
+      "arguments": [
+        {
+          "name": "limit",
+          "description": "Maximum buckets to inspect, from 1 to 1000.",
+          "required": false
+        },
+        {
+          "name": "includeRemediationPlan",
+          "description": "Whether to include proposed remediation steps for public buckets.",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "b2_configure_lifecycle_cost_rules",
+      "title": "Configure lifecycle cost rules",
+      "description": "Prepare cost-optimization lifecycle rules for a named B2 bucket without bypassing destructive confirmations.",
+      "arguments": [
+        {
+          "name": "bucketName",
+          "description": "Name of the B2 bucket to configure.",
+          "required": true
+        },
+        {
+          "name": "objectNamePrefix",
+          "description": "Optional object prefix the lifecycle rules should target.",
+          "required": false
+        },
+        {
+          "name": "currentVersionsToHideAfterDays",
+          "description": "Optional age in days after which current versions should be hidden.",
+          "required": false
+        },
+        {
+          "name": "hiddenVersionsToDeleteAfterDays",
+          "description": "Optional age in days after which noncurrent versions should expire.",
+          "required": false
+        },
+        {
+          "name": "unfinishedLargeFileCancelDays",
+          "description": "Days after initiation to cancel unfinished multipart uploads.",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "b2_provision_locked_bucket",
+      "title": "Provision Object Lock bucket",
+      "description": "Provision a B2 bucket with Object Lock enabled and a default retention policy.",
+      "arguments": [
+        {
+          "name": "bucketName",
+          "description": "Globally unique B2 bucket name.",
+          "required": true
+        },
+        {
+          "name": "retentionMode",
+          "description": "Default Object Lock retention mode for new objects.",
+          "required": true
+        },
+        {
+          "name": "retentionDuration",
+          "description": "Default retention duration for new objects.",
+          "required": true
+        },
+        {
+          "name": "retentionUnit",
+          "description": "Unit for the retention duration.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "b2_review_bucket_notifications",
+      "title": "Review B2 notifications",
+      "description": "Review a B2 bucket's event-notification rules and propose non-executable changes when retained rules contain redactions.",
+      "arguments": [
+        {
+          "name": "bucketId",
+          "description": "B2 bucket ID whose notification rules to review.",
+          "required": true
+        },
+        {
+          "name": "expectedEventTypes",
+          "description": "Optional comma-separated event types the bucket should notify on.",
+          "required": false
+        },
+        {
+          "name": "objectNamePrefix",
+          "description": "Optional object prefix that notification rules should cover.",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "b2_rotate_application_key",
+      "title": "Rotate application key",
+      "description": "Plan a safe B2 application-key rotation: inspect the old key, reject broader replacements, verify it, then revoke the old key.",
+      "arguments": [
+        {
+          "name": "oldApplicationKeyId",
+          "description": "Application key ID to replace.",
+          "required": true
+        },
+        {
+          "name": "replacementKeyName",
+          "description": "Name for the replacement key.",
+          "required": true
+        },
+        {
+          "name": "capabilities",
+          "description": "Optional comma-separated replacement capabilities.",
+          "required": false
+        },
+        {
+          "name": "bucketIds",
+          "description": "Optional comma-separated bucket restrictions for the replacement key.",
+          "required": false
+        },
+        {
+          "name": "namePrefix",
+          "description": "Optional file-name prefix restriction.",
+          "required": false
+        },
+        {
+          "name": "validDurationInSeconds",
+          "description": "Optional replacement key lifetime in seconds.",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "resources": [
+    {
+      "name": "b2_server_config",
+      "title": "B2 MCP Server Config",
+      "uri": "b2://server-config",
+      "description": "Non-secret Backblaze B2 MCP server configuration.",
+      "mimeType": "application/json"
+    },
+    {
+      "name": "b2_capabilities",
+      "title": "B2 Credential Capabilities",
+      "uri": "b2://capabilities",
+      "description": "Current B2 credential capability set and active MCP tool profile.",
+      "mimeType": "application/json"
+    },
+    {
+      "name": "b2_bucket",
+      "title": "B2 Bucket",
+      "uriTemplate": "b2://bucket/{bucketName}",
+      "description": "Read-only B2 bucket control-plane configuration by bucket name. resources/list is capped at 100 concrete bucket resources; resources/read can still target any known bucket name permitted by the credential.",
+      "mimeType": "application/json"
+    }
+  ],
   "tags": ["mcp", "backblaze", "b2", "cloud-storage", "s3", "ai", "object-storage"],
   "tools": [
     {
