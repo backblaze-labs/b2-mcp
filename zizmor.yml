@@ -7,6 +7,28 @@
 #
 # Docs: https://docs.zizmor.sh/configuration/
 rules:
+  ref-version-mismatch:
+    ignore:
+      # Repo-wide convention. Every action is SHA-pinned and annotated with a
+      # human-reviewed comment on the PRECEDING line
+      # (`# <action> vX.Y.Z, reviewed <date>`), which is stricter than the
+      # inline `# vX.Y.Z` tag this audit looks for. ref-version-mismatch only
+      # recognizes an inline same-line comment, so it reports the entire pinned
+      # surface (200+ uses) as false positives against that convention. The pin
+      # digests and their reviewed dates are the source of truth; adding a
+      # second inline version tag would duplicate that metadata and invite the
+      # drift this convention avoids. Accepted for every workflow (zizmor has no
+      # glob support, so each file is listed explicitly).
+      - codeql.yml
+      - contract.yml
+      - docs.yml
+      - evals.yml
+      - mutation.yml
+      - publish.yml
+      - quality-keeper.yml
+      - release-tag.yml
+      - smoke.yml
+      - test.yml
   dangerous-triggers:
     ignore:
       # Publish Package runs on `workflow_run` from the unprivileged "Release

@@ -685,6 +685,9 @@ jobs:
       # write token (that happens in the separate, code-scanning upload step).
       - name: Run online zizmor audit (SARIF, advisory)
         continue-on-error: true
+        # Bounded well below the job's 20-minute budget so a hung network scan
+        # cannot consume the gate job's time and cancel the build.
+        timeout-minutes: 8
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -708,6 +711,8 @@ jobs:
         if: always()
         # Advisory: a failed online scan/upload must never gate CI.
         continue-on-error: true
+        # Bounded so a stuck code-scanning upload cannot exhaust the job budget.
+        timeout-minutes: 5
         # github/codeql-action/upload-sarif v4.37.9, reviewed 2026-09-07.
         uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938
         with:
