@@ -27,11 +27,10 @@ const lhm = readJson<{ tools: LhmTool[] }>("lhm.plugin.json");
 const lhmByName = Object.fromEntries(lhm.tools.map((tool) => [tool.name, tool]));
 
 /**
- * Normalize a JSON Schema for cross-generator comparison. Two facts differ only
+ * Normalize a JSON Schema for cross-generator comparison. One fact differs only
  * as generated metadata between `z.toJSONSchema` (the live SDK path) and the
- * `lhm plugin init` capture, so they are the only things stripped:
+ * `lhm plugin init` capture, so it is the only thing stripped:
  *
- * - the `$schema` dialect URL, which `lhm` drops;
  * - the closed-object `additionalProperties: false` marker that zod emits for
  *   every object but `lhm` omits (record value schemas, where
  *   `additionalProperties` is itself a schema object, are preserved);
@@ -39,6 +38,8 @@ const lhmByName = Object.fromEntries(lhm.tools.map((tool) => [tool.name, tool]))
  *   generators disagree on — a defaulted field is optional, so it is dropped
  *   from `required` on both sides.
  *
+ * The `$schema` dialect URL is now compared, not stripped: the inline-sink
+ * generator emits it, so a missing or incorrect dialect URI must fail drift.
  * Everything else — types, enums, `minimum`/`maximum`/`minLength`/`maxLength`,
  * patterns, descriptions, `items`, and nested `properties` — is compared exactly.
  */
@@ -48,7 +49,6 @@ function normalizeSchema(value: unknown): unknown {
     const source = value as Record<string, unknown>;
     const out: Record<string, unknown> = {};
     for (const [key, val] of Object.entries(source)) {
-      if (key === "$schema") continue;
       if (key === "additionalProperties" && val === false) continue;
       out[key] = normalizeSchema(val);
     }
