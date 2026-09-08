@@ -107,11 +107,10 @@ describe("oauth malformed bearer token rejection", () => {
   });
 
   it("rejects a request with no Authorization header", async () => {
-    const result = await authenticateOAuthRequest(
-      new Request(oauthConfig.publicUrl),
-      oauthConfig,
-      { fetch: rejectingFetch, nowSeconds: () => 1_000 },
-    );
+    const result = await authenticateOAuthRequest(new Request(oauthConfig.publicUrl), oauthConfig, {
+      fetch: rejectingFetch,
+      nowSeconds: () => 1_000,
+    });
     expect(result).toBeInstanceOf(Response);
     expect((result as Response).status).toBe(401);
   });
@@ -140,7 +139,9 @@ describe("oauth aborted in-flight verification", () => {
 
 describe("oauth pre-verified auth info validation", () => {
   it("accepts auth info that satisfies every deployment rule", () => {
-    expect(() => validatePreverifiedOAuthAuthInfo(baseAuthInfo(), oauthConfig, () => 1_000)).not.toThrow();
+    expect(() =>
+      validatePreverifiedOAuthAuthInfo(baseAuthInfo(), oauthConfig, () => 1_000),
+    ).not.toThrow();
   });
 
   it("rejects an untrusted issuer", () => {
@@ -176,7 +177,9 @@ describe("oauth pre-verified auth info validation", () => {
     const info = baseAuthInfo();
     (info.extra as Record<string, unknown>).alg = "HS256";
     const permissiveConfig = { ...oauthConfig, allowedAlgorithms: [] } as OAuthJwtVerifierConfig;
-    expect(() => validatePreverifiedOAuthAuthInfo(info, permissiveConfig, () => 1_000)).not.toThrow();
+    expect(() =>
+      validatePreverifiedOAuthAuthInfo(info, permissiveConfig, () => 1_000),
+    ).not.toThrow();
   });
 
   it("loads a hardened default config with a non-empty algorithm allow-list", () => {

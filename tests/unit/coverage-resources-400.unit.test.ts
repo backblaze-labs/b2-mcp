@@ -37,10 +37,14 @@ async function connect(
   } = {},
 ) {
   const fake =
-    options.fake ?? new DeterministicB2NativeFake({ capabilities: options.capabilities ?? undefined });
+    options.fake ??
+    new DeterministicB2NativeFake({ capabilities: options.capabilities ?? undefined });
   installSdkTransport(fake);
   const server = createServer(options.config ?? testConfig, options.capabilities);
-  const client = new Client({ name: "b2-mcp-resource-cov", version: "1.0.0" }, { defaultCacheTtlMs: 0 });
+  const client = new Client(
+    { name: "b2-mcp-resource-cov", version: "1.0.0" },
+    { defaultCacheTtlMs: 0 },
+  );
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
   await client.connect(clientTransport);

@@ -33,9 +33,7 @@ function bucketFixture() {
  * Build a bucket-tool harness over an in-memory B2 client double whose
  * notification-rule response can be customized per test.
  */
-function makeHarness(
-  notificationRules?: unknown,
-): { tools: ToolHarness; calls: Recorded[] } {
+function makeHarness(notificationRules?: unknown): { tools: ToolHarness; calls: Recorded[] } {
   const calls: Recorded[] = [];
   const b2 = {
     async createBucket(input: unknown) {
@@ -93,7 +91,11 @@ describe("buckets webhook URL guard (SSRF defense-in-depth)", () => {
   });
 
   it.each([
-    { name: "IPv6 zone identifier", url: "https://[fe80::1%25en0]/hook", reason: "zone identifier" },
+    {
+      name: "IPv6 zone identifier",
+      url: "https://[fe80::1%25en0]/hook",
+      reason: "zone identifier",
+    },
     { name: "non-canonical numeric host", url: "https://127.1/hook", reason: "numeric IP address" },
     { name: "unparseable URL", url: "ht!tp://x", reason: "is not a valid URL" },
     { name: "non-https scheme", url: "http://example.com/hook", reason: "must use https" },
@@ -103,10 +105,18 @@ describe("buckets webhook URL guard (SSRF defense-in-depth)", () => {
       reason: "must not include credentials",
     },
     { name: "localhost", url: "https://localhost/hook", reason: "must not target localhost" },
-    { name: "dotted localhost", url: "https://api.localhost/hook", reason: "must not target localhost" },
+    {
+      name: "dotted localhost",
+      url: "https://api.localhost/hook",
+      reason: "must not target localhost",
+    },
     { name: "hex numeric host", url: "https://0x7f000001/hook", reason: "IP address" },
     { name: "private IPv4 literal", url: "https://10.0.0.1/hook", reason: "non-public IP address" },
-    { name: "link-local metadata IPv4", url: "https://169.254.169.254/latest", reason: "non-public IP address" },
+    {
+      name: "link-local metadata IPv4",
+      url: "https://169.254.169.254/latest",
+      reason: "non-public IP address",
+    },
     { name: "ULA IPv6 literal", url: "https://[fec0::1]/hook", reason: "non-public IP address" },
     {
       name: "IPv4-mapped IPv6 literal",
@@ -184,7 +194,10 @@ describe("buckets handler option normalization", () => {
       defaultServerSideEncryption: { mode: "none" },
     });
     const creates = calls.filter((c) => c.operation === "createBucket").map((c) => c.input as any);
-    expect(creates[0].defaultServerSideEncryption).toEqual({ mode: "SSE-B2", algorithm: undefined });
+    expect(creates[0].defaultServerSideEncryption).toEqual({
+      mode: "SSE-B2",
+      algorithm: undefined,
+    });
     expect(creates[1].defaultServerSideEncryption).toEqual({ mode: "none" });
   });
 
@@ -194,7 +207,10 @@ describe("buckets handler option normalization", () => {
       bucketName: "minimal-bucket",
       bucketType: "allPrivate",
     });
-    const input = calls.find((c) => c.operation === "createBucket")?.input as Record<string, unknown>;
+    const input = calls.find((c) => c.operation === "createBucket")?.input as Record<
+      string,
+      unknown
+    >;
     expect(input).toEqual({ bucketName: "minimal-bucket", bucketType: "allPrivate" });
   });
 
@@ -209,7 +225,10 @@ describe("buckets handler option normalization", () => {
       defaultServerSideEncryption: { mode: "SSE-B2", algorithm: "AES256" },
       fileLockEnabled: true,
     });
-    const input = calls.find((c) => c.operation === "createBucket")?.input as Record<string, unknown>;
+    const input = calls.find((c) => c.operation === "createBucket")?.input as Record<
+      string,
+      unknown
+    >;
     expect(input).toMatchObject({
       bucketInfo: { team: "ops" },
       lifecycleRules: [{ fileNamePrefix: "tmp/", daysFromHidingToDeleting: 1 }],
@@ -222,7 +241,10 @@ describe("buckets handler option normalization", () => {
   it("updates with only a bucketId, omitting every optional field", async () => {
     const { tools, calls } = makeHarness();
     await tools.call("b2_update_bucket", { bucketId: "bucket-1" });
-    const input = calls.find((c) => c.operation === "updateBucket")?.input as Record<string, unknown>;
+    const input = calls.find((c) => c.operation === "updateBucket")?.input as Record<
+      string,
+      unknown
+    >;
     expect(input).toEqual({ bucketId: "bucket-1" });
   });
 
@@ -240,7 +262,10 @@ describe("buckets handler option normalization", () => {
       ifRevisionIs: 7,
       confirm: true,
     });
-    const input = calls.find((c) => c.operation === "updateBucket")?.input as Record<string, unknown>;
+    const input = calls.find((c) => c.operation === "updateBucket")?.input as Record<
+      string,
+      unknown
+    >;
     expect(input).toMatchObject({
       bucketId: "bucket-1",
       bucketType: "allPublic",
