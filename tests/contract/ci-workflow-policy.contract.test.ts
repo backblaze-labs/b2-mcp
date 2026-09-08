@@ -80,6 +80,7 @@ describe("CI workflow policy", () => {
   const evals = readFileSync(join(root, ".github/workflows/evals.yml"), "utf8");
   const publish = readFileSync(join(root, ".github/workflows/publish.yml"), "utf8");
   const qualityKeeper = readFileSync(join(root, ".github/workflows/quality-keeper.yml"), "utf8");
+  const releaseTag = readFileSync(join(root, ".github/workflows/release-tag.yml"), "utf8");
 
   function workflowJob(name: string): string {
     const job = workflowJobBlock(ci, name);
@@ -95,6 +96,17 @@ describe("CI workflow policy", () => {
       "group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}",
     );
     expect(ci).toContain("cancel-in-progress: ${{ github.event_name == 'pull_request' }}");
+  });
+
+  it("sets workflow-specific concurrency controls", () => {
+    expect(yamlMappingForKey(qualityKeeper, "concurrency")).toMatchObject({
+      group: "quality-keeper-${{ github.workflow }}-${{ github.ref }}",
+      "cancel-in-progress": "true",
+    });
+    expect(yamlMappingForKey(releaseTag, "concurrency")).toMatchObject({
+      group: "release-tag-${{ github.ref }}",
+      "cancel-in-progress": "false",
+    });
   });
 
   it("keeps Quality Keeper pull_request execution unprivileged", () => {

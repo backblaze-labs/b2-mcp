@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Add workflow-level concurrency groups to the Quality Keeper and release-tag
+  request workflows, coalescing superseded PR analysis without interrupting
+  release signals. (#420)
+
 ## [0.2.1] - 2026-09-04
 
 ### Added
