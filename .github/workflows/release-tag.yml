@@ -18,6 +18,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: release-tag-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   request:
     runs-on: ubuntu-latest

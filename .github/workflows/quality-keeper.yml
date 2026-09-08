@@ -17,6 +17,10 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
 
+concurrency:
+  group: quality-keeper-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 # No pull_request_target: fork, draft, and unknown-head code is never trusted.
 permissions: {}
 
