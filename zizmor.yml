@@ -72,12 +72,23 @@ rules:
       # `ci-green` marker ref on `main` via `git push` in the following step,
       # and that push needs the persisted checkout credential. Setting
       # `persist-credentials: false` would break the marker push — it is a
-      # functional requirement here, not an oversight. The job is `main`-only,
-      # scoped to `contents: write`, and uploads no artifacts, so the persisted
-      # credential cannot leak into build outputs. The artipacked risk this
-      # audit flags does not apply, so the finding is accepted.
+      # functional requirement here, not an oversight.
+      #
+      # `persist-credentials: true` writes the `contents: write` GITHUB_TOKEN
+      # into `.git/config`, where every step in the job can read it for the
+      # job's full duration — not only an artifact-upload step. The true safety
+      # invariant is therefore that this job runs NO untrusted/third-party code
+      # while the credential is persisted: it runs only the SHA-pinned
+      # `actions/checkout` and inline, trusted git commands, uploads no
+      # artifacts, and is `main`-only. Under that invariant the persisted
+      # credential has no exfil surface, so the artipacked finding is accepted.
+      # Re-review whenever this job gains any third-party action/script, an
+      # artifact upload, or stops pushing the marker ref.
       #
       # Anchored to the ci-green marker `actions/checkout` (test.yml:1008).
-      # Re-review whenever that job stops pushing the marker ref or gains an
-      # artifact upload.
+      # zizmor matches ignores by file:line, not by job/step identity, so a
+      # shifted line could mask an unrelated checkout. A required test
+      # (tests/unit/supply-chain-policy.unit.test.ts) compensates: it fails if
+      # this anchor no longer resolves to the persist-credentials:true checkout
+      # inside the mark-green job, or if any other job persists credentials.
       - test.yml:1008

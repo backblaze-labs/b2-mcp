@@ -1427,6 +1427,48 @@ describe("supply-chain audit policy", () => {
     expect(markGreenJob).toContain("Advanced owned ci-green marker to");
   });
 
+  it("anchors the zizmor artipacked ignore to the ci-green marker checkout", () => {
+    // The artipacked suppression persists the checkout credential ON PURPOSE so
+    // the ci-green marker push works, and it is pinned by raw line number
+    // (test.yml:<line>). zizmor matches ignores by file:line, not by job/step
+    // identity, so a future edit that shifts a DIFFERENT actions/checkout onto
+    // that line would silently inherit the suppression. This required test
+    // compensates for that brittleness: it fails if the pinned line no longer
+    // resolves to the persist-credentials:true checkout inside the mark-green
+    // (ci-green marker) job, forcing a re-review instead of a silent mask.
+    const zizmorConfig = readFileSync(join(root, "zizmor.yml"), "utf8");
+    const artipackedBlock = yamlBlockForKey(zizmorConfig, "artipacked");
+    expect(artipackedBlock).not.toBeNull();
+    const anchors = [...(artipackedBlock ?? "").matchAll(/-\s*test\.yml:(\d+)/g)];
+    // Exactly one anchored checkout may carry this accepted-risk suppression.
+    expect(anchors).toHaveLength(1);
+    const anchoredLine = Number(anchors[0]?.[1]);
+    expect(Number.isInteger(anchoredLine)).toBe(true);
+
+    const workflowLines = workflow.split(/\r?\n/);
+    // Anchor is 1-indexed and must be the checkout `uses:` line itself.
+    const anchoredText = workflowLines[anchoredLine - 1] ?? "";
+    expect(anchoredText).toMatch(/uses:\s*actions\/checkout@/);
+
+    // That line must fall inside the mark-green job block, and that job must be
+    // the one persisting credentials — so an unrelated checkout cannot inherit
+    // the ignore even if it lands on the same line number.
+    const markGreenJob = jobBlock("mark-green");
+    const jobStartOffset = workflow.indexOf(markGreenJob);
+    expect(jobStartOffset).toBeGreaterThanOrEqual(0);
+    const anchoredOffset = workflowLines
+      .slice(0, anchoredLine - 1)
+      .reduce((sum, line) => sum + line.length + 1, 0);
+    expect(anchoredOffset).toBeGreaterThanOrEqual(jobStartOffset);
+    expect(anchoredOffset).toBeLessThan(jobStartOffset + markGreenJob.length);
+    expect(markGreenJob).toContain("persist-credentials: true");
+
+    // The persisted-credential checkout is unique to this job: no other job in
+    // the workflow uses persist-credentials:true, so the accepted risk stays
+    // scoped to the reviewed ci-green marker push.
+    expect(workflow.match(/persist-credentials:\s*true/g) ?? []).toHaveLength(1);
+  });
+
   it("refuses environment-injected audit fixtures outside tests", () => {
     const result = spawnSync(process.execPath, ["scripts/audit-supply-chain.mjs"], {
       cwd: root,
