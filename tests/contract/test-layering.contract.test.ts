@@ -371,20 +371,20 @@ describe("test layer naming", () => {
     const ciWorkflow = readFileSync(join(root, ".github/workflows/test.yml"), "utf8");
 
     expect(vitestConfig).toMatch(
-      /thresholds:\s*{\s*statements:\s*94\.5,\s*branches:\s*89,\s*functions:\s*97\.5,\s*lines:\s*96\.7,?\s*}/,
+      /thresholds:\s*{\s*statements:\s*96,\s*branches:\s*92,\s*functions:\s*97\.7,\s*lines:\s*97\.4,?\s*}/,
     );
     expect(vitestConfig).toContain('include: ["src/**/*.ts"]');
     expect(vitestConfig).toContain('"html"');
     expect(vitestConfig).toContain('"lcov"');
     expect(vitestConfig).toContain('"cobertura"');
     expect(readme).toContain(
-      "coverage-S%2094.5%20%7C%20B%2089%20%7C%20F%2097.5%20%7C%20L%2096.7-brightgreen",
+      "coverage-S%2096%20%7C%20B%2092%20%7C%20F%2097.7%20%7C%20L%2097.4-brightgreen",
     );
     expect(testingGuide).toMatch(
-      /Global V8 coverage must remain at or above 94\.5% statements,\s*89% branches,\s*97\.5% functions, and 96\.7% lines\./,
+      /Global V8 coverage must remain at or above 96% statements,\s*92% branches,\s*97\.7% functions, and 97\.4% lines\./,
     );
     expect(ciWorkflow).toContain(
-      "Required: statements 94.5%, branches 89%, functions 97.5%, lines 96.7%.",
+      "Required: statements 96%, branches 92%, functions 97.7%, lines 97.4%.",
     );
   });
 
