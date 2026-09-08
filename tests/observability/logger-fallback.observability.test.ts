@@ -22,6 +22,7 @@ const FALLBACK_PREFIX = "b2-mcp:";
 let logFileCounter = 0;
 const createdLogFiles: string[] = [];
 let envSnapshot: NodeJS.ProcessEnv;
+let sighupListeners: Set<NodeJS.SignalsListener>;
 
 interface FakeDestOptions {
   throwOnWrite?: boolean;
@@ -187,12 +188,21 @@ function emitSighup(): void {
 describe("observability logger fallback paths", () => {
   beforeEach(() => {
     envSnapshot = { ...process.env };
+    // Snapshot pre-existing SIGHUP listeners so afterEach removes only the
+    // handler this suite's fresh module installs registered, never listeners
+    // owned by other suites sharing the Vitest worker.
+    sighupListeners = new Set(process.listeners("SIGHUP"));
   });
 
   afterEach(() => {
-    // Detach the SIGHUP handler each fresh module install registered so
-    // reloaded module state cannot leak across tests.
-    process.removeAllListeners("SIGHUP");
+    // Detach only the SIGHUP handler each fresh module install registered so
+    // reloaded module state cannot leak across tests, without disturbing
+    // listeners registered outside this suite.
+    for (const listener of process.listeners("SIGHUP")) {
+      if (!sighupListeners.has(listener)) {
+        process.off("SIGHUP", listener as NodeJS.SignalsListener);
+      }
+    }
     vi.restoreAllMocks();
     vi.doUnmock("pino");
     vi.doUnmock("../../src/utils/secret-sanitizer");
