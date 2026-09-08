@@ -4,6 +4,7 @@ import {
   sanitizeForMcpOutput,
   sanitizeStructuredLogValue,
 } from "../../src/utils/secret-sanitizer";
+import { FASTCHECK_SEED } from "../support/fast-check-seed";
 
 // Property-based / fuzz coverage for the secret redaction helpers
 // (`src/utils/secret-sanitizer.ts`). The central security property is
@@ -100,7 +101,7 @@ describe("secret sanitizer property suite", () => {
         expect(mcp.includes(secret)).toBe(false);
         expect(log.includes(secret)).toBe(false);
       }),
-      { numRuns: 400 },
+      { numRuns: 400, seed: FASTCHECK_SEED },
     );
   });
 
@@ -132,7 +133,7 @@ describe("secret sanitizer property suite", () => {
         const logged = JSON.stringify(sanitizeStructuredLogValue(error, { secrets: [secret] }));
         expect(logged.includes(secret)).toBe(false);
       }),
-      { numRuns: 300 },
+      { numRuns: 300, seed: FASTCHECK_SEED },
     );
   });
 
@@ -150,7 +151,7 @@ describe("secret sanitizer property suite", () => {
         expect(sanitized.nested.applicationKeyId).toBe(identifier);
         expect(sanitized.nested.items[0]).toBe(identifier);
       }),
-      { numRuns: 300 },
+      { numRuns: 300, seed: FASTCHECK_SEED },
     );
   });
 });

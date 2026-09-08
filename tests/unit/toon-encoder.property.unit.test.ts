@@ -2,6 +2,7 @@ import { decode } from "@toon-format/toon";
 import fc from "fast-check";
 import type { JsonCompatible } from "../../src/utils/result-serializer";
 import { encodeToon } from "../../src/utils/toon-encoder";
+import { FASTCHECK_SEED } from "../support/fast-check-seed";
 
 // Property-based / fuzz coverage for the repository-owned TOON encoder
 // (`src/utils/toon-encoder.ts`), complementing the example-based suite in
@@ -12,13 +13,17 @@ import { encodeToon } from "../../src/utils/toon-encoder";
 // as a string, or vice versa).
 //
 // Edge cases surfaced while building this suite (issue #399 acceptance):
-// - Round-trip held across 5000+ generated inputs and every hand-picked corner
-//   (empty containers, single-space and whitespace-only string values,
-//   numeric-like strings such as "42"/"-0"/"1e3", boolean/null-like strings,
-//   empty and unsafe object keys, `-0`, MAX_SAFE_INTEGER, emoji graphemes,
-//   deeply nested tabular/keyed/list-item shapes). No divergence was found — the
-//   encoder is robust, so this suite stands as a regression guard rather than a
-//   bug reproduction.
+// - Round-trip held across the committed 2000 runs (1000 + 500 + 500 below) plus
+//   5000+ ad-hoc runs during development, and every hand-picked corner (empty
+//   containers, single-space and whitespace-only string values, numeric-like
+//   strings such as "42"/"-0"/"1e3", boolean/null-like strings, empty and unsafe
+//   object keys, `-0`, MAX_SAFE_INTEGER, emoji graphemes, deeply nested
+//   tabular/keyed/list-item shapes). No divergence was found — the encoder is
+//   robust, so this suite stands as a regression guard rather than a bug
+//   reproduction.
+//
+// Runs are pinned to a deterministic seed (see `../support/fast-check-seed`) so
+// each commit's pass/fail is reproducible.
 
 // Full-grapheme strings never contain lone surrogates (which the encoder rejects
 // by design), plus a palette of TOON-significant tokens that would break a naive
@@ -94,7 +99,7 @@ describe("TOON encoder property suite", () => {
         const decoded = decode(encodeToon(value));
         expect(decoded).toStrictEqual(jsonCanonical(value));
       }),
-      { numRuns: 1000 },
+      { numRuns: 1000, seed: FASTCHECK_SEED },
     );
   });
 
@@ -111,7 +116,7 @@ describe("TOON encoder property suite", () => {
           expect(decoded[key]).toStrictEqual(expected[key]);
         }
       }),
-      { numRuns: 500 },
+      { numRuns: 500, seed: FASTCHECK_SEED },
     );
   });
 
@@ -133,7 +138,7 @@ describe("TOON encoder property suite", () => {
           expect(() => encodeToon(record)).not.toThrow();
         }
       }),
-      { numRuns: 500 },
+      { numRuns: 500, seed: FASTCHECK_SEED },
     );
   });
 });

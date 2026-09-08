@@ -1,5 +1,6 @@
 import fc from "fast-check";
 import { compareToCommonMark } from "../support/commonmark-oracle";
+import { FASTCHECK_SEED } from "../support/fast-check-seed";
 
 // Property-based / fuzz coverage for the bespoke CommonMark validator/renderer
 // behind the hosted privacy page (`scripts/write-privacy-page.mjs`). The
@@ -115,7 +116,7 @@ describe("privacy-page CommonMark validator property suite", () => {
         const comparison = compareToCommonMark(markdown, renderMarkdown);
         expect(comparison.kind).not.toBe("diverges");
       }),
-      { numRuns: 4000 },
+      { numRuns: 4000, seed: FASTCHECK_SEED },
     );
   });
 
@@ -132,7 +133,7 @@ describe("privacy-page CommonMark validator property suite", () => {
           expect(tag).toMatch(ALLOWED_TAG);
         }
       }),
-      { numRuns: 1000 },
+      { numRuns: 1000, seed: FASTCHECK_SEED },
     );
   });
 });
