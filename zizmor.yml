@@ -38,8 +38,14 @@ rules:
       # attacker-controllable head code. The privileged-trigger risk this audit
       # flags is mitigated by that design, so the finding is accepted.
       #
-      # Scoped to the specific `on:` trigger block (publish.yml:9) rather than
-      # the whole file, so the exception only covers today's known-safe design.
-      # Re-review whenever publish.yml's triggers change: a new dangerous
-      # trigger on a different line will NOT be pre-suppressed by this entry.
+      # Anchored to publish.yml's `on:` key (publish.yml:9). zizmor 1.29.0
+      # anchors EVERY dangerous-triggers finding to this same `on:` key, so this
+      # line-scoped ignore would also cover another dangerous trigger (e.g.
+      # pull_request_target) added to the same block. That over-breadth is
+      # deliberately compensated by a required test
+      # (tests/unit/supply-chain-policy.unit.test.ts) that fails if publish.yml's
+      # `on:` gains pull_request_target/pull_request or any trigger other than the
+      # reviewed workflow_run — so a newly added dangerous trigger can never be
+      # silently suppressed by this entry. Re-review whenever publish.yml's
+      # triggers change.
       - publish.yml:9

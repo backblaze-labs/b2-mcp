@@ -935,6 +935,14 @@ describe("supply-chain audit policy", () => {
     expect(yamlBlockForKey(publishOnBlock, "release")).toBeNull();
     expect(yamlBlockForKey(publishOnBlock, "push")).toBeNull();
     expect(yamlBlockForKey(publishOnBlock, "workflow_dispatch")).toBeNull();
+    // The zizmor dangerous-triggers ignore is anchored to publish.yml's `on:`
+    // key, which would also mask a dangerous trigger added to the same block.
+    // Compensate for that over-breadth: workflow_run is the only permitted
+    // trigger, so a pull_request_target / pull_request added here fails this
+    // required test instead of being silently suppressed by zizmor.yml.
+    expect(yamlBlockForKey(publishOnBlock, "pull_request_target")).toBeNull();
+    expect(yamlBlockForKey(publishOnBlock, "pull_request")).toBeNull();
+    expect(yamlBlockForKey(publishOnBlock, "workflow_run")).not.toBeNull();
     expect(publishWorkflow).not.toContain("inputs.tag");
     expect(publishWorkflow).not.toContain("github.event.workflow_run.head_branch");
     expect(publishWorkflow).not.toContain("${{ github.event.release.tag_name }}");
