@@ -12,7 +12,7 @@
 [![Node.js](https://img.shields.io/badge/Node.js-22.22%2B%20%7C%2024%20%7C%2026-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![MCP](https://img.shields.io/badge/MCP-2026--07--28-5b5fc7)](https://modelcontextprotocol.io/specification/2026-07-28)
 [![API docs](https://img.shields.io/badge/API%20docs-TypeDoc-3178c6?logo=readthedocs&logoColor=white)](https://backblaze-labs.github.io/b2-mcp/)
-[![Coverage floors](https://img.shields.io/badge/coverage-S%2094.3%20%7C%20B%2088%20%7C%20F%2097.2%20%7C%20L%2096.6-brightgreen)](docs/TESTING.md)
+[![Coverage floors](https://img.shields.io/badge/coverage-S%2094.5%20%7C%20B%2089%20%7C%20F%2097.5%20%7C%20L%2096.7-brightgreen)](docs/TESTING.md)
 [![Runtime dependencies](https://img.shields.io/badge/runtime_dependencies-9-blue)](package-budget.json)
 
 <!-- Directory badges point at deterministic per-server URLs derived from the locked

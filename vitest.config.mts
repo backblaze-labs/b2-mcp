@@ -33,11 +33,17 @@ export default defineConfig({
       reporter: ["text-summary", "html", "json-summary", "lcov", "cobertura"],
       include: ["src/**/*.ts"],
       exclude: ["dist/**", "tests/**", "**/*.d.ts", "**/*.test.ts", "**/generated/**"],
+      // Floors sit a deliberate buffer below the achieved merged coverage
+      // (statements 94.81 / branches 89.15 / functions 97.61 / lines 96.91 as of
+      // this change) so normal per-layer execution and v8 measurement variance,
+      // or an unrelated PR that drops a branch or two, does not wedge the global
+      // merge/deploy gate. Each floor stays at or above the previous value so the
+      // ratchet never weakens; raise them only when a durable gain is measured.
       thresholds: {
-        statements: 94.3,
-        branches: 88,
-        functions: 97.2,
-        lines: 96.6,
+        statements: 94.5,
+        branches: 89,
+        functions: 97.5,
+        lines: 96.7,
       },
     },
     projects: layerProjectNamesForConfig().map((name) =>
