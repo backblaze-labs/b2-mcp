@@ -65,3 +65,19 @@ rules:
       # Re-review whenever the pack-smoke install step moves or changes what it
       # installs.
       - test.yml:397
+  artipacked:
+    ignore:
+      # The ci-green marker job (test.yml:1008) checks out with
+      # `persist-credentials: true` on purpose: it force-advances the owned
+      # `ci-green` marker ref on `main` via `git push` in the following step,
+      # and that push needs the persisted checkout credential. Setting
+      # `persist-credentials: false` would break the marker push — it is a
+      # functional requirement here, not an oversight. The job is `main`-only,
+      # scoped to `contents: write`, and uploads no artifacts, so the persisted
+      # credential cannot leak into build outputs. The artipacked risk this
+      # audit flags does not apply, so the finding is accepted.
+      #
+      # Anchored to the ci-green marker `actions/checkout` (test.yml:1008).
+      # Re-review whenever that job stops pushing the marker ref or gains an
+      # artifact upload.
+      - test.yml:1008
