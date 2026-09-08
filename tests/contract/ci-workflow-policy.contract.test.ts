@@ -378,21 +378,41 @@ describe("CI workflow policy", () => {
     expect(ci).toContain(`ZIZMOR_IMAGE: ${zizmorPin}`);
     expect(ci.split(zizmorPin).length - 1).toBe(1);
     expect(workflowSecurity).toContain('"${ZIZMOR_IMAGE}"');
-    // Offline gate: locked down (no network), pedantic, SARIF-emitting, and
-    // gated deterministically by the SARIF result count.
-    expect(workflowSecurity).toContain("--network=none");
-    expect(workflowSecurity).toContain("--format=sarif");
-    expect(workflowSecurity).toContain("--no-online-audits");
-    expect(workflowSecurity).toContain("--persona=pedantic");
-    expect(workflowSecurity).toContain("--min-severity=medium");
-    expect(workflowSecurity).toContain("--min-confidence=medium");
+    // Offline gate flags are scoped to the NAMED scan step. The PR-head
+    // validation step reuses the same persona/format/threshold flags, so a
+    // whole-job search could stay green even if the real gate scan were deleted
+    // or weakened — assert them on the gate step itself.
+    const offlineGate = workflowStepBlock(workflowSecurity, "Run offline zizmor gate (SARIF)");
+    expect(offlineGate, "offline zizmor gate step must exist").not.toBe("");
+    expect(offlineGate).toContain("--network=none");
+    expect(offlineGate).toContain("--format=sarif");
+    expect(offlineGate).toContain("--no-online-audits");
+    expect(offlineGate).toContain("--persona=pedantic");
+    expect(offlineGate).toContain("--min-severity=medium");
+    expect(offlineGate).toContain("--min-confidence=medium");
+    // The container runs with no network and no token in the gate step.
+    expect(offlineGate).not.toContain("--persona=auditor");
+    expect(offlineGate).not.toContain("GH_TOKEN");
+    // The deterministic result-count gate must exist as its own step: because
+    // `--format=sarif` always exits 0, findings only gate via this jq count +
+    // `exit 1`. Lock the step so deleting/weakening it fails the contract.
+    const countGate = workflowStepBlock(workflowSecurity, "Gate on offline zizmor findings");
+    expect(countGate, "offline zizmor count-gate step must exist").not.toBe("");
+    expect(countGate).toMatch(/jq[^\n]*\.runs\[\][^\n]*results/);
+    expect(countGate).toContain("length");
+    expect(countGate).toContain("exit 1");
+    // ...and it must run BEFORE the SARIF upload, so a failing gate blocks first.
+    const countGateIdx = workflowSecurity.indexOf("- name: Gate on offline zizmor findings");
+    const uploadIdx = workflowSecurity.indexOf(
+      "- name: Upload offline zizmor SARIF to code scanning",
+    );
+    expect(countGateIdx).toBeGreaterThan(-1);
+    expect(uploadIdx).toBeGreaterThan(-1);
+    expect(countGateIdx).toBeLessThan(uploadIdx);
     expect(workflowSecurity).toContain(
       "github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938",
     );
     expect(workflowSecurity).toContain("category: zizmor-offline");
-    // The gate job runs the container with no network and no token.
-    expect(workflowSecurity).not.toContain("--persona=auditor");
-    expect(workflowSecurity).not.toContain("GH_TOKEN");
 
     // Advisory online audit is split: a read-only scan job runs the networked
     // container (so it only gets a read-scoped token) and a separate
@@ -400,8 +420,10 @@ describe("CI workflow policy", () => {
     const onlineScan = workflowJob("zizmor-online-scan");
     expect(onlineScan).toContain("--persona=auditor");
     expect(onlineScan).toContain("GH_TOKEN: ${{ github.token }}");
-    expect(onlineScan).toContain("contents: read");
-    expect(onlineScan).not.toContain("security-events: write");
+    // Lock the EXACT job-level permission set, not just the absence of
+    // security-events: any added write scope (id-token/actions/packages: write)
+    // must fail here, so the networked container can never gain a write token.
+    expect(yamlMappingForKey(onlineScan, "permissions")).toEqual({ contents: "read" });
     expect(onlineScan).toContain("name: zizmor-online-sarif");
     // The audit step itself must be advisory: scope continue-on-error to the
     // named audit step so it stays non-gating even if other steps change.
