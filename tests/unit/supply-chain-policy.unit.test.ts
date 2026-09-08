@@ -920,13 +920,29 @@ describe("supply-chain audit policy", () => {
     expect(releaseTagWorkflow).not.toContain("actions/checkout");
     expect(releaseTagWorkflow).not.toContain("npm publish");
     expect(releaseTagWorkflow).not.toContain("GHCR_TOKEN");
-    expect(publishWorkflow).toContain("zizmor: ignore[dangerous-triggers]");
-    expect(publishWorkflow).toContain("tag artifact");
-    expect(publishWorkflow).toContain("validates protected refs");
+    // The dangerous-triggers suppression is centralized in the checked-in
+    // zizmor.yml (not an inline marker), scoped to publish.yml's on: block, and
+    // still carries the accepted-risk rationale.
+    const zizmorConfig = readFileSync(join(root, "zizmor.yml"), "utf8");
+    expect(publishWorkflow).not.toContain("zizmor: ignore[");
+    expect(publishWorkflow).toContain("centralized in the");
+    expect(publishWorkflow).toContain("zizmor.yml");
+    expect(zizmorConfig).toContain("dangerous-triggers:");
+    expect(zizmorConfig).toContain("- publish.yml:9");
+    expect(zizmorConfig).toContain("tag artifact");
+    expect(zizmorConfig).toContain("validates protected refs");
     expect(publishWorkflowRunBlock).toContain("Release Tag Request");
     expect(yamlBlockForKey(publishOnBlock, "release")).toBeNull();
     expect(yamlBlockForKey(publishOnBlock, "push")).toBeNull();
     expect(yamlBlockForKey(publishOnBlock, "workflow_dispatch")).toBeNull();
+    // The zizmor dangerous-triggers ignore is anchored to publish.yml's `on:`
+    // key, which would also mask a dangerous trigger added to the same block.
+    // Compensate for that over-breadth: workflow_run is the only permitted
+    // trigger, so a pull_request_target / pull_request added here fails this
+    // required test instead of being silently suppressed by zizmor.yml.
+    expect(yamlBlockForKey(publishOnBlock, "pull_request_target")).toBeNull();
+    expect(yamlBlockForKey(publishOnBlock, "pull_request")).toBeNull();
+    expect(yamlBlockForKey(publishOnBlock, "workflow_run")).not.toBeNull();
     expect(publishWorkflow).not.toContain("inputs.tag");
     expect(publishWorkflow).not.toContain("github.event.workflow_run.head_branch");
     expect(publishWorkflow).not.toContain("${{ github.event.release.tag_name }}");

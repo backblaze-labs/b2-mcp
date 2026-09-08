@@ -9,6 +9,12 @@ on:
 permissions:
   contents: read
 
+env:
+  # Single source of truth for the digest-pinned zizmor image, shared by every
+  # zizmor job/step. Track any bump by digest (Track 3 of issue #405), never by
+  # a floating tag. zizmor 1.29.0, reviewed 2026-09-07.
+  ZIZMOR_IMAGE: ghcr.io/zizmorcore/zizmor:1.29.0@sha256:863026d54f91271b10b60b67ad8054cb37120167e162482597db102b3026a284
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -575,11 +581,11 @@ jobs:
     name: CodeQL/workflow security
     needs: runtime-policy
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     permissions:
-      actions: read
-      contents: read
-      security-events: write
+      actions: read # CodeQL reads the Actions run graph during analysis.
+      contents: read # Checkout of the repository under analysis.
+      security-events: write # Upload zizmor SARIF to the code scanning tab.
     steps:
       # actions/checkout v7, reviewed 2026-08-25.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -595,27 +601,214 @@ jobs:
         with:
           category: "/language:javascript-typescript"
           upload: never
-      - name: Run digest-pinned offline zizmor
-        env:
-          ZIZMOR_IMAGE: ghcr.io/zizmorcore/zizmor:1.29.0@sha256:863026d54f91271b10b60b67ad8054cb37120167e162482597db102b3026a284
+      - name: Pull digest-pinned zizmor image
+        run: docker pull "${ZIZMOR_IMAGE}"
+      # Source the gate's suppression config from the TRUSTED base ref, not the
+      # PR head, so a fork PR cannot add its own `ignore:` entry to suppress the
+      # finding that would flag its own dangerous workflow change (issue #405
+      # review). For push builds base==head, which is already trusted. Sparse so
+      # only zizmor.yml lands, in a sibling path outside the analyzed tree.
+      # actions/checkout v7, reviewed 2026-08-25.
+      - name: Checkout trusted zizmor config from base ref
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
+          persist-credentials: false
+          sparse-checkout: |
+            zizmor.yml
+          sparse-checkout-cone-mode: false
+          path: .zizmor-trusted
+      - name: Resolve trusted zizmor config
         run: |
           set -euo pipefail
-          docker pull "${ZIZMOR_IMAGE}"
+          if [ -f "${GITHUB_WORKSPACE}/.zizmor-trusted/zizmor.yml" ]; then
+            echo "ZIZMOR_CONFIG=.zizmor-trusted/zizmor.yml" >> "${GITHUB_ENV}"
+            echo "Gate config: trusted base-ref zizmor.yml."
+          else
+            # Bootstrap only: the base ref predates zizmor.yml (e.g. the PR that
+            # introduces it). Once merged, the base copy always governs the gate,
+            # so PR-head suppressions can never weaken it after this point.
+            echo "ZIZMOR_CONFIG=zizmor.yml" >> "${GITHUB_ENV}"
+            echo "::notice::Base ref has no zizmor.yml (bootstrap); using PR-head config for this run only."
+          fi
+      # Gate pass: offline (`--network=none`), stricter `pedantic` persona, SARIF
+      # output. `--format=sarif` always exits 0, so the gate is enforced by the
+      # dedicated result-count step below rather than the process exit code.
+      - name: Run offline zizmor gate (SARIF)
+        run: |
+          set -euo pipefail
           docker run \
             --rm \
             --network=none \
             --volume "${GITHUB_WORKSPACE}:/workspace:ro" \
             --workdir /workspace \
             "${ZIZMOR_IMAGE}" \
-            --persona=regular \
-            --format=github \
+            --config "${ZIZMOR_CONFIG}" \
+            --persona=pedantic \
+            --format=sarif \
             --collect=default \
             --no-online-audits \
             --min-severity=medium \
             --min-confidence=medium \
             --color=never \
             -- \
-            .
+            . > "${RUNNER_TEMP}/zizmor-offline.sarif"
+      # Gate is decided SOLELY by the deterministic result count over the offline
+      # SARIF, and runs BEFORE the best-effort upload so a read-only fork token,
+      # network error, or rate limit on the upload can never fail the build.
+      - name: Gate on offline zizmor findings
+        run: |
+          set -euo pipefail
+          count="$(jq '[.runs[].results[]] | length' "${RUNNER_TEMP}/zizmor-offline.sarif")"
+          echo "offline zizmor findings at gate threshold: ${count}"
+          if [ "${count}" -ne 0 ]; then
+            echo "::error::zizmor gate failed with ${count} finding(s) at medium severity/confidence (pedantic). Fix the workflow or add a documented suppression to zizmor.yml."
+            exit 1
+          fi
+      # The gate above decides findings from the TRUSTED base-ref config, so the
+      # PR-head zizmor.yml is otherwise never validated by a required check: a
+      # malformed or unsupported PR-head config would pass every required PR check
+      # and then break the gate on the first `main` push once it becomes the base
+      # copy (issue #405 review). Validate the PR-head config here — findings are
+      # discarded (the base config still decides them), but a config-load or
+      # runtime error makes zizmor exit non-zero (`--format=sarif` only forces a
+      # 0 exit for *findings*), failing this required step before the broken
+      # config can merge.
+      - name: Validate PR-head zizmor config (errors fail; findings ignored)
+        run: |
+          set -euo pipefail
+          if [ ! -f "${GITHUB_WORKSPACE}/zizmor.yml" ]; then
+            # The base-ref copy was sparse-checked-out into .zizmor-trusted/ above.
+            # If the base HAS zizmor.yml but the PR head does not, the PR is
+            # deleting the required config: it would pass here yet leave the gate
+            # with no trusted copy on the next `main` push. Fail closed. Only a
+            # genuine bootstrap (base has no zizmor.yml either) is a clean no-op.
+            if [ -f "${GITHUB_WORKSPACE}/.zizmor-trusted/zizmor.yml" ]; then
+              echo "::error::zizmor.yml exists on the base ref but is missing from the PR head. Deleting the required zizmor.yml would break the gate on the next main push; restore it (or retire the gate in a dedicated, reviewed change)."
+              exit 1
+            fi
+            echo "No zizmor.yml on base or head (bootstrap); nothing to validate."
+            exit 0
+          fi
+          docker run \
+            --rm \
+            --network=none \
+            --volume "${GITHUB_WORKSPACE}:/workspace:ro" \
+            --workdir /workspace \
+            "${ZIZMOR_IMAGE}" \
+            --config zizmor.yml \
+            --persona=pedantic \
+            --format=sarif \
+            --collect=default \
+            --no-online-audits \
+            --min-severity=medium \
+            --min-confidence=medium \
+            --color=never \
+            -- \
+            . > /dev/null
+          echo "PR-head zizmor.yml loaded and ran cleanly (findings ignored here; the trusted base-ref config decides findings at the gate)."
+      - name: Upload offline zizmor SARIF to code scanning
+        if: always()
+        # Best-effort tracking: fork PRs get a read-only token that cannot write
+        # code scanning, so this must never gate the build (the step above does).
+        # `continue-on-error` handles a failed upload, but not a hung one:
+        # `upload-sarif` waits on server-side SARIF processing by default, so an
+        # unbounded stall would consume this REQUIRED job's timeout and cancel it.
+        # Bound the step so a slow/stalled upload stays advisory instead of gating.
+        continue-on-error: true
+        timeout-minutes: 5
+        # github/codeql-action/upload-sarif v4.37.9, reviewed 2026-09-07.
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938
+        with:
+          sarif_file: ${{ runner.temp }}/zizmor-offline.sarif
+          category: zizmor-offline
+
+  # Advisory online zizmor audit, deliberately split into a read-only scan job
+  # and a separate upload job. GitHub Actions permissions are job-scoped, so the
+  # network-facing container must live in a job that holds NO `security-events:
+  # write` — otherwise it would receive a write-capable GITHUB_TOKEN. The scan
+  # job produces a SARIF artifact; the upload job (which never runs the
+  # container) forwards it to code scanning. Both are non-gating: not required
+  # checks, continue-on-error, and time-bounded, so they can never block merges.
+  zizmor-online-scan:
+    name: zizmor online audit (advisory)
+    needs: runtime-policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read # Read-only token: the networked container gets no write scope.
+    steps:
+      # actions/checkout v7, reviewed 2026-08-25.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Pull digest-pinned zizmor image
+        run: docker pull "${ZIZMOR_IMAGE}"
+      # Broadest `auditor`/low bar with online audits enabled. Advisory only:
+      # findings are tracked in code scanning via the upload job below.
+      - name: Run online zizmor audit (SARIF, advisory)
+        continue-on-error: true
+        # Bounded below the job budget so a hung network scan never stalls CI.
+        timeout-minutes: 8
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          docker run \
+            --rm \
+            --volume "${GITHUB_WORKSPACE}:/workspace:ro" \
+            --workdir /workspace \
+            --env GH_TOKEN \
+            "${ZIZMOR_IMAGE}" \
+            --config zizmor.yml \
+            --persona=auditor \
+            --format=sarif \
+            --collect=default \
+            --min-severity=low \
+            --min-confidence=low \
+            --color=never \
+            -- \
+            . > "${RUNNER_TEMP}/zizmor-online.sarif"
+      - name: Upload online zizmor SARIF artifact
+        if: always()
+        continue-on-error: true
+        # actions/upload-artifact v7, reviewed 2026-08-25.
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: zizmor-online-sarif
+          path: ${{ runner.temp }}/zizmor-online.sarif
+          if-no-files-found: warn
+          retention-days: 7
+
+  zizmor-online-upload:
+    name: zizmor online audit upload (advisory)
+    needs: zizmor-online-scan
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      security-events: write # Upload-only (no container): forward SARIF to code scanning.
+      actions: read # Read the workflow run graph during the SARIF upload.
+    steps:
+      - name: Download online zizmor SARIF artifact
+        id: download
+        continue-on-error: true
+        # actions/download-artifact v8, reviewed 2026-08-25.
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: zizmor-online-sarif
+          path: online-sarif
+      - name: Upload online zizmor SARIF to code scanning
+        if: always() && steps.download.outcome == 'success'
+        # Advisory: a failed upload must never gate CI.
+        continue-on-error: true
+        # Bounded so a stuck code-scanning upload cannot exhaust the job budget.
+        timeout-minutes: 5
+        # github/codeql-action/upload-sarif v4.37.9, reviewed 2026-09-07.
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938
+        with:
+          sarif_file: online-sarif/zizmor-online.sarif
+          category: zizmor-online
 
   slow-lifecycle:
     name: slow/lifecycle
@@ -809,7 +1002,7 @@ jobs:
       group: ci-green-${{ github.repository }}-main
       cancel-in-progress: false
     permissions:
-      contents: write
+      contents: write # Force-advance the owned ci-green marker ref on main.
     steps:
       # actions/checkout v7, reviewed 2026-08-25.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1

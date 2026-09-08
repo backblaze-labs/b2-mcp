@@ -1,0 +1,51 @@
+# zizmor (GitHub Actions static analysis) configuration.
+#
+# This is the single, checked-in source of truth for zizmor suppressions.
+# Every entry MUST carry a rationale so an auditor can see why a finding is
+# accepted rather than fixed. Inline `# zizmor: ignore[...]` comments have been
+# migrated here so suppressions live in one reviewable place.
+#
+# Docs: https://docs.zizmor.sh/configuration/
+rules:
+  ref-version-mismatch:
+    ignore:
+      # Repo-wide convention. Every action is SHA-pinned and annotated with a
+      # human-reviewed comment on the PRECEDING line
+      # (`# <action> vX.Y.Z, reviewed <date>`), which is stricter than the
+      # inline `# vX.Y.Z` tag this audit looks for. ref-version-mismatch only
+      # recognizes an inline same-line comment, so it reports the entire pinned
+      # surface (200+ uses) as false positives against that convention. The pin
+      # digests and their reviewed dates are the source of truth; adding a
+      # second inline version tag would duplicate that metadata and invite the
+      # drift this convention avoids. Accepted for every workflow (zizmor has no
+      # glob support, so each file is listed explicitly).
+      - codeql.yml
+      - contract.yml
+      - docs.yml
+      - evals.yml
+      - mutation.yml
+      - publish.yml
+      - quality-keeper.yml
+      - release-tag.yml
+      - smoke.yml
+      - test.yml
+  dangerous-triggers:
+    ignore:
+      # Publish Package runs on `workflow_run` from the unprivileged "Release
+      # Tag Request" workflow. It only consumes an inert tag artifact, checks
+      # out trusted `ci-green` resolver code, validates protected refs, and
+      # publishes behind protected environments — it never runs
+      # attacker-controllable head code. The privileged-trigger risk this audit
+      # flags is mitigated by that design, so the finding is accepted.
+      #
+      # Anchored to publish.yml's `on:` key (publish.yml:9). zizmor 1.29.0
+      # anchors EVERY dangerous-triggers finding to this same `on:` key, so this
+      # line-scoped ignore would also cover another dangerous trigger (e.g.
+      # pull_request_target) added to the same block. That over-breadth is
+      # deliberately compensated by a required test
+      # (tests/unit/supply-chain-policy.unit.test.ts) that fails if publish.yml's
+      # `on:` gains pull_request_target/pull_request or any trigger other than the
+      # reviewed workflow_run — so a newly added dangerous trigger can never be
+      # silently suppressed by this entry. Re-review whenever publish.yml's
+      # triggers change.
+      - publish.yml:9
