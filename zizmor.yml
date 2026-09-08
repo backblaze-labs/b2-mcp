@@ -49,3 +49,19 @@ rules:
       # silently suppressed by this entry. Re-review whenever publish.yml's
       # triggers change.
       - publish.yml:9
+  adhoc-packages:
+    ignore:
+      # The packed-install smoke test (test.yml:397) is the pack-smoke install
+      # of the locally-built tarball, not an unpinned third-party dependency.
+      # It builds the package tarball, then `npm install`s THAT tarball into an
+      # isolated temp dir to prove the published artifact installs cleanly —
+      # validating the real `npm install` experience a consumer gets. Installing
+      # the artifact under test outside a lockfile is the entire point of the
+      # check, and it is already hardened (`--ignore-scripts`, `--omit=dev`) and
+      # installs only the locally-built `$tarball_path`. The adhoc-packages
+      # risk this audit flags does not apply, so the finding is accepted.
+      #
+      # Anchored to the `npm install "$tarball_path"` line (test.yml:397).
+      # Re-review whenever the pack-smoke install step moves or changes what it
+      # installs.
+      - test.yml:397
