@@ -139,12 +139,41 @@ describe(`HTTP fetch handler fault paths (#400)`, () => {
     expect(res.headers.get("connection")).toBe("close");
   });
 
-  it("accepts an empty POST body and treats it as an empty JSON-RPC parse", async () => {
-    const h = build({ credentialProvider: fixedProvider() });
-    // Exercises the empty-body branch of parsedJsonBody without throwing.
+  it("routes an empty POST body through to the MCP handler with the contracted 200 envelope", async () => {
+    const mcpHandler = okMcpHandler();
+    const h = build({ credentialProvider: fixedProvider(), mcpHandler });
+    // The `/mcp` POST body is an untrusted-input boundary: an empty body is a
+    // valid empty JSON-RPC parse and must reach the handler with the exact
+    // contracted 200 + JSON-RPC envelope — not a partial/unauthenticated 2xx,
+    // redirect, or error. Pinning the status and shape (rather than only
+    // "not 413/500") makes a future malformed-input regression fail here.
     const res = await h.fetch(post("", modernHeaders("tools/list")));
-    expect(res.status).not.toBe(413);
-    expect(res.status).not.toBe(500);
+    expect(res.status, `${ISSUE}: empty body must yield the contracted 200`).toBe(200);
+    const body = JSON.parse(await res.text());
+    expect(body).toMatchObject({ jsonrpc: "2.0" });
+    expect(
+      mcpHandler.fetch,
+      `${ISSUE}: empty body must reach the MCP handler`,
+    ).toHaveBeenCalledTimes(1);
+  });
+
+  it("still enforces credential resolution on a malformed JSON body (no unauthenticated bypass)", async () => {
+    vi.spyOn(logger, "warn").mockImplementation(() => undefined as never);
+    const mcpHandler = okMcpHandler();
+    const err = new CredentialResolutionError("nope", 401, "capability_auth_failed");
+    const h = build({ credentialProvider: throwingProvider(err), mcpHandler });
+    // A malformed (unparseable) body must not skip the credential trust
+    // boundary or reach the MCP handler with an unexpected 2xx. An unparseable
+    // body cannot carry a JSON-RPC id, so the failure surfaces through the plain
+    // credential-error envelope at the resolver's status — pin that exact shape.
+    const res = await h.fetch(post("{ not json", modernHeaders("tools/list")));
+    expect(res.status, `${ISSUE}: malformed body must not bypass credential resolution`).toBe(401);
+    const body = JSON.parse(await res.text());
+    expect(body).toEqual({ error: "nope" });
+    expect(
+      mcpHandler.fetch,
+      `${ISSUE}: malformed body must not reach the MCP handler`,
+    ).not.toHaveBeenCalled();
   });
 
   it("returns a typed JSON-RPC error status when credential resolution fails", async () => {

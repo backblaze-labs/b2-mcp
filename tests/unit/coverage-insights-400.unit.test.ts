@@ -30,6 +30,7 @@ import {
   computeEgressLeaders,
   latestSnapshotDate,
   loadDayRows,
+  NATIVE_SCAN_TIME_BUDGET_MS,
   type ReportRow,
 } from "../../src/b2/insights";
 import type {
@@ -44,8 +45,9 @@ import { parseResult, ToolHarness } from "../support/deterministic-fakes";
 
 const GB = 1e9;
 const DAY_MS = 86400_000;
-// Mirrors the private 12s scan budget in src/b2/insights.ts.
-const TIME_BUDGET_MS = 12_000;
+// Single source of truth: imported from the module under test so a change to
+// the native-scan budget is reflected here automatically instead of drifting.
+const TIME_BUDGET_MS = NATIVE_SCAN_TIME_BUDGET_MS;
 
 function daysAgo(days: number): string {
   return new Date(Date.now() - days * DAY_MS).toISOString().slice(0, 10);
