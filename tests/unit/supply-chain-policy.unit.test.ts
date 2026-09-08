@@ -1461,7 +1461,23 @@ describe("supply-chain audit policy", () => {
       .reduce((sum, line) => sum + line.length + 1, 0);
     expect(anchoredOffset).toBeGreaterThanOrEqual(jobStartOffset);
     expect(anchoredOffset).toBeLessThan(jobStartOffset + markGreenJob.length);
-    expect(markGreenJob).toContain("persist-credentials: true");
+
+    // `persist-credentials: true` must belong to THIS checkout step, not merely
+    // appear somewhere in the job: extract the step block that starts at the
+    // anchored `- uses:` line and runs until the next sibling step (a `- ` at
+    // the same indent) or the end of the job. A second checkout that persists
+    // credentials elsewhere in the job would not satisfy this.
+    const anchorIndent = anchoredText.match(/^(\s*)-/)?.[1].length ?? 0;
+    const stepBlock: string[] = [anchoredText];
+    for (let i = anchoredLine; i < workflowLines.length; i += 1) {
+      const next = workflowLines[i] ?? "";
+      if (new RegExp(`^\\s{${anchorIndent}}-\\s`).test(next)) break;
+      if (next.trim() !== "" && (next.match(/^(\s*)\S/)?.[1].length ?? 0) <= anchorIndent) {
+        break;
+      }
+      stepBlock.push(next);
+    }
+    expect(stepBlock.join("\n")).toMatch(/persist-credentials:\s*true/);
 
     // The persisted-credential checkout is unique to this job: no other job in
     // the workflow uses persist-credentials:true, so the accepted risk stays
