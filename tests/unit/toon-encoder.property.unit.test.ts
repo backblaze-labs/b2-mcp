@@ -64,7 +64,10 @@ const primitive = fc.oneof(
   fc.constant(null),
   fc.boolean(),
   fc.integer(),
-  fc.double({ noNaN: true, noDefaultInfinity: true }),
+  // Explicit finite bounds guarantee JSON-representable doubles: never NaN and
+  // never ±Infinity, which `encodeToon` would stringify verbatim and JSON cannot
+  // round-trip.
+  fc.double({ min: -Number.MAX_VALUE, max: Number.MAX_VALUE, noNaN: true }),
   leafString,
 );
 
