@@ -34,10 +34,10 @@ export default defineConfig({
       include: ["src/**/*.ts"],
       exclude: ["dist/**", "tests/**", "**/*.d.ts", "**/*.test.ts", "**/generated/**"],
       thresholds: {
-        statements: 94.3,
-        branches: 88,
-        functions: 97.2,
-        lines: 96.6,
+        statements: 94.8,
+        branches: 89.1,
+        functions: 97.6,
+        lines: 96.9,
       },
     },
     projects: layerProjectNamesForConfig().map((name) =>
