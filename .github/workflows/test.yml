@@ -678,7 +678,16 @@ jobs:
         run: |
           set -euo pipefail
           if [ ! -f "${GITHUB_WORKSPACE}/zizmor.yml" ]; then
-            echo "No PR-head zizmor.yml to validate."
+            # The base-ref copy was sparse-checked-out into .zizmor-trusted/ above.
+            # If the base HAS zizmor.yml but the PR head does not, the PR is
+            # deleting the required config: it would pass here yet leave the gate
+            # with no trusted copy on the next `main` push. Fail closed. Only a
+            # genuine bootstrap (base has no zizmor.yml either) is a clean no-op.
+            if [ -f "${GITHUB_WORKSPACE}/.zizmor-trusted/zizmor.yml" ]; then
+              echo "::error::zizmor.yml exists on the base ref but is missing from the PR head. Deleting the required zizmor.yml would break the gate on the next main push; restore it (or retire the gate in a dedicated, reviewed change)."
+              exit 1
+            fi
+            echo "No zizmor.yml on base or head (bootstrap); nothing to validate."
             exit 0
           fi
           docker run \
