@@ -140,6 +140,7 @@
     "eslint": "10.9.1",
     "eslint-plugin-jsdoc": "64.3.4",
     "eslint-plugin-tsdoc": "0.5.2",
+    "fast-check": "4.9.0",
     "miniflare": "5.20260903.0-alpha",
     "semver": "7.8.5",
     "tsx": "4.23.13",
