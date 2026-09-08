@@ -8,6 +8,7 @@
  */
 import {
   authenticateOAuthRequest,
+  loadOAuthResourceServerConfig,
   resetOAuthVerifierCacheForTests,
   validatePreverifiedOAuthAuthInfo,
 } from "../../src/oauth-resource-server";
@@ -129,7 +130,11 @@ describe("oauth aborted in-flight verification", () => {
       { fetch: fetchMock, nowSeconds: () => 1_000 },
     );
 
+    // Must fail closed: an aborted in-flight verification maps to a
+    // 503 (request_aborted dependency error), never a success/leaky response.
     expect(result).toBeInstanceOf(Response);
+    expect((result as Response).status).toBe(503);
+    expect((result as Response).status).not.toBe(200);
   });
 });
 
@@ -162,10 +167,48 @@ describe("oauth pre-verified auth info validation", () => {
     );
   });
 
+  // An empty allowedAlgorithms disables algorithm-policy enforcement (a
+  // fail-open path that would re-enable JWT alg-confusion). This test only
+  // documents that branch's behavior; the companion test below proves the
+  // default/loaded config never reaches it, so the fail-open state is
+  // unreachable in a real deployment.
   it("skips algorithm enforcement when no algorithms are configured", () => {
     const info = baseAuthInfo();
     (info.extra as Record<string, unknown>).alg = "HS256";
     const permissiveConfig = { ...oauthConfig, allowedAlgorithms: [] } as OAuthJwtVerifierConfig;
     expect(() => validatePreverifiedOAuthAuthInfo(info, permissiveConfig, () => 1_000)).not.toThrow();
+  });
+
+  it("loads a hardened default config with a non-empty algorithm allow-list", () => {
+    const loaded = loadOAuthResourceServerConfig({
+      B2_MCP_PUBLIC_URL: oauthConfig.publicUrl,
+      B2_OAUTH_JWKS_URI: oauthConfig.jwksUri,
+      B2_OAUTH_ISSUER: oauthConfig.issuer,
+      B2_OAUTH_AUDIENCE: oauthConfig.audience,
+      B2_OAUTH_AUTHORIZATION_ENDPOINT: oauthConfig.authorizationEndpoint,
+      B2_OAUTH_TOKEN_ENDPOINT: oauthConfig.tokenEndpoint,
+      B2_OAUTH_DANGEROUSLY_ALLOW_INSECURE_ISSUER_URL: "true",
+    } as NodeJS.ProcessEnv);
+
+    // The fail-open branch above is unreachable by default: the loaded config
+    // always populates allowedAlgorithms with asymmetric algorithms only.
+    expect(loaded.allowedAlgorithms.length).toBeGreaterThan(0);
+    expect(loaded.allowedAlgorithms).not.toContain("HS256");
+
+    // With the loaded (non-empty) allow-list an HS256 token is rejected, so the
+    // alg-confusion downgrade the permissive test allows cannot happen by default.
+    const info = baseAuthInfo();
+    (info.extra as Record<string, unknown>).iss = loaded.issuer;
+    (info.extra as Record<string, unknown>).aud = loaded.audience;
+    (info.extra as Record<string, unknown>).resource = loaded.resource;
+    (info.extra as Record<string, unknown>).alg = "HS256";
+    info.resource = new URL(loaded.resource);
+    expect(() =>
+      validatePreverifiedOAuthAuthInfo(
+        info,
+        loaded as unknown as OAuthJwtVerifierConfig,
+        () => 1_000,
+      ),
+    ).toThrow(/algorithm is not accepted/);
   });
 });

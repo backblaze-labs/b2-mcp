@@ -202,18 +202,27 @@ describe("resources list guards", () => {
 });
 
 describe("resources sanitizer key-id handling", () => {
-  it("reads server-config when every credential id is too short to redact", async () => {
+  it("does not leak credential ids that are too short to redact", async () => {
+    // Distinctive <8-char ids drive the branch that skips adding them to the
+    // redaction set; server-config must still never echo a credential id.
     const shortIdConfig = {
       ...testConfig,
-      applicationKeyId: "k",
-      appKeyId: "k",
-      masterKeyId: "k",
+      applicationKeyId: "shortA1",
+      appKeyId: "shortB2",
+      masterKeyId: "shortC3",
     } as B2Config;
     const { client, close } = await connect({ config: shortIdConfig });
     try {
-      const payload = parseJson<ServerConfigResourcePayload>(
-        await client.readResource({ uri: SERVER_CONFIG_RESOURCE_URI }, { cacheMode: "refresh" }),
+      const result = await client.readResource(
+        { uri: SERVER_CONFIG_RESOURCE_URI },
+        { cacheMode: "refresh" },
       );
+      const serialized = String("text" in result.contents[0] ? result.contents[0].text : "");
+      expect(serialized).not.toContain("shortA1");
+      expect(serialized).not.toContain("shortB2");
+      expect(serialized).not.toContain("shortC3");
+
+      const payload = JSON.parse(serialized) as ServerConfigResourcePayload;
       expect(payload.uri).toBe(SERVER_CONFIG_RESOURCE_URI);
     } finally {
       await close();
