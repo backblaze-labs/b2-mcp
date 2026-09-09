@@ -1481,12 +1481,25 @@ describe("supply-chain audit policy", () => {
       }
       stepBlock.push(next);
     }
-    expect(stepBlock.join("\n")).toMatch(/persist-credentials:\s*true/);
+    // Anchored to a real YAML mapping line (start-of-line after indent) so a
+    // commented `# persist-credentials: true` cannot satisfy the assertion.
+    expect(stepBlock.join("\n")).toMatch(/^\s*persist-credentials:\s*true\b/m);
 
     // The persisted-credential checkout is unique to this job: no other job in
-    // the workflow uses persist-credentials:true, so the accepted risk stays
-    // scoped to the reviewed ci-green marker push.
-    expect(workflowLf.match(/persist-credentials:\s*true/g) ?? []).toHaveLength(1);
+    // the workflow persists credentials, so the accepted risk stays scoped to
+    // the reviewed ci-green marker push. Same start-of-line anchor excludes
+    // commented occurrences.
+    expect(workflowLf.match(/^\s*persist-credentials:\s*true\b/gm) ?? []).toHaveLength(1);
+
+    // Fail-closed on the suppression's core safety invariant: the mark-green job
+    // must run NO third-party action while the checkout credential is persisted.
+    // It may use exactly one `uses:` — the SHA-pinned actions/checkout — and
+    // everything else must be inline `run:` steps. Any added `uses:` (a
+    // third-party action or artifact upload) trips this and forces re-review of
+    // the accepted artipacked risk.
+    const markGreenUses = markGreenJob.match(/^\s*-?\s*uses:\s*\S+/gm) ?? [];
+    expect(markGreenUses).toHaveLength(1);
+    expect(markGreenUses[0]).toMatch(/actions\/checkout@/);
   });
 
   it("refuses environment-injected audit fixtures outside tests", () => {
