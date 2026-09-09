@@ -11,6 +11,9 @@ const layers = (process.env.B2_MCP_LEAK_DIAGNOSTIC_LAYERS ?? "unit,protocol-mode
 const runner = process.env.B2_MCP_LEAK_DIAGNOSTIC_RUNNER ?? "scripts/run-vitest-layer.mjs";
 const maxBuffer = parsePositiveIntegerEnv("B2_MCP_LEAK_DIAGNOSTIC_MAX_BUFFER", 64 * 1024 * 1024);
 const timeout = parsePositiveIntegerEnv("B2_MCP_LEAK_DIAGNOSTIC_TIMEOUT_MS", 2 * 60 * 1000);
+// A single-threaded layer run can exceed the timeout on a loaded CI runner — a
+// transient flake, not a real leak. Re-run the layer on a timeout before failing.
+const attempts = parsePositiveIntegerEnv("B2_MCP_LEAK_DIAGNOSTIC_ATTEMPTS", 2);
 const warningPatterns = [
   /MaxListenersExceededWarning/,
   /Possible EventEmitter memory leak detected/,
@@ -32,17 +35,30 @@ for (const layer of layers) {
   env.NODE_OPTIONS = [env.NODE_OPTIONS, "--trace-warnings"].filter(Boolean).join(" ");
   delete env.FORCE_COLOR;
 
-  const result = spawnSync(
-    process.execPath,
-    [runner, layer, "--", "--fileParallelism=false", "--reporter=hanging-process"],
-    {
-      cwd: process.cwd(),
-      env,
-      encoding: "utf8",
-      maxBuffer,
-      timeout,
-    },
-  );
+  let result;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    result = spawnSync(
+      process.execPath,
+      [runner, layer, "--", "--fileParallelism=false", "--reporter=hanging-process"],
+      {
+        cwd: process.cwd(),
+        env,
+        encoding: "utf8",
+        maxBuffer,
+        timeout,
+      },
+    );
+    // Only a run-duration timeout is transient; every other outcome (real
+    // failure, leak warning, buffer overflow) is deterministic — stop and report.
+    const timedOut = result.error && "code" in result.error && result.error.code === "ETIMEDOUT";
+    if (timedOut && attempt < attempts) {
+      console.error(
+        `Leak diagnostics layer '${layer}' timed out after ${timeout} ms (attempt ${attempt}/${attempts}); retrying.`,
+      );
+      continue;
+    }
+    break;
+  }
   const stdout = result.stdout ?? "";
   const stderr = result.stderr ?? "";
   if (stdout) process.stdout.write(stdout);
