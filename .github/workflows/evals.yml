@@ -6,6 +6,22 @@ name: LLM Evals
 # OpenAI is temporarily disabled (the account has no API credits), so scheduled
 # runs cover Anthropic only. Re-enable OpenAI by restoring OPENAI_API_KEY to the
 # guard's required secrets and to the eval step env below.
+#
+# OPERATOR RUNBOOK — the `guard` and `evals` jobs bind to the `llm-evals`
+# GitHub environment (below) to scope ANTHROPIC_API_KEY. Referencing an
+# environment that does not exist auto-creates it with NO protection rules and
+# a repo-level ANTHROPIC_API_KEY still resolves, so the gate delivers no real
+# protection until an operator, out-of-band, has:
+#   1. Created the `llm-evals` environment.
+#   2. Added ANTHROPIC_API_KEY as an environment secret (and removed the
+#      repo-level copy if it should no longer be repo-scoped).
+#   3. Restricted deployment branches to `main` only.
+# REQUIRED CONSTRAINT: this workflow runs unattended (weekly `schedule` cron +
+# `workflow_dispatch`), so the environment MUST NOT carry required-reviewer or
+# wait-timer protection rules — either would pause the job in `Waiting` with no
+# human to approve, silently halting the eval evidence. Use branch restrictions
+# and secret scoping only. Verify by running the workflow via workflow_dispatch
+# after configuring the environment.
 
 on:
   workflow_dispatch:
@@ -23,9 +39,11 @@ jobs:
   guard:
     if: github.repository == 'backblaze-labs/b2-mcp'
     runs-on: ubuntu-latest
-    # Gate ANTHROPIC_API_KEY behind a dedicated environment so environment
-    # protection rules (required reviewers, branch restrictions, secret
-    # scoping) govern the provider secret (zizmor secrets-outside-env).
+    # Gate ANTHROPIC_API_KEY behind a dedicated environment so branch and
+    # secret-scoping protection rules govern the provider secret (zizmor
+    # secrets-outside-env). See the OPERATOR RUNBOOK at the top of this file:
+    # the environment must be configured out-of-band and must NOT use
+    # required-reviewer/wait-timer rules (they would stall the cron run).
     environment: llm-evals
     timeout-minutes: 5
     outputs:
