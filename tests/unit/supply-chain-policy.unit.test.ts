@@ -1445,7 +1445,11 @@ describe("supply-chain audit policy", () => {
     const anchoredLine = Number(anchors[0]?.[1]);
     expect(Number.isInteger(anchoredLine)).toBe(true);
 
-    const workflowLines = workflow.split(/\r?\n/);
+    // Normalize to LF so the character-offset math below is newline-convention
+    // agnostic: a CRLF checkout would otherwise skew every offset by one byte
+    // per preceding line (`\r\n` split away but only `\n` re-added).
+    const workflowLf = workflow.replace(/\r\n/g, "\n");
+    const workflowLines = workflowLf.split("\n");
     // Anchor is 1-indexed and must be the checkout `uses:` line itself.
     const anchoredText = workflowLines[anchoredLine - 1] ?? "";
     expect(anchoredText).toMatch(/uses:\s*actions\/checkout@/);
@@ -1453,8 +1457,8 @@ describe("supply-chain audit policy", () => {
     // That line must fall inside the mark-green job block, and that job must be
     // the one persisting credentials — so an unrelated checkout cannot inherit
     // the ignore even if it lands on the same line number.
-    const markGreenJob = jobBlock("mark-green");
-    const jobStartOffset = workflow.indexOf(markGreenJob);
+    const markGreenJob = jobBlock("mark-green").replace(/\r\n/g, "\n");
+    const jobStartOffset = workflowLf.indexOf(markGreenJob);
     expect(jobStartOffset).toBeGreaterThanOrEqual(0);
     const anchoredOffset = workflowLines
       .slice(0, anchoredLine - 1)
@@ -1482,7 +1486,7 @@ describe("supply-chain audit policy", () => {
     // The persisted-credential checkout is unique to this job: no other job in
     // the workflow uses persist-credentials:true, so the accepted risk stays
     // scoped to the reviewed ci-green marker push.
-    expect(workflow.match(/persist-credentials:\s*true/g) ?? []).toHaveLength(1);
+    expect(workflowLf.match(/persist-credentials:\s*true/g) ?? []).toHaveLength(1);
   });
 
   it("refuses environment-injected audit fixtures outside tests", () => {
