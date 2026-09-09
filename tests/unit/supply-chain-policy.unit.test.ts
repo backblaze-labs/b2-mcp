@@ -1488,12 +1488,6 @@ describe("supply-chain audit policy", () => {
     // commented `# persist-credentials: true` cannot satisfy the assertion.
     expect(stepBlock.join("\n")).toMatch(/^\s*persist-credentials:\s*true\b/m);
 
-    // The persisted-credential checkout is unique to this job: no other job in
-    // the workflow persists credentials, so the accepted risk stays scoped to
-    // the reviewed ci-green marker push. Same start-of-line anchor excludes
-    // commented occurrences.
-    expect(workflowLf.match(/^\s*persist-credentials:\s*true\b/gm) ?? []).toHaveLength(1);
-
     // Fail-closed on the FULL accepted-risk invariant, not just an action count.
     // Parse the workflow as YAML (not a line regex) so every step form is seen —
     // block (`- uses:`), name-first (`- name:`/`uses:`), and flow/aliased
@@ -1505,6 +1499,25 @@ describe("supply-chain audit policy", () => {
     const parsedWorkflow = parseWorkflowYaml(workflow) as {
       jobs?: Record<string, { if?: string; steps?: Array<Record<string, unknown>> }>;
     };
+
+    // actions/checkout defaults `persist-credentials` to true, so "only
+    // mark-green persists the token" is NOT proven by counting literal
+    // `persist-credentials: true` — a checkout that omits the input persists by
+    // default. Enumerate every checkout across all jobs and require the only
+    // credential-persisting one to be mark-green's; every other checkout must opt
+    // out with `persist-credentials: false` explicitly.
+    const persistingCheckoutJobs: string[] = [];
+    for (const [jobId, job] of Object.entries(parsedWorkflow.jobs ?? {})) {
+      for (const step of job.steps ?? []) {
+        if (step == null || typeof step !== "object") continue;
+        const stepUses = typeof step.uses === "string" ? step.uses : "";
+        if (!/^actions\/checkout@/.test(stepUses)) continue;
+        const withBlock = (step.with as Record<string, unknown> | undefined) ?? {};
+        if (withBlock["persist-credentials"] !== false) persistingCheckoutJobs.push(jobId);
+      }
+    }
+    expect(persistingCheckoutJobs).toEqual(["mark-green"]);
+
     const markGreenSteps = parsedWorkflow.jobs?.["mark-green"]?.steps ?? [];
     expect(markGreenSteps).toHaveLength(2);
 
