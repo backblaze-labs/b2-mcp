@@ -1497,8 +1497,23 @@ describe("supply-chain audit policy", () => {
     // new `uses:`, or ANY new executable/download/upload line in the run script
     // fails this test and forces re-review of the persisted write token.
     const parsedWorkflow = parseWorkflowYaml(workflow) as {
+      defaults?: unknown;
+      env?: Record<string, unknown>;
       jobs?: Record<string, { if?: string; steps?: Array<Record<string, unknown>> }>;
     };
+
+    // Fail closed on WORKFLOW-level execution surfaces inherited by every job,
+    // including this credential-bearing one. The job-key allowlist below stops a
+    // job-level `defaults`/`env`, but a top-level `defaults.run.shell` wrapper or
+    // a global `env.BASH_ENV` would run extra code with the persisted write token
+    // while the job/step keys and snapshotted `run` text stay unchanged (the repo
+    // already treats workflow-level custom shells as an execution surface in
+    // scripts/check-runtime-policy.mjs). Require NO top-level `defaults` at all,
+    // and pin the top-level `env` to its single reviewed data key so any inherited
+    // execution setting forces re-review. A legitimate future addition must update
+    // this allowlist, which re-anchors the review to the persisted-credential job.
+    expect(parsedWorkflow.defaults).toBeUndefined();
+    expect(Object.keys(parsedWorkflow.env ?? {})).toEqual(["ZIZMOR_IMAGE"]);
 
     // actions/checkout defaults `persist-credentials` to true, so "only
     // mark-green persists the token" is NOT proven by counting literal
