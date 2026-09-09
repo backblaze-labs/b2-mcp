@@ -18,6 +18,14 @@ on:
 permissions:
   contents: read
 
+# Release signal per tag: never interrupt a tag's run. Key on the resolved tag
+# (same value as the job's REQUEST_TAG) so a push-tag run and a workflow_dispatch
+# run for the same tag share one group, and distinct tags never collapse — on
+# workflow_dispatch github.ref is the branch ref, so it cannot isolate per tag.
+concurrency:
+  group: release-tag-${{ github.repository }}-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
   request:
     runs-on: ubuntu-latest
