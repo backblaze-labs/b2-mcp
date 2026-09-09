@@ -10,9 +10,12 @@ const layers = (process.env.B2_MCP_LEAK_DIAGNOSTIC_LAYERS ?? "unit,protocol-mode
   .filter(Boolean);
 const runner = process.env.B2_MCP_LEAK_DIAGNOSTIC_RUNNER ?? "scripts/run-vitest-layer.mjs";
 const maxBuffer = parsePositiveIntegerEnv("B2_MCP_LEAK_DIAGNOSTIC_MAX_BUFFER", 64 * 1024 * 1024);
-const timeout = parsePositiveIntegerEnv("B2_MCP_LEAK_DIAGNOSTIC_TIMEOUT_MS", 2 * 60 * 1000);
-// A single-threaded layer run can exceed the timeout on a loaded CI runner — a
-// transient flake, not a real leak. Re-run the layer on a timeout before failing.
+// The unit layer runs single-threaded here (--fileParallelism=false), so as the
+// suite grows it comfortably outlasts a parallel run. The default carries ample
+// headroom over the observed single-threaded duration on a loaded CI runner; a
+// timeout is still a transient flake, not a real leak.
+const timeout = parsePositiveIntegerEnv("B2_MCP_LEAK_DIAGNOSTIC_TIMEOUT_MS", 5 * 60 * 1000);
+// Re-run the layer on a timeout before failing to absorb the occasional stall.
 const attempts = parsePositiveIntegerEnv("B2_MCP_LEAK_DIAGNOSTIC_ATTEMPTS", 2);
 const warningPatterns = [
   /MaxListenersExceededWarning/,

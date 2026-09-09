@@ -6,6 +6,25 @@ name: LLM Evals
 # OpenAI is temporarily disabled (the account has no API credits), so scheduled
 # runs cover Anthropic only. Re-enable OpenAI by restoring OPENAI_API_KEY to the
 # guard's required secrets and to the eval step env below.
+#
+# OPERATOR RUNBOOK — the `guard` and `evals` jobs bind to the `llm-evals`
+# GitHub environment (below) to scope ANTHROPIC_API_KEY. Referencing an
+# environment that does not exist auto-creates it with NO protection rules and
+# a repo-level ANTHROPIC_API_KEY still resolves, so the gate delivers no real
+# protection until an operator, out-of-band, has:
+#   1. Created the `llm-evals` environment.
+#   2. Added ANTHROPIC_API_KEY as an environment secret AND removed any
+#      repository-level ANTHROPIC_API_KEY copy, which otherwise stays resolvable
+#      to jobs outside llm-evals and keeps the key broadly scoped.
+#   3. Restricted deployment branches to `main` only.
+# REQUIRED CONSTRAINT: this workflow runs unattended (weekly `schedule` cron +
+# `workflow_dispatch`), so the environment MUST NOT carry a required-reviewer
+# rule — with no human to approve, it pauses the job in `Waiting` forever and
+# silently halts the eval evidence. A wait-timer rule only delays the run by its
+# configured interval (it auto-releases), so it does not stall the workflow but
+# still needlessly postpones the evidence; prefer branch restrictions and secret
+# scoping only. Verify by running the workflow via workflow_dispatch after
+# configuring the environment.
 
 on:
   workflow_dispatch:
@@ -23,6 +42,13 @@ jobs:
   guard:
     if: github.repository == 'backblaze-labs/b2-mcp'
     runs-on: ubuntu-latest
+    # Gate ANTHROPIC_API_KEY behind a dedicated environment so branch and
+    # secret-scoping protection rules govern the provider secret (zizmor
+    # secrets-outside-env). See the OPERATOR RUNBOOK at the top of this file:
+    # the environment must be configured out-of-band (including removing any
+    # repo-level ANTHROPIC_API_KEY copy) and must NOT use a required-reviewer
+    # rule, which would stall the unattended cron run in `Waiting` forever.
+    environment: llm-evals
     timeout-minutes: 5
     outputs:
       checkout-sha: ${{ steps.ref.outputs.checkout_sha }}
@@ -54,7 +80,7 @@ jobs:
           done
 
           if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
-            echo "::error::ANTHROPIC_API_KEY is required for canonical scheduled/dispatch LLM evals; configure it with gh secret set ANTHROPIC_API_KEY"
+            echo "::error::ANTHROPIC_API_KEY is required for canonical scheduled/dispatch LLM evals; configure it as an llm-evals environment secret with gh secret set ANTHROPIC_API_KEY --env llm-evals"
             exit 1
           fi
 
@@ -64,6 +90,9 @@ jobs:
     name: Claude pass rates
     needs: guard
     runs-on: ubuntu-latest
+    # Same dedicated environment as the guard job so the provider secret stays
+    # scoped to environment protection rules (zizmor secrets-outside-env).
+    environment: llm-evals
     timeout-minutes: 20
     steps:
       # actions/checkout v7, reviewed 2026-08-25.
