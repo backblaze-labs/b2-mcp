@@ -1,3 +1,47 @@
 {
-  "allowedAdvisories": []
+  "allowedAdvisories": [
+    {
+      "name": "sharp",
+      "source": 1193725,
+      "maxSeverity": "high",
+      "isDirect": false,
+      "nodes": [".>miniflare>sharp", ".>wrangler>miniflare>sharp"],
+      "effects": [],
+      "package": {
+        "version": "0.35.2",
+        "integrity": "sha512-FVtFjtBCMiJS6yb5CX7Sop45WFMpeGw6oRKuJnXYgf/f1ms/D7LE/ZUSNxnW7rZ/dbslQWYkoqFHGPaDBtaK4w=="
+      },
+      "via": {
+        "path": "node_modules/miniflare",
+        "name": "miniflare",
+        "version": "5.20260903.0-alpha",
+        "dependencyRange": "0.35.2"
+      },
+      "expires": "2026-10-09",
+      "reason": "Dev-only transitive dependency via wrangler/miniflare (Cloudflare CLI); not present in the published @backblaze-labs/b2-mcp package. libheif advisories GHSA-g89c-p67h-r497 / GHSA-2jg2-4ch7-h545. Revisit when wrangler ships a patched sharp."
+    },
+    {
+      "name": "js-yaml",
+      "source": 1193727,
+      "maxSeverity": "high",
+      "isDirect": false,
+      "nodes": [
+        ".>vercel>@vercel/python-analysis>js-yaml",
+        ".>vercel>@vercel/python>@vercel/python-analysis>js-yaml"
+      ],
+      "effects": [],
+      "package": {
+        "version": "4.3.1",
+        "integrity": "sha512-CY6crGq313MX8GkwvB7tzgp99vjQxY1++5y10/BKN/GUfHqWaOGQMNZkBvqSzsZKWk/ijwHlWzzkLulsGHhjWQ=="
+      },
+      "via": {
+        "path": "node_modules/@vercel/python-analysis",
+        "name": "@vercel/python-analysis",
+        "version": "0.14.0",
+        "dependencyRange": "4.3.1"
+      },
+      "expires": "2026-10-09",
+      "reason": "Dev-only transitive dependency via the Vercel CLI (@vercel/python-analysis); not present in the published @backblaze-labs/b2-mcp package. js-yaml maxTotalMergeKeys CPU-use advisory. Revisit when vercel ships a patched js-yaml."
+    }
+  ]
 }

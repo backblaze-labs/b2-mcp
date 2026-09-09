@@ -93,6 +93,7 @@ describe("supply-chain audit policy", () => {
       package: { version: string; integrity: string };
       via: { path: string; name: string; version: string; dependencyRange: string };
       expires: string;
+      reason: string;
     }>;
   };
   type LockPackage = {
@@ -1681,8 +1682,20 @@ describe("supply-chain audit policy", () => {
     expect(result.stderr).toContain("::error::audit-policy: new-vulnerable-package:999001");
   });
 
-  it("ships without advisory exceptions", () => {
-    expect(auditPolicy.allowedAdvisories).toEqual([]);
+  it("ships only documented, unexpired advisory exceptions", () => {
+    const today = new Date().toISOString().slice(0, 10);
+    for (const entry of auditPolicy.allowedAdvisories) {
+      expect(entry.name, "advisory exception must name a package").toBeTruthy();
+      expect(entry.source, `${entry.name} exception must cite an advisory source`).toBeTruthy();
+      expect(
+        typeof entry.reason === "string" && entry.reason.trim().length > 0,
+        `${entry.name} exception must document a reason`,
+      ).toBe(true);
+      expect(
+        typeof entry.expires === "string" && entry.expires > today,
+        `${entry.name} exception must have a future expiry (got ${entry.expires})`,
+      ).toBe(true);
+    }
   });
 
   it("allows only a tightly scoped test advisory", () => {
