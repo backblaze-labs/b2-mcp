@@ -15,6 +15,7 @@ import { tmpdir } from "os";
 import { join, resolve } from "path";
 import { spawnSync } from "child_process";
 import { createRequire } from "module";
+import { parse as parseWorkflowYaml } from "yaml";
 
 const root = join(__dirname, "../..");
 const nodeRequire = createRequire(__filename);
@@ -1495,18 +1496,21 @@ describe("supply-chain audit policy", () => {
 
     // Fail-closed on the suppression's core safety invariant: the mark-green job
     // must run NO third-party action while the checkout credential is persisted.
-    // It may use exactly one `uses:` — the SHA-pinned actions/checkout — and
-    // everything else must be inline `run:` steps. Any added `uses:` (a
-    // third-party action or artifact upload) trips this and forces re-review of
-    // the accepted artipacked risk.
-    // Count every `uses:` step property in the job — both the uses-first
-    // (`- uses:`) and the name-first (`- name:` then an indented `uses:`, as at
-    // test.yml:618) forms — with the dash optional but start-anchored so a
-    // commented `# uses:` line is never counted. A third-party action added in
-    // either form (e.g. an artifact upload) pushes the count past one.
-    const markGreenUses = markGreenJob.match(/^\s*-?\s*uses:\s*\S+/gm) ?? [];
-    expect(markGreenUses).toHaveLength(1);
-    expect(markGreenUses[0]).toMatch(/actions\/checkout@[0-9a-f]{40}\b/);
+    // Parse the workflow as YAML (not a line regex) so every step-form counts —
+    // block (`- uses:`), name-first (`- name:` then `uses:`), and flow/aliased
+    // (`- { uses: x }`) alike — and a second action cannot slip past a
+    // line-based scan. The job may declare exactly ONE step with a `uses` key:
+    // the SHA-pinned actions/checkout. Any added action or artifact upload, in
+    // any YAML form, pushes the count past one and forces re-review.
+    const parsedWorkflow = parseWorkflowYaml(workflow) as {
+      jobs?: Record<string, { steps?: Array<Record<string, unknown>> }>;
+    };
+    const markGreenSteps = parsedWorkflow.jobs?.["mark-green"]?.steps ?? [];
+    const markGreenUsesSteps = markGreenSteps.filter(
+      (step) => step != null && typeof step === "object" && "uses" in step,
+    );
+    expect(markGreenUsesSteps).toHaveLength(1);
+    expect(String(markGreenUsesSteps[0]?.uses)).toMatch(/actions\/checkout@[0-9a-f]{40}\b/);
   });
 
   it("refuses environment-injected audit fixtures outside tests", () => {
