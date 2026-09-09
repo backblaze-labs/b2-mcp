@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- README "Backblaze Labs ecosystem" section cross-linking Genblaze,
+  b2-sdk-typescript, and b2-action. (#427)
+
 ## [0.2.1] - 2026-09-04
 
 ### Added
