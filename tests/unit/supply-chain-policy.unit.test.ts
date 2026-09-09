@@ -1528,7 +1528,11 @@ describe("supply-chain audit policy", () => {
       (checkoutStep?.with as Record<string, unknown> | undefined)?.["persist-credentials"],
     ).toBe(true);
 
-    expect("uses" in (markerStep ?? {})).toBe(false);
+    // Bind the marker step's exact key set (as for the checkout step) so an
+    // execution-affecting field — `uses`, a custom `shell:` (e.g. running a
+    // checked-in script), `env:` (e.g. BASH_ENV), `working-directory`, `if`, … —
+    // added alongside the snapshotted `run` still forces re-review.
+    expect(Object.keys(markerStep ?? {}).sort()).toEqual(["name", "run"]);
     expect(typeof markerStep?.run).toBe("string");
 
     // Snapshot the inline step's script, whitespace-normalized (per-line trim,
@@ -1564,9 +1568,14 @@ describe("supply-chain audit policy", () => {
     // The persisted-credential job must stay main-only (a push to refs/heads/main),
     // so the accepted risk never runs on a PR or fork head ref. Bind that job-level
     // guard here too, keeping the full documented invariant fail-closed in one place.
+    // Pin the ENTIRE reviewed condition, not substrings: a broadening clause
+    // (e.g. `|| github.event_name == 'pull_request'`) preserves both substrings
+    // yet would let the credentialed marker push run off `main` — comparing the
+    // normalized condition to the exact reviewed expression forces re-review.
     const markGreenIf = String(parsedWorkflow.jobs?.["mark-green"]?.if ?? "");
-    expect(markGreenIf).toContain("github.ref == 'refs/heads/main'");
-    expect(markGreenIf).toContain("github.event_name == 'push'");
+    expect(markGreenIf.trim()).toBe(
+      "github.ref == 'refs/heads/main' && github.event_name == 'push'",
+    );
   });
 
   it("refuses environment-injected audit fixtures outside tests", () => {
