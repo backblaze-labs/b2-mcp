@@ -74,9 +74,12 @@ rules:
       # `persist-credentials: false` would break the marker push — it is a
       # functional requirement here, not an oversight.
       #
-      # `persist-credentials: true` writes the `contents: write` GITHUB_TOKEN
-      # into `.git/config`, where every step in the job can read it for the
-      # job's full duration — not only an artifact-upload step. The true safety
+      # `persist-credentials: true` leaves the `contents: write` GITHUB_TOKEN
+      # usable by Git for the job's full duration: actions/checkout v7 stores
+      # the credential in a Git config file under `$RUNNER_TEMP` and wires it
+      # into the checkout's local `.git/config` via an `http.<host>.extraheader`
+      # and an `includeIf.gitdir` include, so any Git command in the job can use
+      # it — not only an artifact-upload step. The true safety
       # invariant is therefore that this job runs NO untrusted/third-party code
       # while the credential is persisted: it runs only the SHA-pinned
       # `actions/checkout` and inline, trusted git commands, uploads no
