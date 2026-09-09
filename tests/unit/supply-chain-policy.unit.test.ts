@@ -1626,6 +1626,75 @@ describe("supply-chain audit policy", () => {
     );
   });
 
+  it("anchors the zizmor adhoc-packages ignore to the packed-install smoke", () => {
+    // The adhoc-packages suppression accepts the pack-smoke `npm install
+    // "$tarball_path"` of the locally-built tarball ON PURPOSE (installing the
+    // artifact under test outside a lockfile is the whole point of the smoke
+    // test), and it is pinned by raw line number (test.yml:<line>). zizmor
+    // matches ignores by file:line, not by job/step identity, so a future edit
+    // that shifts a DIFFERENT line onto that number silently un-suppresses the
+    // finding — exactly the drift that reopened alert #95. This required test
+    // compensates: it fails if the pinned line no longer resolves to the
+    // packed-install `npm install "$tarball_path"` step, forcing a re-anchor
+    // instead of a silent regression.
+    const zizmorConfig = readFileSync(join(root, "zizmor.yml"), "utf8");
+    const adhocBlock = yamlBlockForKey(zizmorConfig, "adhoc-packages");
+    expect(adhocBlock).not.toBeNull();
+    const anchors = [...(adhocBlock ?? "").matchAll(/-\s*test\.yml:(\d+)/g)];
+    // Exactly one anchored install may carry this accepted-risk suppression.
+    expect(anchors).toHaveLength(1);
+    const anchoredLine = Number(anchors[0]?.[1]);
+    expect(Number.isInteger(anchoredLine)).toBe(true);
+
+    // Normalize to LF so the character-offset math below is newline-convention
+    // agnostic (see the artipacked guard for the same rationale).
+    const workflowLf = workflow.replace(/\r\n/g, "\n");
+    const workflowLines = workflowLf.split("\n");
+    // Anchor is 1-indexed and must be the pack-smoke install line itself — the
+    // hardened `npm install ... "$tarball_path"` of the locally-built tarball,
+    // start-anchored so a commented reference cannot satisfy it.
+    const anchoredText = workflowLines[anchoredLine - 1] ?? "";
+    expect(anchoredText).toMatch(
+      /^\s*npm install --ignore-scripts --omit=dev --no-audit --no-fund "\$tarball_path"$/,
+    );
+
+    // That line must fall inside the packaged-install smoke job so an unrelated
+    // ad-hoc install elsewhere cannot inherit the ignore on the same line number.
+    const smokeJob = jobBlock("runtime-engine-floor").replace(/\r\n/g, "\n");
+    expect(smokeJob).not.toBe("");
+    const jobStartOffset = workflowLf.indexOf(smokeJob);
+    expect(jobStartOffset).toBeGreaterThanOrEqual(0);
+    const anchoredOffset = workflowLines
+      .slice(0, anchoredLine - 1)
+      .reduce((sum, line) => sum + line.length + 1, 0);
+    expect(anchoredOffset).toBeGreaterThanOrEqual(jobStartOffset);
+    expect(anchoredOffset).toBeLessThan(jobStartOffset + smokeJob.length);
+
+    // The pack-smoke install is a false positive only because it is hardened and
+    // installs the locally-built tarball — pin both the comment rationale and the
+    // hardening flags so weakening either forces a re-review of the suppression.
+    expect(adhocBlock).toContain(`- test.yml:${anchoredLine}`);
+    expect(anchoredText).toContain("--ignore-scripts");
+    expect(anchoredText).toContain("--omit=dev");
+
+    // Alert #95 reopened because the FUNCTIONAL `- test.yml:397` suppression
+    // entry drifted out of sync with the real install line — zizmor ignores the
+    // comments entirely, so only that entry (asserted above) controls whether the
+    // finding is suppressed. The prose is a separate, documentation-only hazard:
+    // the same number is restated in two human-readable comment references ("The
+    // packed-install smoke test (test.yml:406)" and "Anchored to the `npm install
+    // "$tarball_path"` line (test.yml:406)"), and if those drift independently of
+    // the entry they mislead the next maintainer into re-reviewing the wrong line.
+    // Require EVERY `test.yml:<line>` occurrence in the block — the guarded entry
+    // and both comment references — to point at the same anchored line, so a
+    // partial re-anchor that leaves stale documentation fails CI.
+    const allTestYmlRefs = [...adhocBlock!.matchAll(/test\.yml:(\d+)/g)].map((match) =>
+      Number(match[1]),
+    );
+    expect(allTestYmlRefs.length).toBeGreaterThanOrEqual(3);
+    expect(new Set(allTestYmlRefs)).toEqual(new Set([anchoredLine]));
+  });
+
   it("refuses environment-injected audit fixtures outside tests", () => {
     const result = spawnSync(process.execPath, ["scripts/audit-supply-chain.mjs"], {
       cwd: root,
