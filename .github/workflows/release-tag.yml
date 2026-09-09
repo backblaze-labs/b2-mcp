@@ -18,6 +18,11 @@ on:
 permissions:
   contents: read
 
+# Release signal per tag: never interrupt a tag's run.
+concurrency:
+  group: release-tag-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   request:
     runs-on: ubuntu-latest

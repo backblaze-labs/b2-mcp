@@ -20,6 +20,11 @@ on:
 # No pull_request_target: fork, draft, and unknown-head code is never trusted.
 permissions: {}
 
+# Advisory PR analysis: cancel superseded runs on the same PR.
+concurrency:
+  group: quality-keeper-${{ github.repository }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   quality-keeper:
     if: >-
