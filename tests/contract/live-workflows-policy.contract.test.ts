@@ -400,7 +400,7 @@ describe("live secret workflow policy", () => {
     expect(matrixValidation).toContain("B2_LIVE_NOTIFICATION_BUCKET");
     expect(matrixValidation).toContain("node scripts/live-b2-evidence.mjs preflight");
     expect(matrixValidation).toContain(
-      "reports/live-b2/validation-node-${{ matrix.node-version }}.json",
+      "reports/live-b2/validation-node-${MATRIX_NODE_VERSION}.json",
     );
     expect(liveTests).toContain("if: steps.matrix_validation.outcome == 'success'");
     expect(liveTests).toContain(
@@ -415,8 +415,8 @@ describe("live secret workflow policy", () => {
     expect(finalizer).toContain(
       "B2_LIVE_NOTIFICATION_BUCKET: ${{ vars.B2_LIVE_NOTIFICATION_BUCKET }}",
     );
-    expect(finalizer).toContain("reports/live-b2/validation-node-${{ matrix.node-version }}.json");
-    expect(finalizer).toContain('--preflight-outcome "${{ steps.matrix_validation.outcome }}"');
+    expect(finalizer).toContain("reports/live-b2/validation-node-${MATRIX_NODE_VERSION}.json");
+    expect(finalizer).toContain('--preflight-outcome "${MATRIX_VALIDATION_OUTCOME}"');
     expect(finalFallback).toContain("live B2 final evidence fallback");
     expect(finalFallback).toContain("configuration blocked");
     expect(finalFallback).toContain("cleanup failure");
