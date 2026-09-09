@@ -272,7 +272,7 @@ jobs:
         run: |
           set -euo pipefail
           node scripts/live-b2-evidence.mjs preflight \
-            --out "reports/live-b2/validation-node-${{ matrix.node-version }}.json"
+            --out "reports/live-b2/validation-node-${MATRIX_NODE_VERSION}.json"
       - name: Run live B2 contract and integration suites
         id: live_tests
         if: steps.matrix_validation.outcome == 'success'
@@ -312,7 +312,7 @@ jobs:
           fi
           node scripts/live-b2-janitor.mjs \
             --prefix "${B2_MCP_LIVE_RUN_PREFIX}" \
-            --summary-json "reports/live-b2/cleanup-node-${{ matrix.node-version }}.json"
+            --summary-json "reports/live-b2/cleanup-node-${MATRIX_NODE_VERSION}.json"
       - name: Publish live B2 isolation and cleanup evidence
         if: always()
         env:
@@ -326,33 +326,39 @@ jobs:
           B2_MCP_EXPECTED_TOOL_PROFILE: ${{ vars.B2_MCP_EXPECTED_TOOL_PROFILE }}
           B2_MCP_LIVE_RUN_PREFIX: ${{ env.B2_MCP_LIVE_RUN_PREFIX }}
           B2_MCP_LIVE_RESOURCE_LEDGER: ${{ env.B2_MCP_LIVE_RESOURCE_LEDGER }}
-          MATRIX_NODE_VERSION: ${{ matrix.node-version }}
+          MATRIX_VALIDATION_OUTCOME: ${{ steps.matrix_validation.outcome }}
+          LIVE_TESTS_OUTCOME: ${{ steps.live_tests.outcome }}
+          CLEANUP_OUTCOME: ${{ steps.cleanup.outcome }}
         run: |
           set -euo pipefail
           mkdir -p reports/live-b2
           node scripts/live-b2-evidence.mjs finalize \
-            --out "reports/live-b2/isolation-cleanup-node-${{ matrix.node-version }}.json" \
+            --out "reports/live-b2/isolation-cleanup-node-${MATRIX_NODE_VERSION}.json" \
             --resource-ledger "${B2_MCP_LIVE_RESOURCE_LEDGER}" \
-            --cleanup-summary "reports/live-b2/cleanup-node-${{ matrix.node-version }}.json" \
-            --validation-summary "reports/live-b2/validation-node-${{ matrix.node-version }}.json" \
-            --preflight-outcome "${{ steps.matrix_validation.outcome }}" \
-            --test-outcome "${{ steps.live_tests.outcome }}" \
-            --cleanup-outcome "${{ steps.cleanup.outcome }}"
+            --cleanup-summary "reports/live-b2/cleanup-node-${MATRIX_NODE_VERSION}.json" \
+            --validation-summary "reports/live-b2/validation-node-${MATRIX_NODE_VERSION}.json" \
+            --preflight-outcome "${MATRIX_VALIDATION_OUTCOME}" \
+            --test-outcome "${LIVE_TESTS_OUTCOME}" \
+            --cleanup-outcome "${CLEANUP_OUTCOME}"
       - name: Ensure live B2 final evidence exists
         if: always()
+        env:
+          MATRIX_VALIDATION_OUTCOME: ${{ steps.matrix_validation.outcome }}
+          LIVE_TESTS_OUTCOME: ${{ steps.live_tests.outcome }}
+          CLEANUP_OUTCOME: ${{ steps.cleanup.outcome }}
         run: |
           set -euo pipefail
-          final_json="reports/live-b2/isolation-cleanup-node-${{ matrix.node-version }}.json"
+          final_json="reports/live-b2/isolation-cleanup-node-${MATRIX_NODE_VERSION}.json"
           mkdir -p reports/live-b2
           if [[ -s "${final_json}" ]]; then
             exit 0
           fi
           status="configuration blocked"
           reason="live B2 final evidence fallback created before matrix validation completed"
-          if [[ "${{ steps.cleanup.outcome }}" != "success" && "${{ steps.cleanup.outcome }}" != "skipped" ]]; then
+          if [[ "${CLEANUP_OUTCOME}" != "success" && "${CLEANUP_OUTCOME}" != "skipped" ]]; then
             status="cleanup failure"
             reason="live B2 final evidence fallback created after cleanup did not complete successfully"
-          elif [[ "${{ steps.live_tests.outcome }}" != "success" && "${{ steps.live_tests.outcome }}" != "skipped" ]]; then
+          elif [[ "${LIVE_TESTS_OUTCOME}" != "success" && "${LIVE_TESTS_OUTCOME}" != "skipped" ]]; then
             status="product failure"
             reason="live B2 final evidence fallback created after tests did not complete successfully"
           fi
@@ -370,9 +376,9 @@ jobs:
             "status": "${status}",
             "statusReason": "${reason}",
             "outcomes": {
-              "preflight": "${{ steps.matrix_validation.outcome }}",
-              "tests": "${{ steps.live_tests.outcome }}",
-              "cleanup": "${{ steps.cleanup.outcome }}"
+              "preflight": "${MATRIX_VALIDATION_OUTCOME}",
+              "tests": "${LIVE_TESTS_OUTCOME}",
+              "cleanup": "${CLEANUP_OUTCOME}"
             },
             "sensitivity": {
               "secretSafe": true,
@@ -398,22 +404,26 @@ jobs:
           retention-days: 14
       - name: Require live B2 run success
         if: always()
+        env:
+          MATRIX_VALIDATION_OUTCOME: ${{ steps.matrix_validation.outcome }}
+          LIVE_TESTS_OUTCOME: ${{ steps.live_tests.outcome }}
+          CLEANUP_OUTCOME: ${{ steps.cleanup.outcome }}
         run: |
           set -euo pipefail
           failed=0
-          if [[ "${{ steps.matrix_validation.outcome }}" != "success" ]]; then
-            echo "::error::live B2 matrix validation outcome was ${{ steps.matrix_validation.outcome }}"
+          if [[ "${MATRIX_VALIDATION_OUTCOME}" != "success" ]]; then
+            echo "::error::live B2 matrix validation outcome was ${MATRIX_VALIDATION_OUTCOME}"
             failed=1
           fi
-          if [[ "${{ steps.live_tests.outcome }}" != "success" ]]; then
-            echo "::error::live B2 tests outcome was ${{ steps.live_tests.outcome }}"
+          if [[ "${LIVE_TESTS_OUTCOME}" != "success" ]]; then
+            echo "::error::live B2 tests outcome was ${LIVE_TESTS_OUTCOME}"
             failed=1
           fi
-          if [[ "${{ steps.cleanup.outcome }}" != "success" ]]; then
-            echo "::error::live B2 cleanup outcome was ${{ steps.cleanup.outcome }}"
+          if [[ "${CLEANUP_OUTCOME}" != "success" ]]; then
+            echo "::error::live B2 cleanup outcome was ${CLEANUP_OUTCOME}"
             failed=1
           fi
-          evidence_json="reports/live-b2/isolation-cleanup-node-${{ matrix.node-version }}.json"
+          evidence_json="reports/live-b2/isolation-cleanup-node-${MATRIX_NODE_VERSION}.json"
           evidence_status="$(
             node -e '
               const fs = require("node:fs");
