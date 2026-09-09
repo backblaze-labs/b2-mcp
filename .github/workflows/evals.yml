@@ -76,7 +76,7 @@ jobs:
           done
 
           if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
-            echo "::error::ANTHROPIC_API_KEY is required for canonical scheduled/dispatch LLM evals; configure it with gh secret set ANTHROPIC_API_KEY"
+            echo "::error::ANTHROPIC_API_KEY is required for canonical scheduled/dispatch LLM evals; configure it as an llm-evals environment secret with gh secret set ANTHROPIC_API_KEY --env llm-evals"
             exit 1
           fi
 

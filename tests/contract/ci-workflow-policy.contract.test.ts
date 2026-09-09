@@ -474,11 +474,14 @@ describe("CI workflow policy", () => {
     expect(guard).toContain("::add-mask::");
     expect(guard).toContain('[[ -z "${ANTHROPIC_API_KEY:-}" ]]');
     expect(guard).toContain("::error::ANTHROPIC_API_KEY is required");
-    expect(guard).toContain("gh secret set ANTHROPIC_API_KEY");
+    expect(guard).toContain("gh secret set ANTHROPIC_API_KEY --env llm-evals");
     expect(guard).toContain("exit 1");
     expect(guard).not.toContain("should_run=false");
     expect(guard).not.toContain("missing provider secret(s)");
-    expect(guard).not.toContain("environment:");
+    // Both secret-consuming jobs must gate ANTHROPIC_API_KEY behind the
+    // dedicated llm-evals environment (zizmor secrets-outside-env, #419).
+    expect(guard).toContain("environment: llm-evals");
+    expect(evalJob).toContain("environment: llm-evals");
 
     expect(workflowJobBlock(evals, "skipped")).toBeNull();
     expect(evals).not.toContain("LLM evals skipped");

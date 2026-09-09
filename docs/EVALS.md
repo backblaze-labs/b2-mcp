@@ -162,12 +162,21 @@ must not run against unreviewed code. It runs only on:
 > [`../.github/workflows/evals.yml`](../.github/workflows/evals.yml); no code
 > change is needed.
 
-The guard job checks that the repository is `backblaze-labs/b2-mcp`, the ref is
-`refs/heads/main`, and the `ANTHROPIC_API_KEY` repository secret is present.
-Because scheduled and manual CI evals are canonical-main only, a missing
-`ANTHROPIC_API_KEY` is treated as repository misconfiguration: the guard emits a
-GitHub Actions error and fails the workflow. `OPENAI_API_KEY` is not required by
-CI while OpenAI evals are disabled.
+The `guard` and `evals` jobs both bind to the `llm-evals` GitHub environment,
+so `ANTHROPIC_API_KEY` must be configured as an **environment secret** scoped to
+`llm-evals` (`gh secret set ANTHROPIC_API_KEY --env llm-evals`), not a
+repository secret. The guard job checks that the repository is
+`backblaze-labs/b2-mcp`, the ref is `refs/heads/main`, and the
+`ANTHROPIC_API_KEY` environment secret is present. Because scheduled and manual
+CI evals are canonical-main only, a missing `ANTHROPIC_API_KEY` is treated as
+repository misconfiguration: the guard emits a GitHub Actions error and fails
+the workflow. `OPENAI_API_KEY` is not required by CI while OpenAI evals are
+disabled.
+
+> The `llm-evals` environment must be restricted to the `main` branch with
+> secret scoping only. Do **not** add required-reviewer or wait-timer rules:
+> the workflow runs unattended (weekly cron + `workflow_dispatch`), and either
+> rule would pause it in `Waiting` with no human to approve.
 
 The eval job installs with the pinned package manager, builds once, then runs:
 
