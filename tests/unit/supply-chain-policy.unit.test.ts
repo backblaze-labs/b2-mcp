@@ -1518,6 +1518,21 @@ describe("supply-chain audit policy", () => {
     }
     expect(persistingCheckoutJobs).toEqual(["mark-green"]);
 
+    // Fail closed on the job's OWN top-level surface too: a step allowlist does
+    // not stop `container:`, `services:`, or a job-level `defaults.run.shell:`
+    // from running or altering code in this credential-bearing job while every
+    // step assertion still passes. Pin the exact set of reviewed job keys so any
+    // new job-level execution surface forces re-review of the persisted token.
+    expect(Object.keys(parsedWorkflow.jobs?.["mark-green"] ?? {}).sort()).toEqual([
+      "concurrency",
+      "if",
+      "name",
+      "needs",
+      "permissions",
+      "runs-on",
+      "steps",
+    ]);
+
     const markGreenSteps = parsedWorkflow.jobs?.["mark-green"]?.steps ?? [];
     expect(markGreenSteps).toHaveLength(2);
 
