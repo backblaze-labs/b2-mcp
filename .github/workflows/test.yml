@@ -44,7 +44,12 @@ jobs:
     name: format/lint/typecheck
     needs: runtime-policy
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # `pnpm run verify` ends with leak diagnostics, whose worst case is
+    # 3 layers x 2 attempts x B2_MCP_LEAK_DIAGNOSTIC_TIMEOUT_MS (5m) = 30m of
+    # child timeouts. This ceiling leaves headroom for that plus install,
+    # typecheck, build, lint, spell, runtime-security, and smoke so a hung
+    # layer still reports its verdict instead of the job being cancelled.
+    timeout-minutes: 45
     steps:
       # actions/checkout v7, reviewed 2026-08-25.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
