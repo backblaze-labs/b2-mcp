@@ -129,9 +129,11 @@ jobs:
       - run: pnpm run test:coverage
       - name: Publish coverage summary
         if: always()
+        env:
+          MATRIX_NODE_VERSION: ${{ matrix.node-version }}
         run: |
           echo "## Coverage summary" >> "$GITHUB_STEP_SUMMARY"
-          echo "Node.js ${{ matrix.node-version }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Node.js ${MATRIX_NODE_VERSION}" >> "$GITHUB_STEP_SUMMARY"
           echo "Required: statements 96%, branches 92%, functions 97.7%, lines 97.4%." >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           if [ -f coverage/coverage-summary.json ]; then
@@ -168,9 +170,11 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Require complete coverage matrix
+        env:
+          MATRIX_RESULT: ${{ needs.unit-coverage-matrix.result }}
         run: |
-          if [[ "${{ needs.unit-coverage-matrix.result }}" != "success" ]]; then
-            echo "::error::unit coverage matrix result was ${{ needs.unit-coverage-matrix.result }}"
+          if [[ "${MATRIX_RESULT}" != "success" ]]; then
+            echo "::error::unit coverage matrix result was ${MATRIX_RESULT}"
             exit 1
           fi
 
@@ -444,9 +448,11 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Require complete production dependency audit matrix
+        env:
+          MATRIX_RESULT: ${{ needs.production-dependency-audit-matrix.result }}
         run: |
-          if [[ "${{ needs.production-dependency-audit-matrix.result }}" != "success" ]]; then
-            echo "::error::production dependency audit matrix result was ${{ needs.production-dependency-audit-matrix.result }}"
+          if [[ "${MATRIX_RESULT}" != "success" ]]; then
+            echo "::error::production dependency audit matrix result was ${MATRIX_RESULT}"
             exit 1
           fi
 
@@ -898,9 +904,11 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Require complete cross-platform minimum matrix
+        env:
+          MATRIX_RESULT: ${{ needs.cross-platform-minimum-matrix.result }}
         run: |
-          if [[ "${{ needs.cross-platform-minimum-matrix.result }}" != "success" ]]; then
-            echo "::error::cross-platform minimum matrix result was ${{ needs.cross-platform-minimum-matrix.result }}"
+          if [[ "${MATRIX_RESULT}" != "success" ]]; then
+            echo "::error::cross-platform minimum matrix result was ${MATRIX_RESULT}"
             exit 1
           fi
       # actions/download-artifact v6, reviewed 2026-08-25.
