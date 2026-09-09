@@ -23,9 +23,10 @@ import { abortError } from "../../src/utils/named-error";
 import { _resetRateLimiter, allowRequest, rateLimiterConfig } from "../../src/utils/rate-limiter";
 import { _resetRetryBudget } from "../../src/utils/retry";
 import type { InFlightLimitResult } from "../../src/http-fetch-handler";
-import { DeterministicB2NativeFake, testConfig } from "../support/deterministic-fakes";
+import { testConfig } from "../support/deterministic-fakes";
 import {
   authorizeResponse,
+  b2EndpointName,
   deferred,
   installSdkTransport,
   RecordingTransport,
@@ -50,6 +51,20 @@ const CONCURRENCY = 8;
  */
 async function flushMicrotasks(times = CONCURRENCY + 2): Promise<void> {
   for (let i = 0; i < times; i++) await Promise.resolve();
+}
+
+/**
+ * Spin the microtask queue until `predicate` holds, so a test can wait for a
+ * concurrent burst to reach a known state without a wall-clock sleep.
+ *
+ * @throws Error when the predicate never holds within the bounded turn budget.
+ */
+async function waitUntil(predicate: () => boolean, label: string): Promise<void> {
+  for (let i = 0; i < 200; i++) {
+    if (predicate()) return;
+    await Promise.resolve();
+  }
+  throw new Error(`waitUntil timed out waiting for: ${label}`);
 }
 
 function rejectionStatus(result: InFlightLimitResult): number | undefined {
@@ -116,22 +131,67 @@ describe("concurrency races", () => {
       expect(tokens).toEqual(new Set(["token-2"]));
     });
 
-    it("re-authorizes once when a native call surfaces a 401", async () => {
-      const transport = new DeterministicB2NativeFake({ capabilities: ["listBuckets"] }).respond(
-        "b2_list_buckets",
-        new StaticHttpResponse(401, { status: 401, code: "unauthorized", message: "expired" }),
-        new StaticHttpResponse(200, { buckets: [] }),
-      );
+    it("collapses overlapping stale-token 401s into one shared reauthorization", async () => {
+      // The plain sequential single-call 401 retry is already covered by
+      // tests/unit/b2-client-edge.unit.test.ts. This case exercises the race:
+      // many stale-token calls fail with 401 and overlap, and the reauthorize
+      // they trigger stays in flight (held by `reauth`) so every retry must
+      // dedup onto the SAME fresh authorization instead of each firing its own.
+      let authorizeCalls = 0;
+      let listCalls = 0;
+      const reauth = deferred<StaticHttpResponse>();
+      const transport = new RecordingTransport((request) => {
+        const endpoint = b2EndpointName(request);
+        if (endpoint === "b2_authorize_account") {
+          authorizeCalls += 1;
+          if (authorizeCalls === 1) {
+            return new StaticHttpResponse(200, {
+              ...authorizeResponse(["listBuckets"]),
+              authorizationToken: "token-1",
+            });
+          }
+          // Hold the single reauthorization pending so no retry can complete
+          // getAuth() and start a second refresh while it is in flight.
+          return reauth.promise;
+        }
+        if (endpoint === "b2_list_buckets") {
+          listCalls += 1;
+          // The first burst all carry the stale token-1 and get 401; retries on
+          // the shared refreshed token succeed.
+          return listCalls <= CONCURRENCY
+            ? new StaticHttpResponse(401, { status: 401, code: "unauthorized", message: "expired" })
+            : new StaticHttpResponse(200, { buckets: [] });
+        }
+        throw new Error(`unexpected endpoint ${endpoint}`);
+      });
       installSdkTransport(transport);
       const client = new B2Client(new B2AuthManager(testConfig));
 
-      const result = await client.listBuckets();
+      const inflight = Array.from({ length: CONCURRENCY }, () => client.listBuckets());
 
-      expect(result.buckets).toEqual([]);
-      // Initial authorize + one re-authorize triggered by invalidate() on 401.
-      expect(transport.requestsFor("b2_authorize_account")).toHaveLength(2);
-      // The list operation was retried exactly once after the refresh.
-      expect(transport.requestsFor("b2_list_buckets")).toHaveLength(2);
+      // Wait until every stale-token call has hit its 401 and the single shared
+      // reauthorization has started, then let every retry park on it.
+      await waitUntil(
+        () => listCalls >= CONCURRENCY && authorizeCalls >= 2,
+        "all stale-token 401s observed and reauthorization started",
+      );
+      await flushMicrotasks(CONCURRENCY * 3);
+      // A late 401 must not invalidate the newly refreshed auth: still one refresh.
+      expect(authorizeCalls).toBe(2);
+
+      reauth.resolve(
+        new StaticHttpResponse(200, {
+          ...authorizeResponse(["listBuckets"]),
+          authorizationToken: "token-2",
+        }),
+      );
+      const results = await Promise.all(inflight);
+
+      expect(results.every((result) => result.buckets.length === 0)).toBe(true);
+      // Exactly one shared reauthorization: initial authorize + one refresh.
+      expect(authorizeCalls).toBe(2);
+      // Each caller made one stale attempt and exactly one retry after refresh.
+      expect(listCalls).toBe(CONCURRENCY * 2);
     });
   });
 
@@ -224,6 +284,26 @@ describe("concurrency races", () => {
       const rejected = outcomes.length - allowed;
       expect(allowed).toBe(rateLimiterConfig.burst);
       expect(rejected).toBe(CONCURRENCY);
+    });
+
+    it("accepts a throttled key again after one token refills", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+      _resetRateLimiter();
+
+      // Drain the bucket so the next immediate request is throttled.
+      for (let i = 0; i < rateLimiterConfig.burst; i++) {
+        expect(allowRequest("key-A")).toBe(true);
+      }
+      expect(allowRequest("key-A")).toBe(false);
+
+      // One refill interval at the configured RPS restores exactly one token, so
+      // the recovery transition is deterministic with no wall-clock wait.
+      const refillIntervalMs = Math.ceil(1000 / rateLimiterConfig.rps);
+      vi.advanceTimersByTime(refillIntervalMs);
+      expect(allowRequest("key-A")).toBe(true);
+      // That single refilled token is consumed, so the key throttles again.
+      expect(allowRequest("key-A")).toBe(false);
     });
 
     it("keeps distinct credential hashes from colliding under concurrent load", async () => {
