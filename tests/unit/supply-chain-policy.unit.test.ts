@@ -1539,9 +1539,14 @@ describe("supply-chain audit policy", () => {
     const [checkoutStep, markerStep] = markGreenSteps;
     expect(Object.keys(checkoutStep ?? {}).sort()).toEqual(["uses", "with"]);
     expect(String(checkoutStep?.uses)).toMatch(/^actions\/checkout@[0-9a-f]{40}$/);
-    expect(
-      (checkoutStep?.with as Record<string, unknown> | undefined)?.["persist-credentials"],
-    ).toBe(true);
+    // Bind the checkout's `with` map to ONLY `persist-credentials` too: an extra
+    // input such as `token: ${{ secrets.PAT }}` or `github-server-url: https://…`
+    // changes which credential/host is persisted — invalidating the suppression's
+    // GITHUB_TOKEN/no-exfiltration rationale — without altering the step keys, so
+    // a bare value check would still pass. Any new input now forces re-review.
+    const checkoutWith = (checkoutStep?.with as Record<string, unknown> | undefined) ?? {};
+    expect(Object.keys(checkoutWith)).toEqual(["persist-credentials"]);
+    expect(checkoutWith["persist-credentials"]).toBe(true);
 
     // Bind the marker step's exact key set (as for the checkout step) so an
     // execution-affecting field — `uses`, a custom `shell:` (e.g. running a
