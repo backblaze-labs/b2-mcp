@@ -294,6 +294,21 @@ const REPORT_SCAN_LIMITS = {
   concurrency: 1,
 };
 
+/**
+ * Wall-clock budget for the bounded native LIST scans behind
+ * `b2_list_largest_files` and `b2_unfinished_uploads`.
+ *
+ * @remarks
+ * B2 native listing has no server-side cap, so these scans stop after this
+ * budget and return truncated / lower-bound results rather than running for
+ * minutes. Exported as the single source of truth so both scan paths — and the
+ * deadline coverage tests — share one value instead of hand-copying the
+ * literal. (The report-CSV scan tracks its own `REPORT_SCAN_LIMITS.maxElapsedMs`
+ * budget, which is a separate subsystem that merely happens to share this
+ * value.)
+ */
+export const NATIVE_SCAN_TIME_BUDGET_MS = 12_000;
+
 /** Counters captured while scanning and downloading usage reports. */
 interface ReportLoadStats {
   /** Report list pages visited. */
@@ -1344,7 +1359,7 @@ export function registerInsightTools(
         // rate-limited) LIST calls that run for minutes and time out. On a bound
         // hit we return what we have with truncated=true so the caller knows the
         // ranking covers only the objects scanned.
-        const TIME_BUDGET_MS = 12_000;
+        const TIME_BUDGET_MS = NATIVE_SCAN_TIME_BUDGET_MS;
         const startedAt = Date.now();
         const top: Array<{ name: string; size: number; uploaded?: Date }> = [];
         let smallest = -Infinity;
@@ -1470,7 +1485,7 @@ export function registerInsightTools(
         // rate-limited calls that hang and time out. Cap the uploads walked and
         // put an overall wall-clock budget over the parts summation; report
         // truncated / lower-bound results instead of failing.
-        const TIME_BUDGET_MS = 12_000;
+        const TIME_BUDGET_MS = NATIVE_SCAN_TIME_BUDGET_MS;
         const startedAt = Date.now();
         const overBudget = () => Date.now() - startedAt > TIME_BUDGET_MS;
 

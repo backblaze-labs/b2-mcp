@@ -45,7 +45,7 @@ overrides:
   '@vercel/hono>path-to-regexp': 8.4.0
   '@vercel/node>path-to-regexp': 6.3.0
   '@vercel/node>undici': 6.28.0
-  '@vercel/python-analysis>js-yaml': 4.3.1
+  '@vercel/python-analysis>js-yaml': 4.3.2
   '@vercel/python-analysis>minimatch': 10.2.3
   '@vercel/python-analysis>smol-toml': 1.6.1
   '@vercel/remix-builder>path-to-regexp': 6.3.0
@@ -61,3 +61,7 @@ overrides:
   # fast-uri host-confusion/SSRF advisories and the qs array-limit/DoS advisories.
   fast-uri: '>=3.1.6 <4'
   qs: '>=6.16.0'
+  # Dev-only transitive dep via miniflare/wrangler; force the patched build off
+  # the libheif advisories bundled in sharp <0.35.4 (GHSA-g89c-p67h-r497,
+  # GHSA-2jg2-4ch7-h545). The Worker smoke never invokes sharp's image codecs.
+  'miniflare>sharp': '>=0.35.4'
