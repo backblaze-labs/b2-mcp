@@ -223,3 +223,29 @@ export function installSdkTransport(
       }),
   );
 }
+
+/** An externally-resolvable promise plus its settle callbacks. */
+export interface Deferred<T> {
+  /** The pending promise controlled by `resolve` / `reject`. */
+  promise: Promise<T>;
+  /** Settle the promise with a value or another thenable. */
+  resolve: (value: T | PromiseLike<T>) => void;
+  /** Reject the promise with a reason. */
+  reject: (reason?: unknown) => void;
+}
+
+/**
+ * Create an externally-controlled promise for tests that need to hold a
+ * dependency (authorize, transport reply, …) pending across concurrent callers.
+ *
+ * @returns The deferred promise and its `resolve` / `reject` callbacks.
+ */
+export function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}

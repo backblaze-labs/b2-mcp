@@ -26,6 +26,7 @@ import type { InFlightLimitResult } from "../../src/http-fetch-handler";
 import { DeterministicB2NativeFake, testConfig } from "../support/deterministic-fakes";
 import {
   authorizeResponse,
+  deferred,
   installSdkTransport,
   RecordingTransport,
   StaticHttpResponse,
@@ -37,22 +38,17 @@ import {
 
 const CONCURRENCY = 8;
 
-function deferred<T>(): {
-  promise: Promise<T>;
-  resolve: (value: T) => void;
-  reject: (reason?: unknown) => void;
-} {
-  let resolve!: (value: T) => void;
-  let reject!: (reason?: unknown) => void;
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
-
-/** Yield across enough microtask turns for a burst of promises to settle. */
-async function flushMicrotasks(times = 4): Promise<void> {
+/**
+ * Yield across enough microtask turns for a burst of concurrent callers to
+ * settle before an assertion inspects shared state.
+ *
+ * Each `getAuth()` caller reaches the dedup check after a bounded, constant
+ * number of `await` points, so one microtask turn per queued caller is always
+ * sufficient to drain the burst. The count therefore scales with `CONCURRENCY`
+ * (plus a small constant margin) rather than being a fixed literal, so raising
+ * `CONCURRENCY` cannot silently under-drain the queue and make the test flaky.
+ */
+async function flushMicrotasks(times = CONCURRENCY + 2): Promise<void> {
   for (let i = 0; i < times; i++) await Promise.resolve();
 }
 
