@@ -326,7 +326,6 @@ jobs:
           B2_MCP_EXPECTED_TOOL_PROFILE: ${{ vars.B2_MCP_EXPECTED_TOOL_PROFILE }}
           B2_MCP_LIVE_RUN_PREFIX: ${{ env.B2_MCP_LIVE_RUN_PREFIX }}
           B2_MCP_LIVE_RESOURCE_LEDGER: ${{ env.B2_MCP_LIVE_RESOURCE_LEDGER }}
-          MATRIX_NODE_VERSION: ${{ matrix.node-version }}
           MATRIX_VALIDATION_OUTCOME: ${{ steps.matrix_validation.outcome }}
           LIVE_TESTS_OUTCOME: ${{ steps.live_tests.outcome }}
           CLEANUP_OUTCOME: ${{ steps.cleanup.outcome }}
