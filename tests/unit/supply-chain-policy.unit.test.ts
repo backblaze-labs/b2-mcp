@@ -1499,9 +1499,12 @@ describe("supply-chain audit policy", () => {
     // everything else must be inline `run:` steps. Any added `uses:` (a
     // third-party action or artifact upload) trips this and forces re-review of
     // the accepted artipacked risk.
-    // Require real `- uses:` step mappings (dash mandatory, start-anchored) so a
-    // commented `# uses:` line is never counted.
-    const markGreenUses = markGreenJob.match(/^\s*-\s*uses:\s*\S+/gm) ?? [];
+    // Count every `uses:` step property in the job — both the uses-first
+    // (`- uses:`) and the name-first (`- name:` then an indented `uses:`, as at
+    // test.yml:618) forms — with the dash optional but start-anchored so a
+    // commented `# uses:` line is never counted. A third-party action added in
+    // either form (e.g. an artifact upload) pushes the count past one.
+    const markGreenUses = markGreenJob.match(/^\s*-?\s*uses:\s*\S+/gm) ?? [];
     expect(markGreenUses).toHaveLength(1);
     expect(markGreenUses[0]).toMatch(/actions\/checkout@[0-9a-f]{40}\b/);
   });
