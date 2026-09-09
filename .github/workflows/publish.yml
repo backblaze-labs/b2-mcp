@@ -13,8 +13,9 @@ on:
     workflows: ["Release Tag Request"]
     types: [completed]
 
-# Workflow-wide default floor: read-only. Each job re-declares the exact
-# scopes it needs so no job silently inherits more than read access.
+# Workflow-wide default floor: read-only. Jobs that need more re-declare the
+# exact scopes they need; the rest (e.g. prepare) inherit this read-only floor,
+# so no job silently gets more than read access.
 permissions:
   actions: read # Read the triggering workflow_run graph/artifacts.
   contents: read # Checkout trusted resolver code and the validated tag.
