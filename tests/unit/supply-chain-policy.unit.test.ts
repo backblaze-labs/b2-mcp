@@ -1677,14 +1677,17 @@ describe("supply-chain audit policy", () => {
     expect(anchoredText).toContain("--ignore-scripts");
     expect(anchoredText).toContain("--omit=dev");
 
-    // Alert #95 reopened because the PROSE `(test.yml:<line>)` references drifted
-    // out of sync with the real install line. The `- test.yml:<line>` entry is
-    // not the only place the number lives: the two human-readable comment
-    // references ("The packed-install smoke test (test.yml:406)" and "Anchored to
-    // the `npm install "$tarball_path"` line (test.yml:406)") mislead the next
-    // maintainer if they go stale independently. Require EVERY `test.yml:<line>`
-    // occurrence in the block — the guarded entry and both comment references —
-    // to point at the same anchored line, so a partial re-anchor fails CI.
+    // Alert #95 reopened because the FUNCTIONAL `- test.yml:397` suppression
+    // entry drifted out of sync with the real install line — zizmor ignores the
+    // comments entirely, so only that entry (asserted above) controls whether the
+    // finding is suppressed. The prose is a separate, documentation-only hazard:
+    // the same number is restated in two human-readable comment references ("The
+    // packed-install smoke test (test.yml:406)" and "Anchored to the `npm install
+    // "$tarball_path"` line (test.yml:406)"), and if those drift independently of
+    // the entry they mislead the next maintainer into re-reviewing the wrong line.
+    // Require EVERY `test.yml:<line>` occurrence in the block — the guarded entry
+    // and both comment references — to point at the same anchored line, so a
+    // partial re-anchor that leaves stale documentation fails CI.
     const allTestYmlRefs = [...adhocBlock!.matchAll(/test\.yml:(\d+)/g)].map((match) =>
       Number(match[1]),
     );
