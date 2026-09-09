@@ -51,7 +51,7 @@ rules:
       - publish.yml:9
   adhoc-packages:
     ignore:
-      # The packed-install smoke test (test.yml:397) is the pack-smoke install
+      # The packed-install smoke test (test.yml:406) is the pack-smoke install
       # of the locally-built tarball, not an unpinned third-party dependency.
       # It builds the package tarball, then `npm install`s THAT tarball into an
       # isolated temp dir to prove the published artifact installs cleanly —
@@ -61,10 +61,10 @@ rules:
       # installs only the locally-built `$tarball_path`. The adhoc-packages
       # risk this audit flags does not apply, so the finding is accepted.
       #
-      # Anchored to the `npm install "$tarball_path"` line (test.yml:397).
+      # Anchored to the `npm install "$tarball_path"` line (test.yml:406).
       # Re-review whenever the pack-smoke install step moves or changes what it
       # installs.
-      - test.yml:397
+      - test.yml:406
   artipacked:
     ignore:
       # The ci-green marker job (test.yml:1021) checks out with
