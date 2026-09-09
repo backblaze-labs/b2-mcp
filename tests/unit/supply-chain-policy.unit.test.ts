@@ -1494,23 +1494,59 @@ describe("supply-chain audit policy", () => {
     // commented occurrences.
     expect(workflowLf.match(/^\s*persist-credentials:\s*true\b/gm) ?? []).toHaveLength(1);
 
-    // Fail-closed on the suppression's core safety invariant: the mark-green job
-    // must run NO third-party action while the checkout credential is persisted.
-    // Parse the workflow as YAML (not a line regex) so every step-form counts —
-    // block (`- uses:`), name-first (`- name:` then `uses:`), and flow/aliased
-    // (`- { uses: x }`) alike — and a second action cannot slip past a
-    // line-based scan. The job may declare exactly ONE step with a `uses` key:
-    // the SHA-pinned actions/checkout. Any added action or artifact upload, in
-    // any YAML form, pushes the count past one and forces re-review.
+    // Fail-closed on the FULL accepted-risk invariant, not just an action count.
+    // Parse the workflow as YAML (not a line regex) so every step form is seen —
+    // block (`- uses:`), name-first (`- name:`/`uses:`), and flow/aliased
+    // (`- { uses: x }`) alike. mark-green must be EXACTLY its two reviewed steps:
+    // the SHA-pinned actions/checkout (which persists the credential) and one
+    // inline git `run:` step whose script is snapshotted below. Adding a step, a
+    // new `uses:`, or ANY new executable/download/upload line in the run script
+    // fails this test and forces re-review of the persisted write token.
     const parsedWorkflow = parseWorkflowYaml(workflow) as {
       jobs?: Record<string, { steps?: Array<Record<string, unknown>> }>;
     };
     const markGreenSteps = parsedWorkflow.jobs?.["mark-green"]?.steps ?? [];
-    const markGreenUsesSteps = markGreenSteps.filter(
-      (step) => step != null && typeof step === "object" && "uses" in step,
-    );
-    expect(markGreenUsesSteps).toHaveLength(1);
-    expect(String(markGreenUsesSteps[0]?.uses)).toMatch(/actions\/checkout@[0-9a-f]{40}\b/);
+    expect(markGreenSteps).toHaveLength(2);
+
+    const [checkoutStep, markerStep] = markGreenSteps;
+    expect(Object.keys(checkoutStep ?? {}).sort()).toEqual(["uses", "with"]);
+    expect(String(checkoutStep?.uses)).toMatch(/^actions\/checkout@[0-9a-f]{40}$/);
+    expect(
+      (checkoutStep?.with as Record<string, unknown> | undefined)?.["persist-credentials"],
+    ).toBe(true);
+
+    expect("uses" in (markerStep ?? {})).toBe(false);
+    expect(typeof markerStep?.run).toBe("string");
+
+    // Snapshot the inline step's script, whitespace-normalized (per-line trim,
+    // blank lines dropped), so formatting stays flexible but the executable
+    // content is pinned to these reviewed git/echo/shell-control commands.
+    const normalizeScript = (script: string) =>
+      script
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line !== "")
+        .join("\n");
+    const reviewedMarkerRun = [
+      "set -euo pipefail",
+      'tested_sha="$(git rev-parse HEAD)"',
+      "current_main_sha=\"$(git ls-remote origin refs/heads/main | awk '{print $1}')\"",
+      'if [[ "$tested_sha" != "$GITHUB_SHA" ]]; then',
+      'echo "::error::Checked-out HEAD ${tested_sha} does not match GITHUB_SHA ${GITHUB_SHA}"',
+      "exit 1",
+      "fi",
+      'if [[ -z "$current_main_sha" ]]; then',
+      'echo "::error::Could not resolve remote refs/heads/main"',
+      "exit 1",
+      "fi",
+      'if [[ "$current_main_sha" != "$GITHUB_SHA" ]]; then',
+      'echo "::notice::Skipping ci-green update for stale run ${GITHUB_SHA}; current main is ${current_main_sha}"',
+      "exit 0",
+      "fi",
+      'git push origin "${GITHUB_SHA}:refs/heads/ci-green" --force',
+      'echo "::notice::Advanced owned ci-green marker to ${GITHUB_SHA}"',
+    ].join("\n");
+    expect(normalizeScript(String(markerStep?.run ?? ""))).toBe(reviewedMarkerRun);
   });
 
   it("refuses environment-injected audit fixtures outside tests", () => {
