@@ -67,7 +67,7 @@ rules:
       - test.yml:397
   artipacked:
     ignore:
-      # The ci-green marker job (test.yml:1016) checks out with
+      # The ci-green marker job (test.yml:1021) checks out with
       # `persist-credentials: true` on purpose: it force-advances the owned
       # `ci-green` marker ref on `main` via `git push` in the following step,
       # and that push needs the persisted checkout credential. Setting
@@ -88,10 +88,10 @@ rules:
       # Re-review whenever this job gains any third-party action/script, an
       # artifact upload, or stops pushing the marker ref.
       #
-      # Anchored to the ci-green marker `actions/checkout` (test.yml:1016).
+      # Anchored to the ci-green marker `actions/checkout` (test.yml:1021).
       # zizmor matches ignores by file:line, not by job/step identity, so a
       # shifted line could mask an unrelated checkout. A required test
       # (tests/unit/supply-chain-policy.unit.test.ts) compensates: it fails if
       # this anchor no longer resolves to the persist-credentials:true checkout
       # inside the mark-green job, or if any other job persists credentials.
-      - test.yml:1016
+      - test.yml:1021
