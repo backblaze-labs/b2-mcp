@@ -1,0 +1,109 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/backblaze-labs/.github/main/schemas/references.schema.json
+#
+# External references for this repository — blogs, docs, and the MCP directories
+# where the official Backblaze B2 MCP server is listed. Machine-parseable source
+# of truth for internal tooling; standard defined in backblaze-labs/.github.
+schema_version: 1
+project: Backblaze B2 MCP Server
+slug: b2-mcp
+updated: "2026-09-08"
+
+canonical:
+  repo: https://github.com/backblaze-labs/b2-mcp
+  package: "@backblaze-labs/b2-mcp"
+  registry_name: io.github.backblaze-labs/b2-mcp
+  container: ghcr.io/backblaze-labs/b2-mcp
+  homepage: https://backblaze-labs.github.io/b2-mcp/
+  display_name: Backblaze B2 MCP Server
+  backlink_anchor: Backblaze B2 MCP server
+
+references:
+  # --- First-party ---
+  - id: launch-blog
+    title: Introducing the Backblaze B2 MCP Server
+    url: https://www.backblaze.com/blog/introducing-the-backblaze-b2-mcp-server/
+    type: blog
+    source: Backblaze Blog
+    official: true
+    published: "2026-09-10"
+    added: "2026-09-08"
+    status: live
+    tags: [announcement, launch]
+    summary: Company launch announcement for the B2 MCP server.
+
+  - id: api-docs
+    title: API reference (TypeDoc)
+    url: https://backblaze-labs.github.io/b2-mcp/
+    type: docs
+    source: GitHub Pages
+    official: true
+    added: "2026-09-08"
+    status: live
+    summary: Generated TypeDoc for the public src surface.
+
+  # --- Package registry ---
+  - id: npm
+    title: "@backblaze-labs/b2-mcp on npm"
+    url: https://www.npmjs.com/package/@backblaze-labs/b2-mcp
+    type: registry
+    source: npm
+    official: true
+    canonical_for: npm
+    added: "2026-09-08"
+    status: live
+
+  # --- MCP directories / registries where we are listed ---
+  - id: mcp-registry
+    title: Official MCP Registry entry
+    url: https://registry.modelcontextprotocol.io/v0/servers?search=io.github.backblaze-labs/b2-mcp
+    type: registry
+    source: Official MCP Registry
+    official: true
+    canonical_for: mcp-registry
+    added: "2026-09-08"
+    status: live
+    summary: Published from server.json on release; the upstream aggregators ingest this entry.
+
+  - id: glama
+    title: b2-mcp on Glama
+    url: https://glama.ai/mcp/servers/@backblaze-labs/b2-mcp
+    type: registry
+    source: Glama
+    added: "2026-09-08"
+    status: live
+    metrics: { grade: A }
+
+  - id: lobehub
+    title: b2-mcp on LobeHub
+    url: https://lobehub.com/mcp/backblaze-labs-b2-mcp
+    type: registry
+    source: LobeHub
+    added: "2026-09-08"
+    status: live
+    metrics: { grade: A }
+
+  - id: m8ven
+    title: Backblaze B2 MCP Server on M8ven
+    url: https://m8ven.ai/mcp/backblaze-labs-b2-mcp-92j1t6
+    type: registry
+    source: M8ven
+    added: "2026-09-08"
+    status: live
+    metrics: { grade: B, score: 89 }
+
+  - id: mcp-market
+    title: backblaze-b2 on MCP Market
+    url: https://mcpmarket.com/server/backblaze-b2
+    type: registry
+    source: MCP Market
+    added: "2026-09-08"
+    status: live
+    summary: Auto-crawled from the Official MCP Registry.
+
+  - id: mcp-so
+    title: Backblaze B2 MCP Server on mcp.so
+    url: https://mcp.so/servers/backblaze-b2-mcp-server
+    type: registry
+    source: mcp.so
+    added: "2026-09-08"
+    status: live
