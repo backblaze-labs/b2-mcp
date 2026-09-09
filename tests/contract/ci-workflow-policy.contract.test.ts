@@ -480,8 +480,10 @@ describe("CI workflow policy", () => {
     expect(guard).not.toContain("missing provider secret(s)");
     // Both secret-consuming jobs must gate ANTHROPIC_API_KEY behind the
     // dedicated llm-evals environment (zizmor secrets-outside-env, #419).
-    expect(guard).toContain("environment: llm-evals");
-    expect(evalJob).toContain("environment: llm-evals");
+    // Parse the active mapping (yamlValuesForKey ignores comments) so the gate
+    // being commented out fails the contract instead of silently passing.
+    expect(yamlValuesForKey(guard, "environment")).toContain("llm-evals");
+    expect(yamlValuesForKey(evalJob, "environment")).toContain("llm-evals");
 
     expect(workflowJobBlock(evals, "skipped")).toBeNull();
     expect(evals).not.toContain("LLM evals skipped");
