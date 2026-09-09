@@ -23,6 +23,10 @@ jobs:
   guard:
     if: github.repository == 'backblaze-labs/b2-mcp'
     runs-on: ubuntu-latest
+    # Gate ANTHROPIC_API_KEY behind a dedicated environment so environment
+    # protection rules (required reviewers, branch restrictions, secret
+    # scoping) govern the provider secret (zizmor secrets-outside-env).
+    environment: llm-evals
     timeout-minutes: 5
     outputs:
       checkout-sha: ${{ steps.ref.outputs.checkout_sha }}
@@ -64,6 +68,9 @@ jobs:
     name: Claude pass rates
     needs: guard
     runs-on: ubuntu-latest
+    # Same dedicated environment as the guard job so the provider secret stays
+    # scoped to environment protection rules (zizmor secrets-outside-env).
+    environment: llm-evals
     timeout-minutes: 20
     steps:
       # actions/checkout v7, reviewed 2026-08-25.
