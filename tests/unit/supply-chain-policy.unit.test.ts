@@ -1450,9 +1450,11 @@ describe("supply-chain audit policy", () => {
     // per preceding line (`\r\n` split away but only `\n` re-added).
     const workflowLf = workflow.replace(/\r\n/g, "\n");
     const workflowLines = workflowLf.split("\n");
-    // Anchor is 1-indexed and must be the checkout `uses:` line itself.
+    // Anchor is 1-indexed and must be the checkout `uses:` line itself — a real
+    // SHA-pinned `- uses:` mapping, start-anchored so a commented
+    // `# uses: actions/checkout@…` line cannot satisfy it.
     const anchoredText = workflowLines[anchoredLine - 1] ?? "";
-    expect(anchoredText).toMatch(/uses:\s*actions\/checkout@/);
+    expect(anchoredText).toMatch(/^\s*-\s*uses:\s*actions\/checkout@[0-9a-f]{40}\b/);
 
     // That line must fall inside the mark-green job block, and that job must be
     // the one persisting credentials — so an unrelated checkout cannot inherit
@@ -1497,9 +1499,11 @@ describe("supply-chain audit policy", () => {
     // everything else must be inline `run:` steps. Any added `uses:` (a
     // third-party action or artifact upload) trips this and forces re-review of
     // the accepted artipacked risk.
-    const markGreenUses = markGreenJob.match(/^\s*-?\s*uses:\s*\S+/gm) ?? [];
+    // Require real `- uses:` step mappings (dash mandatory, start-anchored) so a
+    // commented `# uses:` line is never counted.
+    const markGreenUses = markGreenJob.match(/^\s*-\s*uses:\s*\S+/gm) ?? [];
     expect(markGreenUses).toHaveLength(1);
-    expect(markGreenUses[0]).toMatch(/actions\/checkout@/);
+    expect(markGreenUses[0]).toMatch(/actions\/checkout@[0-9a-f]{40}\b/);
   });
 
   it("refuses environment-injected audit fixtures outside tests", () => {
