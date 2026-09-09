@@ -375,10 +375,9 @@ jobs:
     if: github.repository == 'backblaze-labs/b2-mcp'
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # Preflight only reads: pull prepare-job artifacts and check out the tree.
+    # Preflight only consumes prepare-job artifacts; no repo checkout needed.
     permissions:
       actions: read # Download build artifacts from the prepare job's run.
-      contents: read # Checkout for the registry preflight validation.
     steps:
       # actions/download-artifact v8, reviewed 2026-08-25.
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
@@ -480,10 +479,9 @@ jobs:
     if: github.repository == 'backblaze-labs/b2-mcp'
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # Publish needs OIDC for provenance; repo/artifacts stay read-only.
+    # Publish consumes downloaded artifacts with OIDC provenance; no checkout.
     permissions:
       actions: read # Download build artifacts from the prepare job's run.
-      contents: read # Checkout trusted resolver code and the validated tag.
       id-token: write # OIDC token for npm/registry publish provenance.
     steps:
       # actions/download-artifact v8, reviewed 2026-08-25.
