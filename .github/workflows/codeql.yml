@@ -27,10 +27,11 @@ jobs:
     if: ${{ github.event.pull_request.user.login != 'dependabot[bot]' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # Least privilege for CodeQL: read the run graph + code, write findings.
     permissions:
-      actions: read
-      contents: read
-      security-events: write
+      actions: read # CodeQL reads the Actions run graph during analysis.
+      contents: read # Checkout of the repository under analysis.
+      security-events: write # Upload CodeQL SARIF to the code scanning tab.
     strategy:
       fail-fast: false
       matrix:

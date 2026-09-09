@@ -13,9 +13,12 @@ on:
     workflows: ["Release Tag Request"]
     types: [completed]
 
+# Workflow-wide default floor: read-only. Jobs that need more re-declare the
+# exact scopes they need; the rest (e.g. prepare) inherit this read-only floor,
+# so no job silently gets more than read access.
 permissions:
-  actions: read
-  contents: read
+  actions: read # Read the triggering workflow_run graph/artifacts.
+  contents: read # Checkout trusted resolver code and the validated tag.
 
 concurrency:
   group: npm-publish-${{ github.repository }}
@@ -372,9 +375,11 @@ jobs:
     if: github.repository == 'backblaze-labs/b2-mcp'
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Read-only preflight: no checkout, mints no tokens. actions/contents stay
+    # at read so the job can never mutate the repository or its workflow runs.
     permissions:
-      actions: read
-      contents: read
+      actions: read # Read-only access to the workflow run and its artifacts.
+      contents: read # Read-only repository scope; preflight never writes.
     steps:
       # actions/download-artifact v8, reviewed 2026-08-25.
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
@@ -476,10 +481,12 @@ jobs:
     if: github.repository == 'backblaze-labs/b2-mcp'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # Publish mints an OIDC token for npm provenance; repo + runs stay
+    # read-only (no checkout, no contents:write) as a least-privilege floor.
     permissions:
-      actions: read
-      contents: read
-      id-token: write
+      actions: read # Read-only access to the workflow run and its artifacts.
+      contents: read # Read-only repository scope; publish never writes.
+      id-token: write # OIDC token for npm/registry publish provenance.
     steps:
       # actions/download-artifact v8, reviewed 2026-08-25.
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
@@ -651,10 +658,11 @@ jobs:
     if: github.repository == 'backblaze-labs/b2-mcp'
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    # Container build/push: write only to GHCR; OIDC for keyless signing.
     permissions:
-      contents: read
-      id-token: write
-      packages: write
+      contents: read # Checkout the protected ci-green ref.
+      id-token: write # OIDC token for cosign keyless image signing.
+      packages: write # Push the container image to GHCR.
     steps:
       # Check out the protected `ci-green` ref (a trusted constant, like the
       # prepare job) rather than a dynamic sha in this write-privileged job, then
@@ -732,9 +740,11 @@ jobs:
     if: github.repository == 'backblaze-labs/b2-mcp'
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # Release job needs contents:write to create the GitHub release + assets;
+    # workflow-run access stays read-only.
     permissions:
-      actions: read
-      contents: write
+      actions: read # Read-only access to the workflow run and its artifacts.
+      contents: write # Create the GitHub release and upload assets.
     steps:
       # actions/download-artifact v8, reviewed 2026-08-25.
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
