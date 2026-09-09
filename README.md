@@ -48,6 +48,7 @@ Destructive actions are gated, durable B2 secrets stay out of the model's contex
 - [Privacy](#privacy)
 - [Development](#development)
 - [Documentation](#documentation)
+- [Backblaze Labs ecosystem](#backblaze-labs-ecosystem)
 
 ---
 
@@ -378,7 +379,8 @@ Part of [Backblaze Labs](https://github.com/backblaze-labs):
   orchestrating generative-AI media pipelines across video, audio, and image
   providers, with built-in provenance for every output.
 - **[b2-sdk-typescript](https://github.com/backblaze-labs/b2-sdk-typescript)** —
-  Backblaze-maintained TypeScript / JavaScript SDK for B2 Cloud Storage.
+  Backblaze-maintained TypeScript / JavaScript SDK for B2 Cloud Storage
+  (published as `@backblaze-labs/b2-sdk`, the SDK this server is built on).
 - **[b2-action](https://github.com/backblaze-labs/b2-action)** —
   Backblaze-maintained GitHub Action for B2 Cloud Storage.
 
