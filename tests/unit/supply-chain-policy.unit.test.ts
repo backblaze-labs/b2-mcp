@@ -1538,7 +1538,11 @@ describe("supply-chain audit policy", () => {
     // from running or altering code in this credential-bearing job while every
     // step assertion still passes. Pin the exact set of reviewed job keys so any
     // new job-level execution surface forces re-review of the persisted token.
-    expect(Object.keys(parsedWorkflow.jobs?.["mark-green"] ?? {}).sort()).toEqual([
+    const markGreenJobParsed = (parsedWorkflow.jobs?.["mark-green"] ?? {}) as Record<
+      string,
+      unknown
+    >;
+    expect(Object.keys(markGreenJobParsed).sort()).toEqual([
       "concurrency",
       "if",
       "name",
@@ -1547,6 +1551,15 @@ describe("supply-chain audit policy", () => {
       "runs-on",
       "steps",
     ]);
+
+    // Pin the VALUES of the two security-sensitive keys, not just their presence.
+    // `runs-on: self-hosted` would let the credential-bearing job run on a runner
+    // that can execute persisted hooks; `permissions: write-all` (or any extra
+    // grant) would widen the token past the documented `contents: write` scope —
+    // both leave the key set unchanged, so bind the reviewed values to force
+    // re-review of either broadening.
+    expect(markGreenJobParsed["runs-on"]).toBe("ubuntu-latest");
+    expect(markGreenJobParsed.permissions).toEqual({ contents: "write" });
 
     const markGreenSteps = parsedWorkflow.jobs?.["mark-green"]?.steps ?? [];
     expect(markGreenSteps).toHaveLength(2);
