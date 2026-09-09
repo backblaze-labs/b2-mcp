@@ -56,9 +56,10 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Pages deployment only: no repo write, just publish + OIDC attestation.
     permissions:
-      pages: write
-      id-token: write
+      pages: write # Deploy the built API docs to GitHub Pages.
+      id-token: write # OIDC token required by the Pages deployment.
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
