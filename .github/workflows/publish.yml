@@ -375,9 +375,9 @@ jobs:
     if: github.repository == 'backblaze-labs/b2-mcp'
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # Preflight only consumes prepare-job artifacts; no repo checkout needed.
-    permissions:
-      actions: read # Download build artifacts from the prepare job's run.
+    # Preflight only consumes same-run artifacts (runner artifact token, not
+    # GITHUB_TOKEN) and external curl downloads, so it needs no token scopes.
+    permissions: {}
     steps:
       # actions/download-artifact v8, reviewed 2026-08-25.
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
@@ -479,9 +479,9 @@ jobs:
     if: github.repository == 'backblaze-labs/b2-mcp'
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # Publish consumes downloaded artifacts with OIDC provenance; no checkout.
+    # Publish consumes same-run artifacts (runner artifact token) and needs
+    # only OIDC; no GITHUB_TOKEN actions/contents scopes are used.
     permissions:
-      actions: read # Download build artifacts from the prepare job's run.
       id-token: write # OIDC token for npm/registry publish provenance.
     steps:
       # actions/download-artifact v8, reviewed 2026-08-25.
@@ -736,9 +736,9 @@ jobs:
     if: github.repository == 'backblaze-labs/b2-mcp'
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    # Release job needs contents:write to create the GitHub release + assets.
+    # Release job downloads same-run artifacts (runner artifact token) and
+    # needs only contents:write to create the GitHub release + assets.
     permissions:
-      actions: read # Download release artifacts from prior jobs.
       contents: write # Create the GitHub release and upload assets.
     steps:
       # actions/download-artifact v8, reviewed 2026-08-25.
