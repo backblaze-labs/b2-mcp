@@ -67,6 +67,23 @@ async function waitUntil(predicate: () => boolean, label: string): Promise<void>
   throw new Error(`waitUntil timed out waiting for: ${label}`);
 }
 
+/** Read the B2 authorization token an SDK request was signed with. */
+function authTokenOf(request: { headers?: unknown }): string | undefined {
+  const headers = request.headers;
+  if (headers instanceof Headers) {
+    return headers.get("Authorization") ?? headers.get("authorization") ?? undefined;
+  }
+  if (headers && typeof headers === "object") {
+    const record = headers as Record<string, string | undefined>;
+    return record.Authorization ?? record.authorization;
+  }
+  return undefined;
+}
+
+function unauthorizedResponse(): StaticHttpResponse {
+  return new StaticHttpResponse(401, { status: 401, code: "unauthorized", message: "expired" });
+}
+
 function rejectionStatus(result: InFlightLimitResult): number | undefined {
   return result.ok ? undefined : result.status;
 }
@@ -192,6 +209,59 @@ describe("concurrency races", () => {
       expect(authorizeCalls).toBe(2);
       // Each caller made one stale attempt and exactly one retry after refresh.
       expect(listCalls).toBe(CONCURRENCY * 2);
+    });
+
+    it("does not re-invalidate freshly refreshed auth on a late stale-token 401", async () => {
+      // A held-in-flight refresh alone cannot catch the late-response race,
+      // because token-2 is only installed after every stale 401 has arrived.
+      // Here one token-1 401 is delayed until AFTER the shared token-2 refresh
+      // has completed and a retry has already succeeded. When it finally lands,
+      // invalidate() must recognize its token is already superseded and NOT
+      // discard token-2 or fire a third authorization.
+      let authorizeCalls = 0;
+      let staleLists = 0;
+      let freshLists = 0;
+      const lateStale = deferred<StaticHttpResponse>();
+      const transport = new RecordingTransport((request) => {
+        const endpoint = b2EndpointName(request);
+        if (endpoint === "b2_authorize_account") {
+          authorizeCalls += 1;
+          return new StaticHttpResponse(200, {
+            ...authorizeResponse(["listBuckets"]),
+            authorizationToken: `token-${authorizeCalls}`,
+          });
+        }
+        if (endpoint === "b2_list_buckets") {
+          if (authTokenOf(request) === "token-1") {
+            staleLists += 1;
+            // Hold the final stale attempt until the refresh + a retry land.
+            return staleLists === CONCURRENCY ? lateStale.promise : unauthorizedResponse();
+          }
+          freshLists += 1;
+          return new StaticHttpResponse(200, { buckets: [] });
+        }
+        throw new Error(`unexpected endpoint ${endpoint}`);
+      });
+      installSdkTransport(transport);
+      const client = new B2Client(new B2AuthManager(testConfig));
+
+      const inflight = Array.from({ length: CONCURRENCY }, () => client.listBuckets());
+
+      // The non-delayed callers refresh to token-2 and at least one retry
+      // succeeds while the final stale 401 is still held pending.
+      await waitUntil(
+        () => authorizeCalls >= 2 && staleLists >= CONCURRENCY && freshLists >= 1,
+        "token-2 refresh completed and a retry succeeded before the late 401",
+      );
+      expect(authorizeCalls).toBe(2);
+
+      // Release the delayed stale 401; its token-1 is already superseded.
+      lateStale.resolve(unauthorizedResponse());
+      const results = await Promise.all(inflight);
+
+      expect(results.every((result) => result.buckets.length === 0)).toBe(true);
+      // The late 401 reused cached token-2 rather than forcing a third authorize.
+      expect(authorizeCalls).toBe(2);
     });
   });
 

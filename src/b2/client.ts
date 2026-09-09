@@ -2111,12 +2111,14 @@ export class B2Client {
     operation: (client: SdkB2Client, auth: B2AuthResponse) => Promise<T>,
   ): Promise<T> {
     let lastError: unknown;
+    let attemptedToken: string | undefined;
     const callerSignal = currentMcpRequestSignal();
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         return await withCircuit(async () => {
           const operationSignal = currentMcpRequestSignal();
           const { client, auth } = await this.auth.getAuthorizedSdk();
+          attemptedToken = auth.authorizationToken;
           assertB2ApiUrl(auth.apiUrl);
           const result = await runWithMcpRequestSignal(operationSignal, () =>
             operation(client, auth),
@@ -2128,7 +2130,9 @@ export class B2Client {
         this.auth.syncCachedAuthFromSdk();
         lastError = err;
         if (attempt === 0 && isUnauthorized(err) && callerSignal?.aborted !== true) {
-          this.auth.invalidate();
+          // Pass the token that failed so a stale 401 whose token was already
+          // replaced by a concurrent refresh cannot discard the fresh auth.
+          this.auth.invalidate(attemptedToken);
           continue;
         }
         throw err;
