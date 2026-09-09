@@ -718,23 +718,8 @@ export class B2AuthManager {
     this.authTime = Date.now();
   }
 
-  /**
-   * Invalidate cached auth and clear the SDK account cache.
-   *
-   * @param expectedToken - When provided, only invalidate if the currently
-   * cached authorization token still matches it. A concurrent refresh may have
-   * already replaced the token that produced a 401; a stale 401 for that
-   * superseded token must not discard the fresh credential or trigger a
-   * redundant re-authorization.
-   */
-  invalidate(expectedToken?: string): void {
-    if (
-      expectedToken !== undefined &&
-      this.cachedAuth !== null &&
-      this.cachedAuth.authorizationToken !== expectedToken
-    ) {
-      return;
-    }
+  /** Invalidate cached auth and clear the SDK account cache. */
+  invalidate(): void {
     this.cachedAuth = null;
     this.authTime = null;
     this.sdk.client.accountInfo.clear();
