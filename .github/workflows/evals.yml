@@ -13,15 +13,18 @@ name: LLM Evals
 # a repo-level ANTHROPIC_API_KEY still resolves, so the gate delivers no real
 # protection until an operator, out-of-band, has:
 #   1. Created the `llm-evals` environment.
-#   2. Added ANTHROPIC_API_KEY as an environment secret (and removed the
-#      repo-level copy if it should no longer be repo-scoped).
+#   2. Added ANTHROPIC_API_KEY as an environment secret AND removed any
+#      repository-level ANTHROPIC_API_KEY copy, which otherwise stays resolvable
+#      to jobs outside llm-evals and keeps the key broadly scoped.
 #   3. Restricted deployment branches to `main` only.
 # REQUIRED CONSTRAINT: this workflow runs unattended (weekly `schedule` cron +
-# `workflow_dispatch`), so the environment MUST NOT carry required-reviewer or
-# wait-timer protection rules — either would pause the job in `Waiting` with no
-# human to approve, silently halting the eval evidence. Use branch restrictions
-# and secret scoping only. Verify by running the workflow via workflow_dispatch
-# after configuring the environment.
+# `workflow_dispatch`), so the environment MUST NOT carry a required-reviewer
+# rule — with no human to approve, it pauses the job in `Waiting` forever and
+# silently halts the eval evidence. A wait-timer rule only delays the run by its
+# configured interval (it auto-releases), so it does not stall the workflow but
+# still needlessly postpones the evidence; prefer branch restrictions and secret
+# scoping only. Verify by running the workflow via workflow_dispatch after
+# configuring the environment.
 
 on:
   workflow_dispatch:
@@ -42,8 +45,9 @@ jobs:
     # Gate ANTHROPIC_API_KEY behind a dedicated environment so branch and
     # secret-scoping protection rules govern the provider secret (zizmor
     # secrets-outside-env). See the OPERATOR RUNBOOK at the top of this file:
-    # the environment must be configured out-of-band and must NOT use
-    # required-reviewer/wait-timer rules (they would stall the cron run).
+    # the environment must be configured out-of-band (including removing any
+    # repo-level ANTHROPIC_API_KEY copy) and must NOT use a required-reviewer
+    # rule, which would stall the unattended cron run in `Waiting` forever.
     environment: llm-evals
     timeout-minutes: 5
     outputs:

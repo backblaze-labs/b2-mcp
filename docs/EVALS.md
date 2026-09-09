@@ -165,7 +165,9 @@ must not run against unreviewed code. It runs only on:
 The `guard` and `evals` jobs both bind to the `llm-evals` GitHub environment,
 so `ANTHROPIC_API_KEY` must be configured as an **environment secret** scoped to
 `llm-evals` (`gh secret set ANTHROPIC_API_KEY --env llm-evals`), not a
-repository secret. The guard job checks that the repository is
+repository secret. Any repository-level `ANTHROPIC_API_KEY` copy must be
+removed: it stays resolvable to jobs outside `llm-evals` and keeps the key
+broadly scoped, defeating the gate. The guard job checks that the repository is
 `backblaze-labs/b2-mcp`, the ref is `refs/heads/main`, and the
 `ANTHROPIC_API_KEY` environment secret is present. Because scheduled and manual
 CI evals are canonical-main only, a missing `ANTHROPIC_API_KEY` is treated as
@@ -174,9 +176,11 @@ the workflow. `OPENAI_API_KEY` is not required by CI while OpenAI evals are
 disabled.
 
 > The `llm-evals` environment must be restricted to the `main` branch with
-> secret scoping only. Do **not** add required-reviewer or wait-timer rules:
-> the workflow runs unattended (weekly cron + `workflow_dispatch`), and either
-> rule would pause it in `Waiting` with no human to approve.
+> secret scoping only. Do **not** add a required-reviewer rule: the workflow
+> runs unattended (weekly cron + `workflow_dispatch`), so with no human to
+> approve it would pause in `Waiting` forever. A wait-timer rule does not stall
+> the run (it auto-releases after its configured delay) but still needlessly
+> postpones the evidence, so avoid it too.
 
 The eval job installs with the pinned package manager, builds once, then runs:
 
