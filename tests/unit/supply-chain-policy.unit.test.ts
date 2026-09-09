@@ -15,6 +15,7 @@ import { tmpdir } from "os";
 import { join, resolve } from "path";
 import { spawnSync } from "child_process";
 import { createRequire } from "module";
+import { parse as parseWorkflowYaml } from "yaml";
 
 const root = join(__dirname, "../..");
 const nodeRequire = createRequire(__filename);
@@ -1425,6 +1426,204 @@ describe("supply-chain audit policy", () => {
     expect(markGreenJob).toContain("Skipping ci-green update for stale run");
     expect(markGreenJob).toContain('git push origin "${GITHUB_SHA}:refs/heads/ci-green" --force');
     expect(markGreenJob).toContain("Advanced owned ci-green marker to");
+  });
+
+  it("anchors the zizmor artipacked ignore to the ci-green marker checkout", () => {
+    // The artipacked suppression persists the checkout credential ON PURPOSE so
+    // the ci-green marker push works, and it is pinned by raw line number
+    // (test.yml:<line>). zizmor matches ignores by file:line, not by job/step
+    // identity, so a future edit that shifts a DIFFERENT actions/checkout onto
+    // that line would silently inherit the suppression. This required test
+    // compensates for that brittleness: it fails if the pinned line no longer
+    // resolves to the persist-credentials:true checkout inside the mark-green
+    // (ci-green marker) job, forcing a re-review instead of a silent mask.
+    const zizmorConfig = readFileSync(join(root, "zizmor.yml"), "utf8");
+    const artipackedBlock = yamlBlockForKey(zizmorConfig, "artipacked");
+    expect(artipackedBlock).not.toBeNull();
+    const anchors = [...(artipackedBlock ?? "").matchAll(/-\s*test\.yml:(\d+)/g)];
+    // Exactly one anchored checkout may carry this accepted-risk suppression.
+    expect(anchors).toHaveLength(1);
+    const anchoredLine = Number(anchors[0]?.[1]);
+    expect(Number.isInteger(anchoredLine)).toBe(true);
+
+    // Normalize to LF so the character-offset math below is newline-convention
+    // agnostic: a CRLF checkout would otherwise skew every offset by one byte
+    // per preceding line (`\r\n` split away but only `\n` re-added).
+    const workflowLf = workflow.replace(/\r\n/g, "\n");
+    const workflowLines = workflowLf.split("\n");
+    // Anchor is 1-indexed and must be the checkout `uses:` line itself — a real
+    // SHA-pinned `- uses:` mapping, start-anchored so a commented
+    // `# uses: actions/checkout@…` line cannot satisfy it.
+    const anchoredText = workflowLines[anchoredLine - 1] ?? "";
+    expect(anchoredText).toMatch(/^\s*-\s*uses:\s*actions\/checkout@[0-9a-f]{40}\b/);
+
+    // That line must fall inside the mark-green job block, and that job must be
+    // the one persisting credentials — so an unrelated checkout cannot inherit
+    // the ignore even if it lands on the same line number.
+    const markGreenJob = jobBlock("mark-green").replace(/\r\n/g, "\n");
+    const jobStartOffset = workflowLf.indexOf(markGreenJob);
+    expect(jobStartOffset).toBeGreaterThanOrEqual(0);
+    const anchoredOffset = workflowLines
+      .slice(0, anchoredLine - 1)
+      .reduce((sum, line) => sum + line.length + 1, 0);
+    expect(anchoredOffset).toBeGreaterThanOrEqual(jobStartOffset);
+    expect(anchoredOffset).toBeLessThan(jobStartOffset + markGreenJob.length);
+
+    // `persist-credentials: true` must belong to THIS checkout step, not merely
+    // appear somewhere in the job: extract the step block that starts at the
+    // anchored `- uses:` line and runs until the next sibling step (a `- ` at
+    // the same indent) or the end of the job. A second checkout that persists
+    // credentials elsewhere in the job would not satisfy this.
+    const anchorIndent = anchoredText.match(/^(\s*)-/)?.[1].length ?? 0;
+    const stepBlock: string[] = [anchoredText];
+    for (let i = anchoredLine; i < workflowLines.length; i += 1) {
+      const next = workflowLines[i] ?? "";
+      if (new RegExp(`^\\s{${anchorIndent}}-\\s`).test(next)) break;
+      if (next.trim() !== "" && (next.match(/^(\s*)\S/)?.[1].length ?? 0) <= anchorIndent) {
+        break;
+      }
+      stepBlock.push(next);
+    }
+    // Anchored to a real YAML mapping line (start-of-line after indent) so a
+    // commented `# persist-credentials: true` cannot satisfy the assertion.
+    expect(stepBlock.join("\n")).toMatch(/^\s*persist-credentials:\s*true\b/m);
+
+    // Fail-closed on the FULL accepted-risk invariant, not just an action count.
+    // Parse the workflow as YAML (not a line regex) so every step form is seen —
+    // block (`- uses:`), name-first (`- name:`/`uses:`), and flow/aliased
+    // (`- { uses: x }`) alike. mark-green must be EXACTLY its two reviewed steps:
+    // the SHA-pinned actions/checkout (which persists the credential) and one
+    // inline git `run:` step whose script is snapshotted below. Adding a step, a
+    // new `uses:`, or ANY new executable/download/upload line in the run script
+    // fails this test and forces re-review of the persisted write token.
+    const parsedWorkflow = parseWorkflowYaml(workflow) as {
+      defaults?: unknown;
+      env?: Record<string, unknown>;
+      jobs?: Record<string, { if?: string; steps?: Array<Record<string, unknown>> }>;
+    };
+
+    // Fail closed on WORKFLOW-level execution surfaces inherited by every job,
+    // including this credential-bearing one. The job-key allowlist below stops a
+    // job-level `defaults`/`env`, but a top-level `defaults.run.shell` wrapper or
+    // a global `env.BASH_ENV` would run extra code with the persisted write token
+    // while the job/step keys and snapshotted `run` text stay unchanged (the repo
+    // already treats workflow-level custom shells as an execution surface in
+    // scripts/check-runtime-policy.mjs). Require NO top-level `defaults` at all,
+    // and pin the top-level `env` to its single reviewed data key so any inherited
+    // execution setting forces re-review. A legitimate future addition must update
+    // this allowlist, which re-anchors the review to the persisted-credential job.
+    expect(parsedWorkflow.defaults).toBeUndefined();
+    expect(Object.keys(parsedWorkflow.env ?? {})).toEqual(["ZIZMOR_IMAGE"]);
+
+    // actions/checkout defaults `persist-credentials` to true, so "only
+    // mark-green persists the token" is NOT proven by counting literal
+    // `persist-credentials: true` — a checkout that omits the input persists by
+    // default. Enumerate every checkout across all jobs and require the only
+    // credential-persisting one to be mark-green's; every other checkout must opt
+    // out with `persist-credentials: false` explicitly.
+    const persistingCheckoutJobs: string[] = [];
+    for (const [jobId, job] of Object.entries(parsedWorkflow.jobs ?? {})) {
+      for (const step of job.steps ?? []) {
+        if (step == null || typeof step !== "object") continue;
+        const stepUses = typeof step.uses === "string" ? step.uses : "";
+        if (!/^actions\/checkout@/.test(stepUses)) continue;
+        const withBlock = (step.with as Record<string, unknown> | undefined) ?? {};
+        if (withBlock["persist-credentials"] !== false) persistingCheckoutJobs.push(jobId);
+      }
+    }
+    expect(persistingCheckoutJobs).toEqual(["mark-green"]);
+
+    // Fail closed on the job's OWN top-level surface too: a step allowlist does
+    // not stop `container:`, `services:`, or a job-level `defaults.run.shell:`
+    // from running or altering code in this credential-bearing job while every
+    // step assertion still passes. Pin the exact set of reviewed job keys so any
+    // new job-level execution surface forces re-review of the persisted token.
+    const markGreenJobParsed = (parsedWorkflow.jobs?.["mark-green"] ?? {}) as Record<
+      string,
+      unknown
+    >;
+    expect(Object.keys(markGreenJobParsed).sort()).toEqual([
+      "concurrency",
+      "if",
+      "name",
+      "needs",
+      "permissions",
+      "runs-on",
+      "steps",
+    ]);
+
+    // Pin the VALUES of the two security-sensitive keys, not just their presence.
+    // `runs-on: self-hosted` would let the credential-bearing job run on a runner
+    // that can execute persisted hooks; `permissions: write-all` (or any extra
+    // grant) would widen the token past the documented `contents: write` scope —
+    // both leave the key set unchanged, so bind the reviewed values to force
+    // re-review of either broadening.
+    expect(markGreenJobParsed["runs-on"]).toBe("ubuntu-latest");
+    expect(markGreenJobParsed.permissions).toEqual({ contents: "write" });
+
+    const markGreenSteps = parsedWorkflow.jobs?.["mark-green"]?.steps ?? [];
+    expect(markGreenSteps).toHaveLength(2);
+
+    const [checkoutStep, markerStep] = markGreenSteps;
+    expect(Object.keys(checkoutStep ?? {}).sort()).toEqual(["uses", "with"]);
+    expect(String(checkoutStep?.uses)).toMatch(/^actions\/checkout@[0-9a-f]{40}$/);
+    // Bind the checkout's `with` map to ONLY `persist-credentials` too: an extra
+    // input such as `token: ${{ secrets.PAT }}` or `github-server-url: https://…`
+    // changes which credential/host is persisted — invalidating the suppression's
+    // GITHUB_TOKEN/no-exfiltration rationale — without altering the step keys, so
+    // a bare value check would still pass. Any new input now forces re-review.
+    const checkoutWith = (checkoutStep?.with as Record<string, unknown> | undefined) ?? {};
+    expect(Object.keys(checkoutWith)).toEqual(["persist-credentials"]);
+    expect(checkoutWith["persist-credentials"]).toBe(true);
+
+    // Bind the marker step's exact key set (as for the checkout step) so an
+    // execution-affecting field — `uses`, a custom `shell:` (e.g. running a
+    // checked-in script), `env:` (e.g. BASH_ENV), `working-directory`, `if`, … —
+    // added alongside the snapshotted `run` still forces re-review.
+    expect(Object.keys(markerStep ?? {}).sort()).toEqual(["name", "run"]);
+    expect(typeof markerStep?.run).toBe("string");
+
+    // Snapshot the inline step's script, whitespace-normalized (per-line trim,
+    // blank lines dropped), so formatting stays flexible but the executable
+    // content is pinned to these reviewed git/echo/shell-control commands.
+    const normalizeScript = (script: string) =>
+      script
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line !== "")
+        .join("\n");
+    const reviewedMarkerRun = [
+      "set -euo pipefail",
+      'tested_sha="$(git rev-parse HEAD)"',
+      "current_main_sha=\"$(git ls-remote origin refs/heads/main | awk '{print $1}')\"",
+      'if [[ "$tested_sha" != "$GITHUB_SHA" ]]; then',
+      'echo "::error::Checked-out HEAD ${tested_sha} does not match GITHUB_SHA ${GITHUB_SHA}"',
+      "exit 1",
+      "fi",
+      'if [[ -z "$current_main_sha" ]]; then',
+      'echo "::error::Could not resolve remote refs/heads/main"',
+      "exit 1",
+      "fi",
+      'if [[ "$current_main_sha" != "$GITHUB_SHA" ]]; then',
+      'echo "::notice::Skipping ci-green update for stale run ${GITHUB_SHA}; current main is ${current_main_sha}"',
+      "exit 0",
+      "fi",
+      'git push origin "${GITHUB_SHA}:refs/heads/ci-green" --force',
+      'echo "::notice::Advanced owned ci-green marker to ${GITHUB_SHA}"',
+    ].join("\n");
+    expect(normalizeScript(String(markerStep?.run ?? ""))).toBe(reviewedMarkerRun);
+
+    // The persisted-credential job must stay main-only (a push to refs/heads/main),
+    // so the accepted risk never runs on a PR or fork head ref. Bind that job-level
+    // guard here too, keeping the full documented invariant fail-closed in one place.
+    // Pin the ENTIRE reviewed condition, not substrings: a broadening clause
+    // (e.g. `|| github.event_name == 'pull_request'`) preserves both substrings
+    // yet would let the credentialed marker push run off `main` — comparing the
+    // normalized condition to the exact reviewed expression forces re-review.
+    const markGreenIf = String(parsedWorkflow.jobs?.["mark-green"]?.if ?? "");
+    expect(markGreenIf.trim()).toBe(
+      "github.ref == 'refs/heads/main' && github.event_name == 'push'",
+    );
   });
 
   it("refuses environment-injected audit fixtures outside tests", () => {

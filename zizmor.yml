@@ -65,3 +65,33 @@ rules:
       # Re-review whenever the pack-smoke install step moves or changes what it
       # installs.
       - test.yml:397
+  artipacked:
+    ignore:
+      # The ci-green marker job (test.yml:1021) checks out with
+      # `persist-credentials: true` on purpose: it force-advances the owned
+      # `ci-green` marker ref on `main` via `git push` in the following step,
+      # and that push needs the persisted checkout credential. Setting
+      # `persist-credentials: false` would break the marker push — it is a
+      # functional requirement here, not an oversight.
+      #
+      # `persist-credentials: true` leaves the `contents: write` GITHUB_TOKEN
+      # usable by Git for the job's full duration: actions/checkout v7 stores
+      # the credential in a Git config file under `$RUNNER_TEMP` and wires it
+      # into the checkout's local `.git/config` via an `http.<host>.extraheader`
+      # and an `includeIf.gitdir` include, so any Git command in the job can use
+      # it — not only an artifact-upload step. The true safety
+      # invariant is therefore that this job runs NO untrusted/third-party code
+      # while the credential is persisted: it runs only the SHA-pinned
+      # `actions/checkout` and inline, trusted git commands, uploads no
+      # artifacts, and is `main`-only. Under that invariant the persisted
+      # credential has no exfil surface, so the artipacked finding is accepted.
+      # Re-review whenever this job gains any third-party action/script, an
+      # artifact upload, or stops pushing the marker ref.
+      #
+      # Anchored to the ci-green marker `actions/checkout` (test.yml:1021).
+      # zizmor matches ignores by file:line, not by job/step identity, so a
+      # shifted line could mask an unrelated checkout. A required test
+      # (tests/unit/supply-chain-policy.unit.test.ts) compensates: it fails if
+      # this anchor no longer resolves to the persist-credentials:true checkout
+      # inside the mark-green job, or if any other job persists credentials.
+      - test.yml:1021
