@@ -1503,7 +1503,7 @@ describe("supply-chain audit policy", () => {
     // new `uses:`, or ANY new executable/download/upload line in the run script
     // fails this test and forces re-review of the persisted write token.
     const parsedWorkflow = parseWorkflowYaml(workflow) as {
-      jobs?: Record<string, { steps?: Array<Record<string, unknown>> }>;
+      jobs?: Record<string, { if?: string; steps?: Array<Record<string, unknown>> }>;
     };
     const markGreenSteps = parsedWorkflow.jobs?.["mark-green"]?.steps ?? [];
     expect(markGreenSteps).toHaveLength(2);
@@ -1547,6 +1547,13 @@ describe("supply-chain audit policy", () => {
       'echo "::notice::Advanced owned ci-green marker to ${GITHUB_SHA}"',
     ].join("\n");
     expect(normalizeScript(String(markerStep?.run ?? ""))).toBe(reviewedMarkerRun);
+
+    // The persisted-credential job must stay main-only (a push to refs/heads/main),
+    // so the accepted risk never runs on a PR or fork head ref. Bind that job-level
+    // guard here too, keeping the full documented invariant fail-closed in one place.
+    const markGreenIf = String(parsedWorkflow.jobs?.["mark-green"]?.if ?? "");
+    expect(markGreenIf).toContain("github.ref == 'refs/heads/main'");
+    expect(markGreenIf).toContain("github.event_name == 'push'");
   });
 
   it("refuses environment-injected audit fixtures outside tests", () => {
