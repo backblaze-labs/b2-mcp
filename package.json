@@ -117,7 +117,7 @@
     "@backblaze-labs/b2-sdk": "0.4.0",
     "@modelcontextprotocol/server": "2.0.0",
     "@smithy/types": "4.17.2",
-    "jose": "6.2.10",
+    "jose": "6.2.12",
     "opossum": "10.0.0",
     "pino": "10.3.1",
     "zod": "4.5.4"
