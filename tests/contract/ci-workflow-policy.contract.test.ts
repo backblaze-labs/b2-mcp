@@ -13,7 +13,7 @@ const { workflowJobBlock, workflowJobBlocks, yamlMappingForKey, yamlValuesForKey
   yamlValuesForKey: (text: string, key: string) => Array<string | string[]>;
 };
 
-const pnpmSetupAction = "pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86";
+const pnpmSetupAction = "pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413";
 const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
   packageManager?: string;
   scripts?: Record<string, string>;
