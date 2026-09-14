@@ -6,7 +6,7 @@
 schema_version: 1
 project: Backblaze B2 MCP Server
 slug: b2-mcp
-updated: "2026-09-08"
+updated: "2026-09-13"
 
 canonical:
   repo: https://github.com/backblaze-labs/b2-mcp
@@ -107,3 +107,21 @@ references:
     source: mcp.so
     added: "2026-09-08"
     status: live
+
+  - id: freemcp
+    title: b2-mcp featured on FreeMCP
+    url: https://freemcp.space/featured/b2-mcp
+    type: registry
+    source: FreeMCP
+    added: "2026-09-13"
+    status: live
+    summary: Published and featured listing on the FreeMCP remote-server directory.
+
+  - id: awesome-remote-mcp-servers
+    title: Backblaze B2 MCP Server on awesome-remote-mcp-servers
+    url: https://github.com/Appnova-EU-OU/awesome-remote-mcp-servers
+    type: listing
+    source: awesome-remote-mcp-servers
+    added: "2026-09-13"
+    status: live
+    summary: Curated awesome list; listed under "Hosted on freemcp.space".

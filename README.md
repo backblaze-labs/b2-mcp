@@ -22,6 +22,7 @@
 [![Glama](https://glama.ai/mcp/servers/@backblaze-labs/b2-mcp/badges/score.svg)](https://glama.ai/mcp/servers/@backblaze-labs/b2-mcp)
 [![Verified by M8ven](https://m8ven.ai/badge/mcp/backblaze-labs-b2-mcp-92j1t6)](https://m8ven.ai/mcp/backblaze-labs-b2-mcp-92j1t6)
 [![MCP Badge](https://lobehub.com/badge/mcp/backblaze-labs-b2-mcp?style=plastic)](https://lobehub.com/mcp/backblaze-labs-b2-mcp)
+[![Listed on awesome-remote-mcp-servers](https://img.shields.io/badge/Listed_on-awesome--remote--mcp--servers-blue?logo=github)](https://github.com/Appnova-EU-OU/awesome-remote-mcp-servers)
 
 A [Model Context Protocol](https://modelcontextprotocol.io) server for [Backblaze B2 Cloud Storage](https://www.backblaze.com/cloud-storage). It lets any MCP-compatible AI client (Claude, and others) operate B2 through a focused, safe set of tools, currently incubating in Backblaze-Labs.
 
