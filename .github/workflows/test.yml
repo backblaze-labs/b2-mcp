@@ -603,12 +603,12 @@ jobs:
         with:
           persist-credentials: false
       # github/codeql-action/init v4.37.9, reviewed 2026-09-07.
-      - uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938
+      - uses: github/codeql-action/init@b96794f015dfd88f77b49b1c93e0fa7110f94c63
         with:
           languages: javascript-typescript
           build-mode: none
       # github/codeql-action/analyze v4.37.9, reviewed 2026-09-07.
-      - uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938
+      - uses: github/codeql-action/analyze@b96794f015dfd88f77b49b1c93e0fa7110f94c63
         with:
           category: "/language:javascript-typescript"
           upload: never
@@ -729,7 +729,7 @@ jobs:
         continue-on-error: true
         timeout-minutes: 5
         # github/codeql-action/upload-sarif v4.37.9, reviewed 2026-09-07.
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938
+        uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63
         with:
           sarif_file: ${{ runner.temp }}/zizmor-offline.sarif
           category: zizmor-offline
@@ -816,7 +816,7 @@ jobs:
         # Bounded so a stuck code-scanning upload cannot exhaust the job budget.
         timeout-minutes: 5
         # github/codeql-action/upload-sarif v4.37.9, reviewed 2026-09-07.
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938
+        uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63
         with:
           sarif_file: online-sarif/zizmor-online.sarif
           category: zizmor-online
