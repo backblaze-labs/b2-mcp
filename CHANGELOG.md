@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-09-29
+
 ### Added
 - README "Backblaze Labs ecosystem" section cross-linking Genblaze,
   b2-sdk-typescript, and b2-action. (#427)
@@ -19,6 +21,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   short of its content length now fails with `incomplete_download` (HTTP 502)
   instead of reporting success, and a destination that is not writable or cannot
   be replaced fails with `bad_request`. (#449)
+
+### Security
+- Patched transitive dependency advisories across the dev/build toolchain and
+  the published `deploy/customer-hosted` lockfile via pinned pnpm overrides:
+  `fast-uri` (GHSA-58mr-gqgx-xq4g), `ip-address` (GHSA-2vr4-cq9g-pvrc), `undici`
+  WebSocket permessage-deflate DoS (GHSA-3wwx-pv8p-q78v) on the 6.x, 7.x, and
+  8.x lines (each bounded to its own reviewed major), `node-tar` PAX/recursion
+  DoS, and `smol-toml` DoS. Deliberately held back the `eslint` 10.11.0 bump
+  whose tree pulls the quarantined keyv/cacheable-compromise packages, and the
+  `@aws-sdk`/`@smithy`/`zod`/MCP-client bumps that changed the reviewed runtime
+  graph or tool schema. (#442, #456)
 
 ## [0.2.1] - 2026-09-04
 
@@ -422,7 +435,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added explicit read-only workflow permissions and consolidated the safe AWS
   SDK, Axios, and TypeScript dependency updates from superseded Dependabot PRs.
 
-[Unreleased]: https://github.com/backblaze-labs/b2-mcp/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/backblaze-labs/b2-mcp/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/backblaze-labs/b2-mcp/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/backblaze-labs/b2-mcp/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/backblaze-labs/b2-mcp/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/backblaze-labs/b2-mcp/compare/v0.1.1...v0.1.2

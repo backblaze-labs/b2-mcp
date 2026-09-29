@@ -177,9 +177,9 @@ Use the shared security contract first:
 
 ## Verification Record
 
-- Last verified: 2026-09-04
-- Repository baseline commit: `19d8eed`
-- Package version: `0.2.1`
+- Last verified: 2026-09-29
+- Repository baseline commit: `74f2e5a`
+- Package version: `0.2.2`
 - MCP revision: 2026-07-28
 - Node runtime: Vercel Node Functions built by locked `@vercel/node@13.0.0`
   with `vercel.json` explicitly pinning the reviewed `nodejs24.x` Function

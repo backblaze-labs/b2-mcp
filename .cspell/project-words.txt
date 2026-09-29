@@ -93,3 +93,7 @@ pathb
 Xhsm
 m8ven
 IHDR
+GHSA
+gqgx
+pvrc
+smol
