@@ -82,3 +82,6 @@ overrides:
   'undici@7': '>=7.29.1 <8'
   'undici@8': '>=8.10.2 <9'
   'smol-toml@1': '>=1.7.1'
+  # Dev-only transitive dep via typedoc; force the patched build off the
+  # markdown-it linkify quadratic-time DoS (GHSA-253c-mchw-3w2r, fixed 14.3.1).
+  markdown-it: '>=14.3.1 <15'
