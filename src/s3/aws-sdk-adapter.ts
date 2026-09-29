@@ -31,12 +31,14 @@ import {
   UploadPartCommand,
   UploadPartCopyCommand,
   type S3ClientConfig as AwsS3ClientConfig,
+  type S3ClientResolvedConfig,
+  type ServiceInputTypes,
+  type ServiceOutputTypes,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import type {
-  Handler,
+  Command,
   HttpHandlerOptions,
-  MetadataBearer,
   StreamingBlobPayloadInputTypes,
   StreamingBlobPayloadOutputTypes,
 } from "@smithy/types";
@@ -44,25 +46,10 @@ import { currentMcpRequestSignal } from "../request-context.js";
 import { withS3Circuit } from "../utils/circuit-breaker.js";
 import { forEachBounded } from "../utils/concurrency.js";
 
-// A minimal, structural command constraint every concrete `*Command` satisfies:
-// it exposes `resolveMiddleware(...)` returning the command's `Handler`. We match
-// on this shape (rather than the positional `Command<…>` / `CommandImpl<…>`
-// generic layout, which differs between @smithy/types and @smithy/core and
-// changed in @smithy/types 4.19 / @aws-sdk/client-s3 3.113x — previously breaking
-// per-command output narrowing). `S3CommandOutput` recovers each command's exact
-// output from that same `Handler`, so callers still get the precise
-// `…CommandOutput` type.
-type S3ExecutableCommand = { resolveMiddleware(...args: any[]): Handler<any, MetadataBearer> };
-type S3CommandOutput<Cmd extends S3ExecutableCommand> = Cmd extends {
-  resolveMiddleware(...args: any[]): Handler<any, infer Output>;
-}
-  ? Output
-  : never;
-
-// The command-input type the underlying S3 client `send()` accepts, used only as
-// the internal cast target so these wrappers stay decoupled from the SDK's
-// evolving command generic layout while keeping public output typing exact.
-type S3SendInput = Parameters<S3Client["send"]>[0];
+type S3SendCommand<
+  InputType extends ServiceInputTypes,
+  OutputType extends ServiceOutputTypes,
+> = Command<ServiceInputTypes, InputType, ServiceOutputTypes, OutputType, S3ClientResolvedConfig>;
 
 /** AWS S3 client configuration accepted by the B2 peer facade. */
 export type B2S3PeerClientConfig = AwsS3ClientConfig;
@@ -867,14 +854,11 @@ export class B2S3PeerClient {
     return { ...(options ?? {}), abortSignal: signal };
   }
 
-  private sendCommand<Cmd extends S3ExecutableCommand>(
-    command: Cmd,
+  private sendCommand<InputType extends ServiceInputTypes, OutputType extends ServiceOutputTypes>(
+    command: S3SendCommand<InputType, OutputType>,
     options?: HttpHandlerOptions,
-  ): Promise<S3CommandOutput<Cmd>> {
-    return this.readClient.send(
-      command as unknown as S3SendInput,
-      this.optionsWithRequestSignal(options),
-    ) as Promise<S3CommandOutput<Cmd>>;
+  ): Promise<OutputType> {
+    return this.readClient.send(command, this.optionsWithRequestSignal(options));
   }
 
   private mutationClient(): S3Client {
@@ -884,23 +868,25 @@ export class B2S3PeerClient {
     return this.unsafeMutationClient;
   }
 
-  private async sendWithCircuit<Cmd extends S3ExecutableCommand>(
-    command: Cmd,
+  private async sendWithCircuit<
+    InputType extends ServiceInputTypes,
+    OutputType extends ServiceOutputTypes,
+  >(
+    command: S3SendCommand<InputType, OutputType>,
     options?: HttpHandlerOptions,
-  ): Promise<S3CommandOutput<Cmd>> {
+  ): Promise<OutputType> {
     return withS3Circuit(() => this.sendCommand(command, options));
   }
 
-  private async sendUnsafeMutationWithCircuit<Cmd extends S3ExecutableCommand>(
-    command: Cmd,
+  private async sendUnsafeMutationWithCircuit<
+    InputType extends ServiceInputTypes,
+    OutputType extends ServiceOutputTypes,
+  >(
+    command: S3SendCommand<InputType, OutputType>,
     options?: HttpHandlerOptions,
-  ): Promise<S3CommandOutput<Cmd>> {
-    return withS3Circuit(
-      () =>
-        this.mutationClient().send(
-          command as unknown as S3SendInput,
-          this.optionsWithRequestSignal(options),
-        ) as Promise<S3CommandOutput<Cmd>>,
+  ): Promise<OutputType> {
+    return withS3Circuit(() =>
+      this.mutationClient().send(command, this.optionsWithRequestSignal(options)),
     );
   }
 
