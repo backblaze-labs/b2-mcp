@@ -31,6 +31,28 @@ function isInside(root: string, target: string): boolean {
 }
 
 /**
+ * Report whether an already resolved path is inside the sandbox root without
+ * resolving it again, as for a path the kernel reported for an open descriptor.
+ *
+ * @param config - Server configuration carrying the optional sandbox root.
+ * @param realPath - Absolute path with every symlink already resolved.
+ *
+ * @returns True when no sandbox root is configured or the path is inside it.
+ *
+ * @throws FileAccessError when the configured sandbox root does not exist.
+ */
+export function isInsideFileRoot(config: B2Config, realPath: string): boolean {
+  if (!config.fileRoot) return true;
+  let realRoot: string;
+  try {
+    realRoot = fs.realpathSync(path.resolve(config.fileRoot));
+  } catch {
+    throw new FileAccessError(`Configured sandbox root does not exist: ${config.fileRoot}`);
+  }
+  return isInside(realRoot, realPath);
+}
+
+/**
  * Map a (possibly not-yet-existing) absolute path onto the real path of its
  * nearest existing ancestor. This resolves symlinks in the existing portion —
  * so a symlinked ancestor can't redirect a write outside the root, and platform

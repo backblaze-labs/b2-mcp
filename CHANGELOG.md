@@ -11,6 +11,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - README "Backblaze Labs ecosystem" section cross-linking Genblaze,
   b2-sdk-typescript, and b2-action. (#427)
 
+### Fixed
+- `s3_get_object` `saveToPath` no longer destroys an existing file when a
+  download fails, or follows a dangling symlink out of `B2_FILE_ROOT`. Files are
+  now replaced via a sibling temp file, which drops hard links, ACLs, extended
+  attributes, and any ownership the server cannot set. A body that ends cleanly
+  short of its content length now fails with `incomplete_download` (HTTP 502)
+  instead of reporting success, and a destination that is not writable or cannot
+  be replaced fails with `bad_request`. (#449)
+
 ## [0.2.1] - 2026-09-04
 
 ### Added

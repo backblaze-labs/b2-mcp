@@ -7,7 +7,7 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { resolveLocalPath, FileAccessError } from "../../src/utils/fs-guard";
+import { FileAccessError, isInsideFileRoot, resolveLocalPath } from "../../src/utils/fs-guard";
 import { B2Config } from "../../src/utils/types";
 
 const baseConfig: B2Config = {
@@ -114,5 +114,30 @@ describe("resolveLocalPath — sandbox root", () => {
     expect(() => resolveLocalPath(cfg, path.join(linkDir, "out.bin"), "write")).toThrow(
       FileAccessError,
     );
+  });
+});
+
+describe("isInsideFileRoot", () => {
+  it("accepts any path when no sandbox root is configured", () => {
+    expect(isInsideFileRoot(baseConfig, outside)).toBe(true);
+  });
+
+  it("compares a resolved path against the real root without resolving it again", () => {
+    const rootLink = path.join(outside, "root-link");
+    fs.symlinkSync(root, rootLink);
+    const cfg = { ...baseConfig, fileRoot: rootLink };
+    const realRoot = fs.realpathSync(rootLink);
+    fs.symlinkSync(outside, path.join(root, "escape"));
+    expect(isInsideFileRoot(cfg, realRoot)).toBe(true);
+    expect(isInsideFileRoot(cfg, path.join(realRoot, "a", "b.txt"))).toBe(true);
+    // Taken as already resolved: following `escape` again would leave the root.
+    expect(isInsideFileRoot(cfg, path.join(realRoot, "escape", "f.txt"))).toBe(true);
+    expect(isInsideFileRoot(cfg, fs.realpathSync(outside))).toBe(false);
+    expect(isInsideFileRoot(cfg, `${realRoot}-sibling`)).toBe(false);
+  });
+
+  it("throws FileAccessError when the configured root is missing", () => {
+    const cfg = { ...baseConfig, fileRoot: path.join(outside, "missing") };
+    expect(() => isInsideFileRoot(cfg, outside)).toThrow(FileAccessError);
   });
 });
