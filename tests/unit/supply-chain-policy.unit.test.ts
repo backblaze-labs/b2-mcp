@@ -107,35 +107,35 @@ describe("supply-chain audit policy", () => {
   type LockPackageWithMetadata = LockPackage & { integrity: string; version: string };
   const lock = readPackageManagerLock(root) as { packages: Record<string, LockPackage> };
 
-  it("keeps the fresh Backblaze SDK release-age exception time-bounded", () => {
+  it("retires the aged-out Backblaze SDK release-age exception", () => {
     const sdkVersion = packageJson.dependencies["@backblaze-labs/b2-sdk"];
     const excludedPackage = `@backblaze-labs/b2-sdk@${sdkVersion}`;
     const rootExcludes = pnpmWorkspace.minimumReleaseAgeExclude ?? [];
     const customerHostedExcludes = customerHostedPnpmWorkspace.minimumReleaseAgeExclude ?? [];
-    const exceptionExpiresAt = "2026-09-16T19:00:00.000Z";
 
-    expect(rootExcludes).toContain(excludedPackage);
-    expect(customerHostedExcludes).toContain(excludedPackage);
-    expect(rootExcludes.filter((entry) => entry.startsWith("@backblaze-labs/b2-sdk@"))).toEqual([
-      excludedPackage,
-    ]);
+    // The @backblaze-labs/b2-sdk@0.4.0 release-age exception was time-bounded to
+    // 2026-09-16 and has aged past the minimum-release-age window. Per the SDK
+    // adoption contract, the temporary minimumReleaseAgeExclude entry is removed
+    // from both workspaces once it expires — assert it is no longer present.
+    expect(rootExcludes.filter((entry) => entry.startsWith("@backblaze-labs/b2-sdk@"))).toEqual([]);
     expect(
       customerHostedExcludes.filter((entry) => entry.startsWith("@backblaze-labs/b2-sdk@")),
-    ).toEqual([excludedPackage]);
-    expect(Date.now()).toBeLessThan(Date.parse(exceptionExpiresAt));
+    ).toEqual([]);
 
+    // The adoption review itself is permanent: the contract still records the
+    // reviewed version and its pinned integrity, and documents the retirement.
     const lockEntry = rawPnpmLock.packages?.[excludedPackage];
     const integrity = lockEntry?.resolution?.integrity;
 
     expect(integrity).toBeTruthy();
     expect(sdkAdoptionContract).toContain(excludedPackage);
-    expect(sdkAdoptionContract).toContain(exceptionExpiresAt);
     expect(sdkAdoptionContract).toContain("SLSA v1 attestation");
     expect(sdkAdoptionContract).toContain(String(integrity));
     expect(sdkAdoptionContract).toContain(
       "npm diff --diff=@backblaze-labs/b2-sdk@0.3.0 --diff=@backblaze-labs/b2-sdk@0.4.0 --diff-name-only",
     );
     expect(sdkAdoptionContract).toContain("lifecycle script");
+    expect(sdkAdoptionContract).toContain("Retired");
   });
 
   function requirePolicyFixturePackage(path: string, purpose: string): LockPackageWithMetadata {
@@ -760,8 +760,8 @@ describe("supply-chain audit policy", () => {
   });
 
   it("keeps tsx dev-only and denies esbuild install builds", () => {
-    const tsxPackage = rawPnpmLock.packages?.["tsx@4.23.13"];
-    const tsxSnapshot = rawPnpmLock.snapshots?.["tsx@4.23.13"];
+    const tsxPackage = rawPnpmLock.packages?.["tsx@4.23.15"];
+    const tsxSnapshot = rawPnpmLock.snapshots?.["tsx@4.23.15"];
     const esbuildPackage = rawPnpmLock.packages?.["esbuild@0.28.1"];
     const esbuildPlatformPackages = Object.entries(rawPnpmLock.packages ?? {}).filter(([key]) =>
       key.startsWith("@esbuild/"),
@@ -769,13 +769,13 @@ describe("supply-chain audit policy", () => {
 
     expect(packageJson.dependencies).not.toHaveProperty("tsx");
     expect(packageJson.dependencies).not.toHaveProperty("esbuild");
-    expect(packageJson.devDependencies.tsx).toBe("4.23.13");
+    expect(packageJson.devDependencies.tsx).toBe("4.23.15");
     expect(rawPnpmLock.importers?.["."]?.devDependencies?.tsx).toEqual({
-      specifier: "4.23.13",
-      version: "4.23.13",
+      specifier: "4.23.15",
+      version: "4.23.15",
     });
     expect(tsxPackage?.resolution?.integrity).toBe(
-      "sha512-BL5MGkRln6aDYhb0xbQlEAGw743BaZYWdbWtdJOBriYJboKgUUYCadFp2/FpBBZquBC/ezNBn7wMMPx7FDZUDw==",
+      "sha512-Yiex1Ovn8z2xPpOWckIiysV1SSyRMY9BkLF++q0yKiDxCqRhosKfMg3janKkiLBwZ5c/YryloKwGZcrEmtwxKw==",
     );
     expect(tsxSnapshot?.dependencies).toEqual({ esbuild: "0.28.1" });
     expect(tsxSnapshot?.optionalDependencies).toEqual({ fsevents: "2.3.3" });
