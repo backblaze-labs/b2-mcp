@@ -32,6 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whose tree pulls the quarantined keyv/cacheable-compromise packages, and the
   `@aws-sdk`/`@smithy`/`zod`/MCP-client bumps that changed the reviewed runtime
   graph or tool schema. (#442, #456)
+- Overrode the dev-only `markdown-it` (via `typedoc`) to the patched 14.3.x line
+  for the `linkify` quadratic-time DoS (GHSA-253c-mchw-3w2r), published after
+  the batch above. (#458)
 
 ## [0.2.1] - 2026-09-04
 
