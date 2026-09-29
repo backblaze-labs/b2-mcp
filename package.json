@@ -136,12 +136,12 @@
     "@vercel/node": "13.0.0",
     "@vitest/coverage-v8": "^4.1.11",
     "commonmark": "0.31.2",
-    "cspell": "^10.2.1",
+    "cspell": "^10.3.5",
     "eslint": "10.9.1",
     "eslint-plugin-jsdoc": "64.5.4",
     "eslint-plugin-tsdoc": "0.5.3",
     "fast-check": "4.10.2",
-    "miniflare": "5.20260910.0-alpha",
+    "miniflare": "5.20260921.1-alpha",
     "semver": "7.8.5",
     "tsx": "4.23.15",
     "typedoc": "0.28.20",
@@ -150,7 +150,7 @@
     "vercel": "59.26.0",
     "vitest": "^4.1.11",
     "wrangler": "4.138.0",
-    "yaml": "^2.9.0"
+    "yaml": "^2.9.1"
   },
   "engines": {
     "node": "^22.22.2 || ^24 || ^26"

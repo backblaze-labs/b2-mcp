@@ -73,13 +73,12 @@ overrides:
   # the libheif advisories bundled in sharp <0.35.4 (GHSA-g89c-p67h-r497,
   # GHSA-2jg2-4ch7-h545). The Worker smoke never invokes sharp's image codecs.
   'miniflare>sharp': '>=0.35.4'
-  # Dev-only transitive deps via vercel build tooling. The undici WebSocket
-  # permessage-deflate DoS (GHSA-3wwx-pv8p-q78v) also affects the 7.x (<7.29.1)
-  # and 8.x (<8.10.2) lines; a stray vulnerable smol-toml 1.5.2 (<1.7.1) arrives
-  # via @vercel/container. Major-selector overrides force each onto a patched
-  # build without disturbing other majors.
-  'undici@7': '>=7.29.1'
-  'undici@8': '>=8.10.2'
-  '@vercel/sandbox>undici': '>=8.10.2'
-  'miniflare>undici': '>=8.10.2'
+  # Dev-only transitive deps via vercel build tooling and wrangler/miniflare. The
+  # undici WebSocket permessage-deflate DoS (GHSA-3wwx-pv8p-q78v) also affects the
+  # 7.x (<7.29.1) and 8.x (<8.10.2) lines; a stray vulnerable smol-toml 1.5.2
+  # (<1.7.1) arrives via @vercel/container. Each major-selector is upper-bounded
+  # so consumers stay on their own reviewed major (miniflare and @vercel/sandbox
+  # are undici-7 consumers) — patched, without an unreviewed cross-major upgrade.
+  'undici@7': '>=7.29.1 <8'
+  'undici@8': '>=8.10.2 <9'
   'smol-toml@1': '>=1.7.1'
