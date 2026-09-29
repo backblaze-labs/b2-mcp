@@ -97,3 +97,5 @@ GHSA
 gqgx
 pvrc
 smol
+linkify
+mchw
