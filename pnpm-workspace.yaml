@@ -26,8 +26,6 @@ minimumReleaseAgeExclude:
   - '@vercel/vc-native-linux-arm64@59.3.0'
   - '@vercel/vc-native-linux-x64@59.3.0'
   - vercel@59.3.0
-  # Time-bounded SDK release-age exception documented in docs/design-docs/sdk-adoption-contract.md.
-  - '@backblaze-labs/b2-sdk@0.4.0'
 overrides:
   # Force the dev-only mcpb packer's interactive-editor path off vulnerable
   # tmp 0.0.33 (GHSA path-traversal); mcpb pack never prompts, but the audit
@@ -36,15 +34,21 @@ overrides:
   '@istanbuljs/load-nyc-config>js-yaml': 3.15.1
   '@typescript-eslint/visitor-keys>eslint-visitor-keys': 4.2.1
   '@hono/node-server': 2.0.10
-  '@types/node': 22.20.2
+  '@types/node': 22.20.4
   '@vercel/backends>path-to-regexp': 8.4.0
+  # Dev-only transitive dep via @vercel/blob; force the patched build off the
+  # undici WebSocket permessage-deflate DoS (GHSA-3wwx-pv8p-q78v, fixed 6.28.1).
+  '@vercel/blob>undici': '>=6.28.1 <7'
   '@vercel/express>path-to-regexp': 8.4.0
   '@vercel/fun>path-to-regexp': 8.4.0
   '@vercel/fun>tar': 7.5.21
+  # Force every node-tar consumer (e.g. @vercel/container pulls a vulnerable 7.x)
+  # onto the patched line off the PAX/recursion DoS advisories (fixed 7.5.21).
+  tar: '>=7.5.21'
   '@vercel/fun>@tootallnate/once': 2.0.1
   '@vercel/hono>path-to-regexp': 8.4.0
   '@vercel/node>path-to-regexp': 6.3.0
-  '@vercel/node>undici': 6.28.0
+  '@vercel/node>undici': '>=6.28.1 <7'
   '@vercel/python-analysis>js-yaml': 4.3.2
   '@vercel/python-analysis>minimatch': 10.2.3
   '@vercel/python-analysis>smol-toml': 1.7.1
@@ -54,14 +58,27 @@ overrides:
   esbuild: 0.28.1
   vercel>path-to-regexp: 8.4.0
   vercel>smol-toml: 1.7.1
-  vercel>undici: 6.28.0
+  vercel>undici: '>=6.28.1 <7'
   'minimatch@3.1.5>brace-expansion': 1.1.18
   nanoid: 3.3.18
   # Dev-only transitive deps (via ajv/vercel); force patched builds off the
-  # fast-uri host-confusion/SSRF advisories and the qs array-limit/DoS advisories.
-  fast-uri: '>=3.1.6 <4'
+  # fast-uri host-confusion/SSRF advisories (incl. GHSA-58mr-gqgx-xq4g, fixed in
+  # 3.1.7) and the qs array-limit/DoS advisories.
+  fast-uri: '>=3.1.7 <4'
   qs: '>=6.16.0'
+  # Dev-only transitive dep; force the patched build off GHSA-2vr4-cq9g-pvrc
+  # (ip-address ReDoS/parse advisory affecting >=10.2.0 <=10.5.0, fixed 10.5.1).
+  ip-address: '>=10.5.1 <11'
   # Dev-only transitive dep via miniflare/wrangler; force the patched build off
   # the libheif advisories bundled in sharp <0.35.4 (GHSA-g89c-p67h-r497,
   # GHSA-2jg2-4ch7-h545). The Worker smoke never invokes sharp's image codecs.
   'miniflare>sharp': '>=0.35.4'
+  # Dev-only transitive deps via vercel build tooling and wrangler/miniflare. The
+  # undici WebSocket permessage-deflate DoS (GHSA-3wwx-pv8p-q78v) also affects the
+  # 7.x (<7.29.1) and 8.x (<8.10.2) lines; a stray vulnerable smol-toml 1.5.2
+  # (<1.7.1) arrives via @vercel/container. Each major-selector is upper-bounded
+  # so consumers stay on their own reviewed major (miniflare and @vercel/sandbox
+  # are undici-7 consumers) — patched, without an unreviewed cross-major upgrade.
+  'undici@7': '>=7.29.1 <8'
+  'undici@8': '>=8.10.2 <9'
+  'smol-toml@1': '>=1.7.1'

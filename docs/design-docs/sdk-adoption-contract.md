@@ -67,11 +67,15 @@ Issue [#344](https://github.com/backblaze-labs/b2-mcp/issues/344) requires
 the time of adoption. The root and customer-hosted workspaces carry a temporary
 exact-version `minimumReleaseAgeExclude` entry for
 `@backblaze-labs/b2-sdk@0.4.0` so frozen installs can verify the reviewed
-lockfile while the cooldown elapses. The exception expires at
-`2026-09-16T19:00:00.000Z`; after that timestamp, the supply-chain policy test
-fails until the exclusion is removed from both workspaces. Future SDK bumps must
-either wait out the release-age window or add a new reviewed, time-bounded
-exception.
+lockfile while the cooldown elapses. The exception was time-bounded to
+`2026-09-16T19:00:00.000Z`. Future SDK bumps must either wait out the
+release-age window or add a new reviewed, time-bounded exception.
+
+**Retired (2026-09-29):** the cooldown has elapsed and
+`@backblaze-labs/b2-sdk@0.4.0` (published `2026-09-01T18:50:49.255Z`) has aged
+past the minimum-release-age window, so the temporary `minimumReleaseAgeExclude`
+entry was removed from both the root and customer-hosted workspaces. The
+adoption review evidence below is retained for the record.
 
 Exception evidence:
 
