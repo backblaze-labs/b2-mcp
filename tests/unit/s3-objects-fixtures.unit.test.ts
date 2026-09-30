@@ -1523,6 +1523,113 @@ describe("S3 object tools with deterministic handler fake", () => {
     );
   }
 
+  for (const platform of ["linux", "darwin"] as const) {
+    (platform === "linux" ? linuxIt : posixIt)(
+      `rejects a filePath swapped out of the file root after it was checked (${platform} check)`,
+      async () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), "b2-put-swap-root-"));
+        const outside = fs.mkdtempSync(path.join(os.tmpdir(), "b2-put-swap-out-"));
+        const dir = path.join(root, "dir");
+        fs.mkdirSync(dir);
+        fs.writeFileSync(path.join(dir, "data.txt"), "INSIDE");
+        fs.writeFileSync(path.join(outside, "data.txt"), "OUTSIDE");
+        const sandboxed = sandboxedTools(root);
+        // The path check passes; the directory is swapped for a link out of the root before the open.
+        const realOpen = fs.promises.open.bind(fs.promises);
+        const openSpy = vi.spyOn(fs.promises, "open").mockImplementation(async (...args) => {
+          fs.renameSync(dir, `${dir}-moved`);
+          fs.symlinkSync(outside, dir);
+          return realOpen(...(args as Parameters<typeof realOpen>));
+        });
+        const realPlatform = process.platform;
+        Object.defineProperty(process, "platform", { value: platform });
+
+        try {
+          const result = await sandboxed.call("s3_put_object", {
+            bucket: "b",
+            key: "data.txt",
+            filePath: path.join(dir, "data.txt"),
+            contentType: "text/plain",
+          });
+
+          expect(result.isError).toBe(true);
+          expectBadRequestToolError(result, /filePath changed while it was being opened/i);
+          expect(s3.requestsFor("putObject")).toHaveLength(0);
+        } finally {
+          Object.defineProperty(process, "platform", { value: realPlatform });
+          openSpy.mockRestore();
+          fs.rmSync(root, { recursive: true, force: true });
+          fs.rmSync(outside, { recursive: true, force: true });
+        }
+      },
+    );
+
+    (platform === "linux" ? linuxIt : posixIt)(
+      `uploads a hard-linked filePath inside the file root (${platform} check)`,
+      async () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), "b2-put-link-root-"));
+        const outside = fs.mkdtempSync(path.join(os.tmpdir(), "b2-put-link-out-"));
+        const filePath = path.join(root, "data.txt");
+        fs.writeFileSync(filePath, "DATA");
+        fs.linkSync(filePath, path.join(outside, "alias.txt"));
+        const sandboxed = sandboxedTools(root);
+        const realPlatform = process.platform;
+        Object.defineProperty(process, "platform", { value: platform });
+
+        try {
+          const result = await sandboxed.call("s3_put_object", {
+            bucket: "b",
+            key: "data.txt",
+            filePath,
+            contentType: "text/plain",
+          });
+
+          expect(result.isError).toBeFalsy();
+          expect(putBodyBuffer(firstRequest<B2S3PutObjectOptions>("putObject")).toString()).toBe(
+            "DATA",
+          );
+        } finally {
+          Object.defineProperty(process, "platform", { value: realPlatform });
+          fs.rmSync(root, { recursive: true, force: true });
+          fs.rmSync(outside, { recursive: true, force: true });
+        }
+      },
+    );
+  }
+
+  // Refused before its size is read, so the error says nothing about the outside file.
+  linuxIt("refuses a swapped filePath before checking what it opened", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "b2-put-order-root-"));
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "b2-put-order-out-"));
+    const dir = path.join(root, "dir");
+    fs.mkdirSync(dir);
+    fs.writeFileSync(path.join(dir, "data.txt"), "INSIDE");
+    fs.writeFileSync(path.join(outside, "data.txt"), Buffer.alloc(MAX_INLINE_OBJECT_BYTES + 1));
+    const sandboxed = sandboxedTools(root);
+    const realOpen = fs.promises.open.bind(fs.promises);
+    const openSpy = vi.spyOn(fs.promises, "open").mockImplementation(async (...args) => {
+      fs.renameSync(dir, `${dir}-moved`);
+      fs.symlinkSync(outside, dir);
+      return realOpen(...(args as Parameters<typeof realOpen>));
+    });
+
+    try {
+      const result = await sandboxed.call("s3_put_object", {
+        bucket: "b",
+        key: "data.txt",
+        filePath: path.join(dir, "data.txt"),
+        contentType: "text/plain",
+      });
+
+      expect(result.isError).toBe(true);
+      expectBadRequestToolError(result, /filePath changed while it was being opened/i);
+    } finally {
+      openSpy.mockRestore();
+      fs.rmSync(root, { recursive: true, force: true });
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
   for (const decoy of ["copy", "hard link"] as const) {
     posixIt(`rejects a temp file whose path is swapped back to a ${decoy} after open`, async () => {
       const root = fs.mkdtempSync(path.join(os.tmpdir(), "b2-save-swapback-root-"));

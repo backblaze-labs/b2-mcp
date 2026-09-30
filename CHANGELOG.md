@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `s3_put_object` `filePath` under `B2_FILE_ROOT` now checks where the opened
+  file is before reading it, so a symlink swapped into the path after validation
+  no longer uploads a file from outside the root; without `/proc` (macOS,
+  Windows) it only narrows the race. (#451)
+
 ## [0.2.2] - 2026-09-29
 
 ### Added

@@ -7,7 +7,12 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { FileAccessError, isInsideFileRoot, resolveLocalPath } from "../../src/utils/fs-guard";
+import {
+  FileAccessError,
+  isInsideFileRoot,
+  isOpenedInsideFileRoot,
+  resolveLocalPath,
+} from "../../src/utils/fs-guard";
 import { B2Config } from "../../src/utils/types";
 
 const baseConfig: B2Config = {
@@ -139,5 +144,145 @@ describe("isInsideFileRoot", () => {
   it("throws FileAccessError when the configured root is missing", () => {
     const cfg = { ...baseConfig, fileRoot: path.join(outside, "missing") };
     expect(() => isInsideFileRoot(cfg, outside)).toThrow(FileAccessError);
+  });
+});
+
+describe("isOpenedInsideFileRoot", () => {
+  async function openedInside(
+    cfg: B2Config,
+    file: string,
+    openedPath: string,
+    requireSoleLink: boolean,
+  ): Promise<boolean> {
+    const handle = await fs.promises.open(file, "r");
+    try {
+      return await isOpenedInsideFileRoot(cfg, handle, openedPath, requireSoleLink);
+    } finally {
+      await handle.close();
+    }
+  }
+
+  async function asPlatform<T>(platform: string, run: () => Promise<T>): Promise<T> {
+    const realPlatform = process.platform;
+    Object.defineProperty(process, "platform", { value: platform });
+    try {
+      return await run();
+    } finally {
+      Object.defineProperty(process, "platform", { value: realPlatform });
+    }
+  }
+
+  it("accepts any opened file when no sandbox root is configured", async () => {
+    const secret = path.join(outside, "secret.txt");
+    fs.writeFileSync(secret, "secret");
+    expect(await openedInside(baseConfig, secret, secret, true)).toBe(true);
+  });
+
+  // Linux reads the location from /proc; other platforms derive it from the path.
+  for (const platform of new Set([process.platform, "darwin"])) {
+    it(`accepts a file opened inside a symlinked root (${platform} check)`, async () => {
+      const rootLink = path.join(outside, "root-link");
+      fs.symlinkSync(root, rootLink);
+      const file = path.join(root, "in.txt");
+      fs.writeFileSync(file, "data");
+      const cfg = { ...baseConfig, fileRoot: rootLink };
+      const inside = await asPlatform(platform, () =>
+        openedInside(cfg, file, fs.realpathSync(file), true),
+      );
+      expect(inside).toBe(true);
+    });
+
+    it(`rejects an outside file opened in place of the checked path (${platform} check)`, async () => {
+      const cfg = { ...baseConfig, fileRoot: root };
+      const checked = path.join(root, "f.txt");
+      const secret = path.join(outside, "f.txt");
+      fs.writeFileSync(checked, "same");
+      fs.writeFileSync(secret, "same");
+      const link = path.join(root, "link.txt");
+      fs.symlinkSync(secret, link);
+      await asPlatform(platform, async () => {
+        // The path was swapped back to an inside copy after the open.
+        expect(await openedInside(cfg, secret, fs.realpathSync(checked), false)).toBe(false);
+        // The path still leads out of the root.
+        expect(await openedInside(cfg, secret, link, false)).toBe(false);
+      });
+    });
+  }
+
+  it("falls back to the path when /proc cannot be read (linux check)", async () => {
+    const cfg = { ...baseConfig, fileRoot: root };
+    const checked = path.join(root, "f.txt");
+    const secret = path.join(outside, "f.txt");
+    fs.writeFileSync(checked, "same");
+    fs.writeFileSync(secret, "same");
+    const real = fs.realpathSync(checked);
+    const readlinkSpy = vi
+      .spyOn(fs.promises, "readlink")
+      .mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
+    try {
+      await asPlatform("linux", async () => {
+        expect(await openedInside(cfg, checked, real, false)).toBe(true);
+        expect(await openedInside(cfg, secret, real, false)).toBe(false);
+      });
+      expect(readlinkSpy).toHaveBeenCalled();
+    } finally {
+      readlinkSpy.mockRestore();
+    }
+  });
+
+  it("refuses a file whose path no longer resolves (darwin check)", async () => {
+    const cfg = { ...baseConfig, fileRoot: root };
+    const file = path.join(root, "f.txt");
+    fs.writeFileSync(file, "data");
+    const real = fs.realpathSync(file);
+    const handle = await fs.promises.open(file, "r");
+    try {
+      fs.renameSync(file, path.join(root, "moved.txt"));
+      const inside = await asPlatform("darwin", () =>
+        isOpenedInsideFileRoot(cfg, handle, real, false),
+      );
+      expect(inside).toBe(false);
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it("refuses a hard-linked file from the path only when a sole link is required", async () => {
+    const cfg = { ...baseConfig, fileRoot: root };
+    const file = path.join(root, "f.txt");
+    fs.writeFileSync(file, "data");
+    fs.linkSync(file, path.join(outside, "alias.txt"));
+    const real = fs.realpathSync(file);
+    await asPlatform("darwin", async () => {
+      expect(await openedInside(cfg, file, real, false)).toBe(true);
+      expect(await openedInside(cfg, file, real, true)).toBe(false);
+    });
+  });
+
+  it("compares file IDs above 2^53 exactly", async () => {
+    const cfg = { ...baseConfig, fileRoot: root };
+    const file = path.join(root, "f.txt");
+    fs.writeFileSync(file, "data");
+    // NTFS file IDs carry a sequence number in the high 16 bits.
+    const openedIno = 2n ** 60n + 1n;
+    const onDiskIno = 2n ** 60n;
+    const fakeStat = (ino: bigint, options?: fs.StatOptions) =>
+      options?.bigint ? { dev: 1n, ino, nlink: 1n } : { dev: 1, ino: Number(ino), nlink: 1 };
+    const statSpy = vi
+      .spyOn(fs.promises, "stat")
+      .mockImplementation((async (_p: fs.PathLike, options?: fs.StatOptions) =>
+        fakeStat(onDiskIno, options)) as unknown as typeof fs.promises.stat);
+    const handle = await fs.promises.open(file, "r");
+    handle.stat = (async (options?: fs.StatOptions) =>
+      fakeStat(openedIno, options)) as unknown as typeof handle.stat;
+    try {
+      const inside = await asPlatform("darwin", () =>
+        isOpenedInsideFileRoot(cfg, handle, fs.realpathSync(file), false),
+      );
+      expect(inside).toBe(false);
+    } finally {
+      statSpy.mockRestore();
+      await handle.close();
+    }
   });
 });
