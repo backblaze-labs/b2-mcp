@@ -8,6 +8,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { FileAccessError, isInsideFileRoot, resolveLocalPath } from "../../src/utils/fs-guard";
+import { parseB2Error } from "../../src/utils/errors";
 import { B2Config } from "../../src/utils/types";
 
 const baseConfig: B2Config = {
@@ -139,5 +140,40 @@ describe("isInsideFileRoot", () => {
   it("throws FileAccessError when the configured root is missing", () => {
     const cfg = { ...baseConfig, fileRoot: path.join(outside, "missing") };
     expect(() => isInsideFileRoot(cfg, outside)).toThrow(FileAccessError);
+  });
+});
+
+describe("resolveLocalPath — refusal classification", () => {
+  it.each([
+    [
+      "local files disabled",
+      () => resolveLocalPath({ ...baseConfig, allowLocalFiles: false }, root, "read"),
+    ],
+    [
+      "a read path that does not exist",
+      () => resolveLocalPath({ ...baseConfig, fileRoot: root }, path.join(root, "nope"), "read"),
+    ],
+    [
+      "a read outside the root",
+      () => resolveLocalPath({ ...baseConfig, fileRoot: root }, outside, "read"),
+    ],
+    [
+      "a missing sandbox root",
+      () => resolveLocalPath({ ...baseConfig, fileRoot: path.join(root, "gone") }, root, "read"),
+    ],
+    [
+      "a write outside the root",
+      () =>
+        resolveLocalPath({ ...baseConfig, fileRoot: root }, path.join(outside, "out.bin"), "write"),
+    ],
+  ])("classifies %s as bad_request", (_branch, refuse) => {
+    let refusal: unknown;
+    try {
+      refuse();
+    } catch (err) {
+      refusal = err;
+    }
+    expect(refusal).toBeInstanceOf(FileAccessError);
+    expect(parseB2Error(refusal)).toMatchObject({ code: "bad_request", status: 400 });
   });
 });

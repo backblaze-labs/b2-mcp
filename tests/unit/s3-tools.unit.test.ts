@@ -454,6 +454,28 @@ describe("s3_put_object and s3_get_object", () => {
     }
   });
 
+  it("returns bad_request for a filePath upload when local files are disabled", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "b2-mcp-s3-put-"));
+    const filePath = path.join(dir, "upload.txt");
+    try {
+      fs.writeFileSync(filePath, "hello");
+      const httpDefault = createServer({ ...testConfig, allowLocalFiles: false });
+
+      const result = await callTool(httpDefault, "s3_put_object", {
+        bucket: "b",
+        key: "k",
+        filePath,
+        contentType: "text/plain",
+      });
+
+      expect(result.isError).toBe(true);
+      expectBadRequestToolError(result, /local filesystem access is disabled/i);
+      expect(sendSpy).not.toHaveBeenCalled();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("rejects oversized local filePath uploads before sending to S3", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "b2-mcp-s3-put-"));
     const filePath = path.join(dir, "large.bin");
@@ -516,6 +538,29 @@ describe("s3_put_object and s3_get_object", () => {
     expect(result.isError).toBe(true);
     expectBadRequestToolError(result, /inline read limit|s3_get_presigned_url|saveToPath/i);
     expect(cancel).toHaveBeenCalled();
+  });
+
+  it("returns bad_request for a saveToPath outside B2_FILE_ROOT", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "b2-mcp-root-"));
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "b2-mcp-outside-"));
+    const target = path.join(outside, "out.txt");
+
+    try {
+      const sandboxed = createServer({ ...testConfig, fileRoot: root });
+      const result = await callTool(sandboxed, "s3_get_object", {
+        bucket: "b",
+        key: "k",
+        saveToPath: target,
+      });
+
+      expect(result.isError).toBe(true);
+      expectBadRequestToolError(result, /outside the allowed directory/i);
+      expect(sendSpy).not.toHaveBeenCalled();
+      expect(fs.existsSync(target)).toBe(false);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
   });
 
   it("rejects invalid reported contentLength and cancels the body", async () => {

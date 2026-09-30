@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Local filesystem policy refusals for `s3_put_object` `filePath` and
+  `s3_get_object` `saveToPath`, including a configured `B2_FILE_ROOT` that does
+  not exist, now return `bad_request` (HTTP 400) instead of `internal_error`
+  (HTTP 500). (#452)
+
 ## [0.2.2] - 2026-09-29
 
 ### Added
