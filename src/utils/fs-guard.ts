@@ -57,8 +57,8 @@ const ignoreError = (): undefined => undefined;
 /**
  * Report whether a file opened from a validated path is inside the sandbox
  * root; Node has no `openat`, so the path can change before the open. Uses
- * `/proc` on Linux; elsewhere the path is resolved again, which narrows that
- * window without closing it.
+ * `/proc` on Linux when readable; otherwise the path is resolved again, which
+ * narrows that window without closing it.
  *
  * @param config - Server configuration carrying the optional sandbox root.
  * @param handle - Descriptor opened from `openedPath`.

@@ -1597,7 +1597,7 @@ describe("S3 object tools with deterministic handler fake", () => {
     );
   }
 
-  // Refused before its size is read, so the error says nothing about the outside file.
+  // Refused before the size check, so the error does not report the outside file's size.
   linuxIt("refuses a swapped filePath before checking what it opened", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "b2-put-order-root-"));
     const outside = fs.mkdtempSync(path.join(os.tmpdir(), "b2-put-order-out-"));
