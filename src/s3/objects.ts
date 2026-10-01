@@ -16,7 +16,12 @@ import { currentMcpRequestSignal } from "../request-context.js";
 import { withS3Circuit, withS3LongCircuit } from "../utils/circuit-breaker.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
 import { badRequestError, codedError, toolError, toolJson, toolSuccess } from "../utils/errors.js";
-import { FileAccessError, isInsideFileRoot, resolveLocalPath } from "../utils/fs-guard.js";
+import {
+  FileAccessError,
+  isInsideFileRoot,
+  isOpenedInsideFileRoot,
+  resolveLocalPath,
+} from "../utils/fs-guard.js";
 import { logger } from "../utils/logger.js";
 import { timeoutError } from "../utils/named-error.js";
 import type { B2Config, B2S3FileVersionBinding, B2S3VersionGuard } from "../utils/types.js";
@@ -283,37 +288,6 @@ function modeCarriedSafely(mode: number, kept: { uid: boolean; gid: boolean }): 
   return (owner << 6) | (shared << 3) | shared;
 }
 
-// Node has no openat, so confirm where the opened temp file actually is.
-async function assertOpenedInsideFileRoot(
-  handle: fs.promises.FileHandle,
-  tempPath: string,
-  config: B2Config,
-): Promise<void> {
-  let openedPath: string | undefined;
-  if (process.platform === "linux") {
-    openedPath = await fs.promises.readlink(`/proc/self/fd/${handle.fd}`).catch(ignoreError);
-  }
-  if (openedPath === undefined) {
-    const opened = await handle.stat();
-    // fs-guard's resolver: the native one can spell paths differently (macOS case, SUBST).
-    let realPath: string | undefined;
-    try {
-      realPath = fs.realpathSync(tempPath);
-    } catch {
-      realPath = undefined;
-    }
-    const onDisk = realPath ? await fs.promises.stat(realPath).catch(ignoreError) : undefined;
-    // A second link could name the same file outside the root.
-    if (onDisk?.dev === opened.dev && onDisk.ino === opened.ino && opened.nlink === 1)
-      openedPath = realPath;
-  }
-  if (openedPath === undefined || !isInsideFileRoot(config, openedPath)) {
-    throw badRequestError(
-      `Path is outside the allowed directory (${config.fileRoot}); the saveToPath directory changed while the download was being prepared.`,
-    );
-  }
-}
-
 function atDirFd(dirFd: number, name: string): string {
   return `/proc/self/fd/${dirFd}/${name}`;
 }
@@ -454,7 +428,11 @@ async function downloadToPath(
   let tempId: { dev: number; ino: number } | undefined;
   try {
     tempId = await handle.stat();
-    if (sandbox) await assertOpenedInsideFileRoot(handle, tempPath, sandbox);
+    if (sandbox && !(await isOpenedInsideFileRoot(sandbox, handle, tempPath, true))) {
+      throw badRequestError(
+        `Path is outside the allowed directory (${sandbox.fileRoot}); the saveToPath directory changed while the download was being prepared.`,
+      );
+    }
     pinnedDir = await pinParentDir(dir, handle, tempName, tempId, sandbox);
     if (target.existing) {
       const kept = await preserveOwnership(handle, target.existing);
@@ -677,12 +655,18 @@ function inlineUploadLimitError(size?: number): Error {
   );
 }
 
-async function readSmallRegularFile(filePath: string): Promise<Buffer> {
+async function readSmallRegularFile(filePath: string, config: B2Config): Promise<Buffer> {
   const handle = await fs.promises.open(
     filePath,
     fs.constants.O_RDONLY | (fs.constants.O_NONBLOCK ?? 0),
   );
   try {
+    // Other hard links are allowed, as resolveLocalPath allows them.
+    if (!(await isOpenedInsideFileRoot(config, handle, filePath, false))) {
+      throw badRequestError(
+        `Path is outside the allowed directory (${config.fileRoot}); the filePath changed while it was being opened.`,
+      );
+    }
     const stat = await handle.stat();
     if (!stat.isFile()) throw badRequestError("s3_put_object filePath must be a regular file.");
     if (stat.size > MAX_INLINE_OBJECT_BYTES) throw inlineUploadLimitError(stat.size);
@@ -875,7 +859,7 @@ export function registerS3ObjectTools(
           : undefined;
 
         const body = safePath
-          ? await readSmallRegularFile(safePath)
+          ? await readSmallRegularFile(safePath, config)
           : Buffer.from(args.content!, "base64");
         const size = body.byteLength;
         if (size > MAX_INLINE_OBJECT_BYTES) {

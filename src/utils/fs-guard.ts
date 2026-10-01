@@ -52,6 +52,57 @@ export function isInsideFileRoot(config: B2Config, realPath: string): boolean {
   return isInside(realRoot, realPath);
 }
 
+const ignoreError = (): undefined => undefined;
+
+/**
+ * Report whether a file opened from a validated path is inside the sandbox
+ * root; Node has no `openat`, so the path can change before the open. Uses
+ * `/proc` on Linux when readable; otherwise the path is resolved again, which
+ * narrows that window without closing it.
+ *
+ * @param config - Server configuration carrying the optional sandbox root.
+ * @param handle - Descriptor opened from `openedPath`.
+ * @param openedPath - Path the descriptor was opened from.
+ * @param requireSoleLink - When the path is resolved again, require one hard link.
+ *
+ * @returns True when no sandbox root is configured or the file is inside it.
+ *
+ * @throws FileAccessError when the configured sandbox root does not exist.
+ */
+export async function isOpenedInsideFileRoot(
+  config: B2Config,
+  handle: fs.promises.FileHandle,
+  openedPath: string,
+  requireSoleLink: boolean,
+): Promise<boolean> {
+  if (!config.fileRoot) return true;
+  let realPath: string | undefined;
+  if (process.platform === "linux") {
+    realPath = await fs.promises.readlink(`/proc/self/fd/${handle.fd}`).catch(ignoreError);
+  }
+  if (realPath === undefined) {
+    // bigint: NTFS file IDs can exceed 2^53.
+    const opened = await handle.stat({ bigint: true });
+    // JS resolver, as for the root: the native one can differ (macOS case, SUBST).
+    let resolved: string | undefined;
+    try {
+      resolved = fs.realpathSync(openedPath);
+    } catch {
+      resolved = undefined;
+    }
+    const onDisk = resolved
+      ? await fs.promises.stat(resolved, { bigint: true }).catch(ignoreError)
+      : undefined;
+    if (
+      onDisk?.dev === opened.dev &&
+      onDisk.ino === opened.ino &&
+      (!requireSoleLink || opened.nlink === 1n)
+    )
+      realPath = resolved;
+  }
+  return realPath !== undefined && isInsideFileRoot(config, realPath);
+}
+
 /**
  * Map a (possibly not-yet-existing) absolute path onto the real path of its
  * nearest existing ancestor. This resolves symlinks in the existing portion —
