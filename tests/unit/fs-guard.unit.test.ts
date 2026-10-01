@@ -178,7 +178,7 @@ describe("isOpenedInsideFileRoot", () => {
     expect(await openedInside(baseConfig, secret, secret, true)).toBe(true);
   });
 
-  // Linux reads the location from /proc; other platforms derive it from the path.
+  // Linux uses /proc when readable; other platforms resolve the path again.
   for (const platform of new Set([process.platform, "darwin"])) {
     it(`accepts a file opened inside a symlinked root (${platform} check)`, async () => {
       const rootLink = path.join(outside, "root-link");
