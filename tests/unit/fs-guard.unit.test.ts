@@ -268,13 +268,13 @@ describe("isOpenedInsideFileRoot", () => {
     const onDiskIno = 2n ** 60n;
     const fakeStat = (ino: bigint, options?: fs.StatOptions) =>
       options?.bigint ? { dev: 1n, ino, nlink: 1n } : { dev: 1, ino: Number(ino), nlink: 1 };
+    const handle = await fs.promises.open(file, "r");
+    handle.stat = (async (options?: fs.StatOptions) =>
+      fakeStat(openedIno, options)) as unknown as typeof handle.stat;
     const statSpy = vi
       .spyOn(fs.promises, "stat")
       .mockImplementation((async (_p: fs.PathLike, options?: fs.StatOptions) =>
         fakeStat(onDiskIno, options)) as unknown as typeof fs.promises.stat);
-    const handle = await fs.promises.open(file, "r");
-    handle.stat = (async (options?: fs.StatOptions) =>
-      fakeStat(openedIno, options)) as unknown as typeof handle.stat;
     try {
       const inside = await asPlatform("darwin", () =>
         isOpenedInsideFileRoot(cfg, handle, fs.realpathSync(file), false),
