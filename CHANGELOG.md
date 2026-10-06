@@ -25,7 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tool and prompt contracts are unchanged apart from the recorded SDK versions.
   (#481)
 - Bumped dev and build tooling: `vercel` `59.26.0` → `60.1.3`, `@vercel/node`
-  `13.0.0` → `16.0.1`, `wrangler` `4.138.0` → `4.146.0`,
+  `13.0.0` → `16.0.1`, `wrangler` `4.138.0` → `4.146.0` with the direct `miniflare` pin moved to
+  `5.20261001.0-alpha` to stay on Wrangler's workerd release,
   `@modelcontextprotocol/inspector` `2.8.0` → `2.9.0`, `@biomejs/biome` `2.5.15`,
   `typescript-eslint` `8.71.0`, `eslint-plugin-tsdoc` `0.5.4`, and
   `@microsoft/tsdoc-config` `0.18.3`; re-pinned `github/codeql-action` to

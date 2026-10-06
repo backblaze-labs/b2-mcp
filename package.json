@@ -141,7 +141,7 @@
     "eslint-plugin-jsdoc": "64.5.4",
     "eslint-plugin-tsdoc": "0.5.4",
     "fast-check": "4.10.2",
-    "miniflare": "5.20260921.1-alpha",
+    "miniflare": "5.20261001.0-alpha",
     "semver": "7.8.5",
     "tsx": "4.23.15",
     "typedoc": "0.28.20",
