@@ -320,6 +320,36 @@ Tool-surface tests inspect the repository-owned registration registry, not SDK
 private fields. The registry is sorted by tool name and mirrors the public
 `registerTool()` calls made at server construction.
 
+## Local Fake Endpoint
+
+Protocol tests can drive the real built server against a local HTTPS fake with
+no real B2 credentials. The server normally trusts only `https` Backblaze hosts
+with no port, so a test-only override exists:
+
+- `B2_TEST_REALM` names one bare `https:` origin (host, optional port, no
+  userinfo, path, query, or fragment; the host must be neither an IP literal nor
+  `localhost`). It is read only when `NODE_ENV` is exactly `test`
+  (`src/utils/test-endpoint.ts`). Otherwise it is ignored. An open gate with a
+  malformed value throws instead of falling back.
+- With the gate open the SDK clients authorize against that realm, and the
+  native and S3 endpoint validators additionally accept that exact origin.
+  Production hosts and every other rule are unchanged; there is no wildcard or
+  suffix trust.
+- `test-support/fake-b2-endpoint.ts` serves the native API with the SDK's public
+  in-process `B2Simulator` transport and a minimal in-memory S3 handler
+  (put, head, get, list, copy, delete, multipart) on a loopback HTTPS socket.
+  The certificate is generated per run with the `openssl` CLI and is never
+  committed; the spawned server trusts it through `NODE_EXTRA_CA_CERTS`.
+- `test-support/loopback-dns-preload.cjs` (`node --require`) resolves the single
+  host in `B2_TEST_LOOPBACK_HOST` to `127.0.0.1`, because the SDK URL guard
+  refuses IP literals and `localhost`.
+
+`tests/protocol/basic-path.stdio.modern-protocol.test.ts` is the reference use.
+Fixture credentials must not overlap (the secret sanitizer redacts a key id that
+appears inside the key). The fake does not verify SigV4 signatures, enforce the
+5 MiB minimum part size, or model versioning, so it proves wiring and data
+integrity, not B2 semantics; keep those in the live suites.
+
 ## Deterministic Local Runtime Smoke
 
 The local runtime smoke is the credential-free startup check for clean

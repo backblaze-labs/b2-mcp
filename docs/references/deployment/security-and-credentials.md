@@ -103,6 +103,14 @@ Use a master key only for a separately reviewed Partner API case. The active
 Phase 1 B2 and S3-compatible tool surface is designed for non-master
 application keys.
 
+## Test-Only Endpoint Override
+
+`B2_TEST_REALM` exists only so the repository's own tests can point a built
+server at a local HTTPS fake (see `docs/TESTING.md`). Never set it in a
+deployment. It is read only when `NODE_ENV` is exactly `test`, so a production
+process ignores it. When honored it trusts one bare `https:` origin by exact
+match, and every other endpoint rule is unchanged.
+
 ## Environment Baseline
 
 Every hosted guide starts from this baseline:

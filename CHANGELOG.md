@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - `docs/TEST-COVERAGE-MAP.md`: snapshot map of the existing tests to a shared
   list of 38 B2 capabilities, with known gaps. (#469)
+- Test-only `B2_TEST_REALM` endpoint override and a local HTTPS fake endpoint,
+  so the built server can be driven in the protocol layer with no real
+  credentials. The override is inert unless `NODE_ENV=test`, trusts exactly one
+  `https:` origin, and is covered by a basic-path stdio test (bucket and object
+  round trip, multipart, `saveToPath`). (#469)
 
 ### Changed
 - Bumped the AWS SDK group (`@aws-sdk/client-s3`,
