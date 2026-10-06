@@ -8,8 +8,8 @@
   "mcpRevision": "2026-07-28",
   "sdk": {
     "@backblaze-labs/b2-sdk": "0.4.0",
-    "@modelcontextprotocol/client": "2.1.0",
-    "@modelcontextprotocol/server": "2.1.0"
+    "@modelcontextprotocol/client": "2.2.0",
+    "@modelcontextprotocol/server": "2.2.0"
   },
   "capabilities": null,
   "counts": {

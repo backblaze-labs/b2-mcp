@@ -1,6 +1,6 @@
 import { readFileSync } from "fs";
 import { join } from "path";
-import { listFiles, readJson, readLock, root } from "./support";
+import { listFiles, readJson, readLock, root, serverAcceptedByNodeAdapter } from "./support";
 
 describe("MCP SDK and protocol contract", () => {
   it("uses the reviewed SDK v2 package split without publishing the Node adapter", () => {
@@ -16,7 +16,8 @@ describe("MCP SDK and protocol contract", () => {
     const clientVersion = pkg.devDependencies["@modelcontextprotocol/client"];
 
     expect(serverVersion).toMatch(/^\d+\.\d+\.\d+$/);
-    expect(nodeVersion).toBe(serverVersion);
+    // The Node adapter ships on its own cadence: it must declare compatibility with the pinned server.
+    expect(serverAcceptedByNodeAdapter(serverVersion)).toBe(true);
     expect(clientVersion).toBe(serverVersion);
     expect(pkg.dependencies).not.toHaveProperty("@modelcontextprotocol/node");
     expect(lock.packages["node_modules/@modelcontextprotocol/server"]?.version).toBe(serverVersion);

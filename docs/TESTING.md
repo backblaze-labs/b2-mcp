@@ -362,7 +362,7 @@ isolated temporary home/cache, fake B2 credentials, and the same no-network
 server guard as `smoke:client`.
 
 The non-interactive external client smoke uses the official
-`@modelcontextprotocol/client@2.1.0` SDK over stdio. It sends fake test
+`@modelcontextprotocol/client@2.2.0` SDK over stdio. It sends fake test
 credentials, sets `B2_REGISTER_ALL_TOOLS=true` so startup performs no B2
 capability-discovery network call, validates `server/discover`, server
 name/version, instructions, and `tools/list`, then compares the returned surface

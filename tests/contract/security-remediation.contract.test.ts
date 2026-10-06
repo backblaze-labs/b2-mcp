@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { createRequire } from "module";
-import { listFiles, readLock, root } from "./support";
+import { listFiles, readLock, root, serverAcceptedByNodeAdapter } from "./support";
 
 type PackageLock = {
   packages: Record<
@@ -68,9 +68,9 @@ describe("security dependency policy", () => {
 
   it("keeps the MCP Node adapter out of the published graph while pinning the dev SDK split", () => {
     expect(pkg.dependencies).not.toHaveProperty("@modelcontextprotocol/node");
-    expect(pkg.devDependencies["@modelcontextprotocol/node"]).toBe(
-      pkg.dependencies["@modelcontextprotocol/server"],
-    );
+    expect(
+      serverAcceptedByNodeAdapter(pkg.dependencies["@modelcontextprotocol/server"] as string),
+    ).toBe(true);
     expect(lock.packages["node_modules/@modelcontextprotocol/node"]?.version).toBe(
       pkg.devDependencies["@modelcontextprotocol/node"],
     );

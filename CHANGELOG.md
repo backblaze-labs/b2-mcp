@@ -17,13 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `@smithy/types` `4.17.2` → `4.19.0` so the S3 peer adapter's command/type
   boundary stays on a single version. `@smithy/core` is re-resolved to `3.35.1`
   so the committed lockfile matches a clean consumer install. (#481)
-- Bumped `@modelcontextprotocol/server` `2.0.0` → `2.1.0`, with the dev-only
-  `@modelcontextprotocol/client` `2.1.0` and `@modelcontextprotocol/node`
-  `2.1.0` kept on the same version as the repository requires. `2.1.0` is the
-  newest release published for all three packages; `server` 2.2.0 is held back
-  until `@modelcontextprotocol/node` ships a matching release. The generated
-  tool and prompt contracts are unchanged apart from the recorded SDK versions.
-  (#481)
+- Bumped `@modelcontextprotocol/server` `2.0.0` → `2.2.0` and the dev-only
+  `@modelcontextprotocol/client` to `2.2.0`, which also clears the client OAuth
+  advisory (GHSA-6qxp-vccf-f47h). The dev-only `@modelcontextprotocol/node`
+  adapter stays on `2.1.0`, its newest release whose peer range accepts
+  `server` 2.2.x, and the SDK contract tests now check that declared peer range
+  instead of an identical version string. The generated tool and prompt
+  contracts are unchanged apart from the recorded SDK versions. (#481)
 - Bumped dev and build tooling: `vercel` `59.26.0` → `60.1.3`, `@vercel/node`
   `13.0.0` → `16.0.1`, `wrangler` `4.138.0` → `4.146.0` with the direct `miniflare` pin moved to
   `5.20261001.0-alpha` to stay on Wrangler's workerd release,
