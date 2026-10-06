@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `docs/TEST-COVERAGE-MAP.md`: snapshot map of the existing tests to a shared
   list of 38 B2 capabilities, with known gaps. (#469)
 
+### Security
+- Patched transitive dev-toolchain advisories via pinned pnpm overrides:
+  `brace-expansion`, `proxy-addr`, `smol-toml`, and `source-map-js`, in both the
+  root and `deploy/customer-hosted` lockfiles. `braces` and `node-forge` have no
+  patched release on npm yet and remain flagged by the supply-chain audit.
+
 ## [0.2.2] - 2026-09-29
 
 ### Added
