@@ -33,6 +33,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `v4.38.2`. `eslint` stays on `10.9.1` because `10.11.0` pulls the
   quarantined `@cacheable/*` packages. (#481)
 
+### Security
+- Patched transitive dev-toolchain advisories via pinned pnpm overrides:
+  `brace-expansion`, `proxy-addr`, `smol-toml`, `source-map-js`, and `sharp`
+  (the librsvg advisory fixed in 0.35.5), in both the root and
+  `deploy/customer-hosted` lockfiles. `braces` and `node-forge` have no patched
+  release on npm yet and remain flagged by the supply-chain audit. (#481)
+
 ## [0.2.2] - 2026-09-29
 
 ### Added
