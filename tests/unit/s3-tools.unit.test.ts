@@ -369,6 +369,34 @@ describe("s3_put_object and s3_get_object", () => {
     expect(command.input.StorageClass).toBeUndefined();
   });
 
+  it("maps serverSideEncryption AES256 to the PutObjectCommand ServerSideEncryption input", async () => {
+    const result = await callTool(server, "s3_put_object", {
+      bucket: "bucket-b",
+      key: "k",
+      content: Buffer.from("hello").toString("base64"),
+      contentType: "text/plain",
+      serverSideEncryption: "AES256",
+    });
+
+    expect(result.isError).toBeFalsy();
+    const command = sendSpy.mock.calls[0][0];
+    expect(command.constructor.name).toBe("PutObjectCommand");
+    expect(command.input.ServerSideEncryption).toBe("AES256");
+  });
+
+  it("leaves ServerSideEncryption unset when serverSideEncryption is omitted", async () => {
+    const result = await callTool(server, "s3_put_object", {
+      bucket: "bucket-b",
+      key: "k",
+      content: Buffer.from("hello").toString("base64"),
+      contentType: "text/plain",
+    });
+
+    expect(result.isError).toBeFalsy();
+    const command = sendSpy.mock.calls[0][0];
+    expect(command.input.ServerSideEncryption).toBeUndefined();
+  });
+
   it("returns small inline objects as base64", async () => {
     const lastModified = new Date("2026-01-01T00:00:00.000Z");
     sendSpy.mockResolvedValueOnce({
