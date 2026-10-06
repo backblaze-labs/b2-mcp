@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `docs/TEST-COVERAGE-MAP.md`: snapshot map of the existing tests to a shared
+  list of 38 B2 capabilities, with known gaps. (#469)
+
 ## [0.2.2] - 2026-09-29
 
 ### Added
