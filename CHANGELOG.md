@@ -38,7 +38,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `brace-expansion`, `proxy-addr`, `smol-toml`, `source-map-js`, and `sharp`
   (the librsvg advisory fixed in 0.35.5), in both the root and
   `deploy/customer-hosted` lockfiles. `braces` and `node-forge` have no patched
-  release on npm yet and remain flagged by the supply-chain audit. (#481)
+  release on npm yet, so they carry time-boxed `audit-policy.json` exceptions
+  (dev-only, expiring 2026-11-05). (#481)
 
 ## [0.2.2] - 2026-09-29
 
