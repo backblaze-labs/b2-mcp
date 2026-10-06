@@ -51,15 +51,15 @@ overrides:
   '@vercel/node>undici': '>=6.28.1 <7'
   '@vercel/python-analysis>js-yaml': 4.3.2
   '@vercel/python-analysis>minimatch': 10.2.3
-  '@vercel/python-analysis>smol-toml': 1.7.1
+  '@vercel/python-analysis>smol-toml': '>=1.8.1 <2'
   '@vercel/remix-builder>path-to-regexp': 6.3.0
-  '@vercel/rust>smol-toml': 1.7.1
+  '@vercel/rust>smol-toml': '>=1.8.1 <2'
   '@vercel/static-config>ajv': 8.18.0
   esbuild: 0.28.1
   vercel>path-to-regexp: 8.4.0
-  vercel>smol-toml: 1.7.1
+  vercel>smol-toml: '>=1.8.1 <2'
   vercel>undici: '>=6.28.1 <7'
-  'minimatch@3.1.5>brace-expansion': 1.1.18
+  'minimatch@3.1.5>brace-expansion': 1.1.21
   nanoid: 3.3.18
   # Dev-only transitive deps (via ajv/vercel); force patched builds off the
   # fast-uri host-confusion/SSRF advisories (incl. GHSA-58mr-gqgx-xq4g, fixed in
@@ -71,8 +71,9 @@ overrides:
   ip-address: '>=10.5.1 <11'
   # Dev-only transitive dep via miniflare/wrangler; force the patched build off
   # the libheif advisories bundled in sharp <0.35.4 (GHSA-g89c-p67h-r497,
-  # GHSA-2jg2-4ch7-h545). The Worker smoke never invokes sharp's image codecs.
-  'miniflare>sharp': '>=0.35.4'
+  # GHSA-2jg2-4ch7-h545) and the librsvg advisory fixed in 0.35.5
+  # (GHSA-wq5f-xc86-pv6w). The Worker smoke never invokes sharp's image codecs.
+  'miniflare>sharp': '>=0.35.5'
   # Dev-only transitive deps via vercel build tooling and wrangler/miniflare. The
   # undici WebSocket permessage-deflate DoS (GHSA-3wwx-pv8p-q78v) also affects the
   # 7.x (<7.29.1) and 8.x (<8.10.2) lines; a stray vulnerable smol-toml 1.5.2
@@ -81,7 +82,18 @@ overrides:
   # are undici-7 consumers) — patched, without an unreviewed cross-major upgrade.
   'undici@7': '>=7.29.1 <8'
   'undici@8': '>=8.10.2 <9'
-  'smol-toml@1': '>=1.7.1'
+  'smol-toml@1': '>=1.8.1 <2'
   # Dev-only transitive dep via typedoc; force the patched build off the
   # markdown-it linkify quadratic-time DoS (GHSA-253c-mchw-3w2r, fixed 14.3.1).
   markdown-it: '>=14.3.1 <15'
+  # Dev-only transitive deps; force patched builds off the brace-expansion
+  # recursion/quadratic-time DoS advisories (GHSA-q2hr-2g5m-vwhr,
+  # GHSA-qhr7-859c-m2p7, GHSA-6j4f-fj2g-mc7p; fixed 5.0.12 / 1.1.21), the
+  # proxy-addr IPv4-mapped IPv6 trust-subnet spoofing advisory
+  # (GHSA-jqcg-44mw-7w3h, fixed 2.0.8, via the inspector's express), the
+  # smol-toml parseKey quadratic-time advisory (GHSA-r4xh-jqrq-34v2, fixed
+  # 1.8.1), and the source-map-js indexed-section DoS (GHSA-68fv-2mgg-jv7q,
+  # fixed 1.2.2). Each is bounded to its current major.
+  'brace-expansion@5': '>=5.0.12 <6'
+  proxy-addr: '>=2.0.8 <3'
+  source-map-js: '>=1.2.2 <2'

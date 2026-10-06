@@ -181,7 +181,7 @@ Use the shared security contract first:
 - Repository baseline commit: `74f2e5a`
 - Package version: `0.2.2`
 - MCP revision: 2026-07-28
-- Node runtime: Vercel Node Functions built by locked `@vercel/node@13.0.0`
+- Node runtime: Vercel Node Functions built by locked `@vercel/node@16.0.1`
   with `vercel.json` explicitly pinning the reviewed `nodejs24.x` Function
   runtime; CI validates generated `.vercel/output` runtime configs against
   that pin and runs local tests on Node `22.23.1`, `24`, and `26`

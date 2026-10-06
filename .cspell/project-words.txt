@@ -98,4 +98,6 @@ gqgx
 pvrc
 smol
 linkify
+librsvg
+vccf
 mchw

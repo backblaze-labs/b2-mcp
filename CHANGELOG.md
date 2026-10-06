@@ -11,6 +11,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `docs/TEST-COVERAGE-MAP.md`: snapshot map of the existing tests to a shared
   list of 38 B2 capabilities, with known gaps. (#469)
 
+### Changed
+- Bumped the AWS SDK group (`@aws-sdk/client-s3`,
+  `@aws-sdk/s3-request-presigner`) `3.1125.0` → `3.1144.0` and realigned
+  `@smithy/types` `4.17.2` → `4.19.0` so the S3 peer adapter's command/type
+  boundary stays on a single version. `@smithy/core` is re-resolved to `3.35.1`
+  so the committed lockfile matches a clean consumer install. (#481)
+- Bumped `@modelcontextprotocol/server` `2.0.0` → `2.2.0` and the dev-only
+  `@modelcontextprotocol/client` to `2.2.0`, which also clears the client OAuth
+  advisory (GHSA-6qxp-vccf-f47h). The dev-only `@modelcontextprotocol/node`
+  adapter stays on `2.1.0`, its newest release whose peer range accepts
+  `server` 2.2.x, and the SDK contract tests now check that declared peer range
+  instead of an identical version string. The generated tool and prompt
+  contracts are unchanged apart from the recorded SDK versions. (#481)
+- Bumped dev and build tooling: `vercel` `59.26.0` → `60.1.3`, `@vercel/node`
+  `13.0.0` → `16.0.1`, `wrangler` `4.138.0` → `4.146.0` with the direct `miniflare` pin moved to
+  `5.20261001.0-alpha` to stay on Wrangler's workerd release,
+  `@modelcontextprotocol/inspector` `2.8.0` → `2.9.0`, `@biomejs/biome` `2.5.15`,
+  `typescript-eslint` `8.71.0`, `eslint-plugin-tsdoc` `0.5.4`, and
+  `@microsoft/tsdoc-config` `0.18.3`; re-pinned `github/codeql-action` to
+  `v4.38.2`. `eslint` stays on `10.9.1` because `10.11.0` pulls the
+  quarantined `@cacheable/*` packages. (#481)
+
+### Security
+- Patched transitive dev-toolchain advisories via pinned pnpm overrides:
+  `brace-expansion`, `proxy-addr`, `smol-toml`, `source-map-js`, and `sharp`
+  (the librsvg advisory fixed in 0.35.5), in both the root and
+  `deploy/customer-hosted` lockfiles. `braces` and `node-forge` have no patched
+  release on npm yet, so they carry time-boxed `audit-policy.json` exceptions
+  (dev-only, expiring 2026-11-05). (#481)
+
 ## [0.2.2] - 2026-09-29
 
 ### Added

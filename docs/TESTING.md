@@ -346,7 +346,7 @@ credential-free evidence. External clients are advisory evidence until they
 prove deterministic enough for CI.
 
 Manual Inspector compatibility is pinned by the repository wrapper to
-`@modelcontextprotocol/inspector@2.8.0`. That Inspector release requires
+`@modelcontextprotocol/inspector@2.9.0`. That Inspector release requires
 Node.js 22.19.0 or newer, so it is supplemental evidence for the patched Node
 22 LTS development/runtime pin. Install project dependencies, build from a
 non-serving checkout, then run the locked Inspector CLI through the wrapper:
@@ -362,7 +362,7 @@ isolated temporary home/cache, fake B2 credentials, and the same no-network
 server guard as `smoke:client`.
 
 The non-interactive external client smoke uses the official
-`@modelcontextprotocol/client@2.0.0` SDK over stdio. It sends fake test
+`@modelcontextprotocol/client@2.2.0` SDK over stdio. It sends fake test
 credentials, sets `B2_REGISTER_ALL_TOOLS=true` so startup performs no B2
 capability-discovery network call, validates `server/discover`, server
 name/version, instructions, and `tools/list`, then compares the returned surface

@@ -1,3 +1,84 @@
 {
-  "allowedAdvisories": []
+  "allowedAdvisories": [
+    {
+      "name": "braces",
+      "source": 1240992,
+      "maxSeverity": "high",
+      "isDirect": false,
+      "nodes": [
+        ".>@vercel/node>@vercel/static-config>ts-morph>@ts-morph/common>fast-glob>micromatch>braces",
+        ".>@vercel/node>ts-morph>@ts-morph/common>fast-glob>micromatch>braces",
+        ".>vercel>@vercel/backends>@vercel/static-config>ts-morph>@ts-morph/common>fast-glob>micromatch>braces",
+        ".>vercel>@vercel/backends>ts-morph>@ts-morph/common>fast-glob>micromatch>braces",
+        ".>vercel>@vercel/elysia>@vercel/node>@vercel/static-config>ts-morph>@ts-morph/common>fast-glob>micromatch>braces",
+        ".>vercel>@vercel/elysia>@vercel/node>ts-morph>@ts-morph/common>fast-glob>micromatch>braces",
+        ".>vercel>@vercel/elysia>@vercel/static-config>ts-morph>@ts-morph/common>fast-glob>micromatch>braces",
+        ".>vercel>@vercel/express>@vercel/cervel>@vercel/backends>@vercel/static-config>ts-morph>@ts-morph/common>fast-glob>micromatch>braces",
+        ".>vercel>@vercel/express>@vercel/cervel>@vercel/backends>ts-morph>@ts-morph/common>fast-glob>micromatch>braces",
+        ".>vercel>@vercel/express>@vercel/node>@vercel/static-config>ts-morph>@ts-morph/common>fast-glob>micromatch>braces",
+        ".>vercel>@vercel/express>@vercel/node>ts-morph>@ts-morph/common>fast-glob>micromatch>braces",
+        ".>vercel>@vercel/express>@vercel/static-config>ts-morph>@ts-morph/common>fast-glob>micromatch>braces",
+        ".>vercel>@vercel/express>ts-morph>@ts-morph/common>fast-glob>micromatch>braces",
+        ".>vercel>@vercel/fastify>@vercel/node>@vercel/static-config>ts-morph>@ts-morph/common>fast-glob>micromatch>braces",
+        ".>vercel>@vercel/fastify>@vercel/node>ts-morph>@ts-morph/common>fast-glob>micromatch>braces",
+        ".>vercel>@vercel/fastify>@vercel/static-config>ts-morph>@ts-morph/common>fast-glob>micromatch>braces",
+        ".>vercel>@vercel/h3>@vercel/node>@vercel/static-config>ts-morph>@ts-morph/common>fast-glob>micromatch>braces",
+        ".>vercel>@vercel/h3>@vercel/node>ts-morph>@ts-morph/common>fast-glob>micromatch>braces",
+        ".>vercel>@vercel/h3>@vercel/static-config>ts-morph>@ts-morph/common>fast-glob>micromatch>braces",
+        ".>vercel>@vercel/hono>@vercel/node>@vercel/static-config>ts-morph>@ts-morph/common>fast-glob>micromatch>braces",
+        ".>vercel>@vercel/hono>@vercel/node>ts-morph>@ts-morph/common>fast-glob>micromatch>braces",
+        ".>vercel>@vercel/hono>@vercel/static-config>ts-morph>@ts-morph/common>fast-glob>micromatch>braces",
+        ".>vercel>@vercel/hono>ts-morph>@ts-morph/common>fast-glob>micromatch>braces",
+        ".>vercel>@vercel/hydrogen>@vercel/static-config>ts-morph>@ts-morph/common>fast-glob>micromatch>braces",
+        ".>vercel>@vercel/hydrogen>ts-morph>@ts-morph/common>fast-glob>micromatch>braces",
+        ".>vercel>@vercel/koa>@vercel/node>@vercel/static-config>ts-morph>@ts-morph/common>fast-glob>micromatch>braces",
+        ".>vercel>@vercel/koa>@vercel/node>ts-morph>@ts-morph/common>fast-glob>micromatch>braces",
+        ".>vercel>@vercel/koa>@vercel/static-config>ts-morph>@ts-morph/common>fast-glob>micromatch>braces",
+        ".>vercel>@vercel/nestjs>@vercel/node>@vercel/static-config>ts-morph>@ts-morph/common>fast-glob>micromatch>braces",
+        ".>vercel>@vercel/nestjs>@vercel/node>ts-morph>@ts-morph/common>fast-glob>micromatch>braces",
+        ".>vercel>@vercel/nestjs>@vercel/static-config>ts-morph>@ts-morph/common>fast-glob>micromatch>braces",
+        ".>vercel>@vercel/node>@vercel/static-config>ts-morph>@ts-morph/common>fast-glob>micromatch>braces",
+        ".>vercel>@vercel/node>ts-morph>@ts-morph/common>fast-glob>micromatch>braces",
+        ".>vercel>@vercel/redwood>@vercel/static-config>ts-morph>@ts-morph/common>fast-glob>micromatch>braces",
+        ".>vercel>@vercel/redwood>ts-morph>@ts-morph/common>fast-glob>micromatch>braces",
+        ".>vercel>@vercel/remix-builder>@vercel/static-config>ts-morph>@ts-morph/common>fast-glob>micromatch>braces",
+        ".>vercel>@vercel/remix-builder>ts-morph>@ts-morph/common>fast-glob>micromatch>braces",
+        ".>vercel>@vercel/static-build>@vercel/static-config>ts-morph>@ts-morph/common>fast-glob>micromatch>braces",
+        ".>vercel>@vercel/static-build>ts-morph>@ts-morph/common>fast-glob>micromatch>braces"
+      ],
+      "effects": [],
+      "package": {
+        "version": "3.0.3",
+        "integrity": "sha512-yQbXgO/OSZVD2IsiLlro+7Hf6Q18EJrKSEsdoMzKePKXct3gvD8oLcOQdIzGupr5Fj+EDe8gO/lxc1BzfMpxvA=="
+      },
+      "via": {
+        "path": "node_modules/micromatch",
+        "name": "micromatch",
+        "version": "4.0.8",
+        "dependencyRange": "3.0.3"
+      },
+      "expires": "2026-11-05",
+      "reason": "GHSA-vfj7-8cjw-p6xm: no patched braces release is published (needs >=3.0.4 per advisory). Reached only through the dev-only vercel/@vercel/node build tooling (ts-morph > fast-glob > micromatch); not in the published package or any runtime dependency. Time-boxed: re-check for a fixed release or newer vercel before expiry."
+    },
+    {
+      "name": "node-forge",
+      "source": 1240912,
+      "maxSeverity": "high",
+      "isDirect": false,
+      "nodes": [".>@anthropic-ai/mcpb>node-forge"],
+      "effects": [],
+      "package": {
+        "version": "1.4.0",
+        "integrity": "sha512-LarFH0+6VfriEhqMMcLX2F7SwSXeWwnEAJEsYm5QKWchiVYVvJyV9v7UDvUv+w5HO23ZpQTXDv/GxdDdMyOuoQ=="
+      },
+      "via": {
+        "path": "node_modules/@anthropic-ai/mcpb",
+        "name": "@anthropic-ai/mcpb",
+        "version": "2.1.2",
+        "dependencyRange": "1.4.0"
+      },
+      "expires": "2026-11-05",
+      "reason": "GHSA-86w9-cpqp-85rv: no patched node-forge release is reachable (needs >=1.4.1); @anthropic-ai/mcpb 2.1.2, its latest, pins 1.4.0. Dev-only MCPB packaging tooling; not in the published package or any runtime dependency. Time-boxed: re-check for a fixed mcpb release before expiry."
+    }
+  ]
 }
