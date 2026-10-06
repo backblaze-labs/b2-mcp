@@ -7,9 +7,9 @@ const WORKER_SOURCE_GRAPH_FILES_BUDGET = 75;
 // 946,261 bytes after the atomic saveToPath write path (#449).
 const WORKER_SOURCE_GRAPH_BYTES_BUDGET = 948_000;
 const WORKER_EMITTED_FILES_BUDGET = 8;
-// Remeasured for the @aws-sdk/client-s3 3.1125.0 bump: the Cloudflare dry run
-// now emits 10,140,148 bytes. Budget set to 10,400,000 for modest headroom.
-const WORKER_EMITTED_TOTAL_BYTES_BUDGET = 10_400_000;
+// Remeasured for the @aws-sdk/client-s3 3.1144.0 bump: the Cloudflare dry run
+// now emits 10,447,871 bytes. Budget set to 10,700,000 for modest headroom.
+const WORKER_EMITTED_TOTAL_BYTES_BUDGET = 10_700_000;
 const WORKER_UPLOAD_SCRIPT_BYTES_BUDGET = 3_000_000;
 const WORKER_UPLOAD_SCRIPT_GZIP_BYTES_BUDGET = 600_000;
 const IMPORT_PATTERN =

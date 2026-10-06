@@ -363,10 +363,10 @@ describe("CI workflow policy", () => {
     expect(workflowSecurity).toContain("actions: read");
     expect(workflowSecurity).toContain("security-events: write");
     expect(workflowSecurity).toContain(
-      "github/codeql-action/init@1c5b675653bb5c22dbe9b12b556ec555138e09fd",
+      "github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2",
     );
     expect(workflowSecurity).toContain(
-      "github/codeql-action/analyze@1c5b675653bb5c22dbe9b12b556ec555138e09fd",
+      "github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2",
     );
     expect(workflowSecurity).toContain("upload: never");
     expect(workflowSecurity).toContain("persist-credentials: false");
@@ -410,7 +410,7 @@ describe("CI workflow policy", () => {
     expect(uploadIdx).toBeGreaterThan(-1);
     expect(countGateIdx).toBeLessThan(uploadIdx);
     expect(workflowSecurity).toContain(
-      "github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd",
+      "github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2",
     );
     expect(workflowSecurity).toContain("category: zizmor-offline");
 
