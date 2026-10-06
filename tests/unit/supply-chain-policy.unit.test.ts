@@ -1794,6 +1794,7 @@ describe("supply-chain audit policy", () => {
         PATH: `${dir}${process.platform === "win32" ? ";" : ":"}${process.env.PATH ?? ""}`,
         NODE_ENV: "test",
         B2_MCP_AUDIT_POLICY_JSON: JSON.stringify(exceptionPolicy),
+        B2_MCP_AUDIT_TODAY: "2026-09-30",
       };
       delete env.B2_MCP_AUDIT_REPORT_JSON;
       const result = spawnSync(process.execPath, ["scripts/audit-supply-chain.mjs"], {
@@ -1842,6 +1843,7 @@ describe("supply-chain audit policy", () => {
         NODE_ENV: "test",
         B2_MCP_FAKE_NPM_STATE: state,
         B2_MCP_AUDIT_POLICY_JSON: JSON.stringify(exceptionPolicy),
+        B2_MCP_AUDIT_TODAY: "2026-09-30",
       };
       delete env.B2_MCP_AUDIT_REPORT_JSON;
       const result = spawnSync(process.execPath, ["scripts/audit-supply-chain.mjs"], {
