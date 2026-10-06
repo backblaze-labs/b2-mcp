@@ -11,6 +11,7 @@ open the smallest document that covers the task at hand.
 - [`DEPLOY.md`](DEPLOY.md) - hosted deployment matrix and provider guide index.
 - [`SECURITY.md`](SECURITY.md) - engineering security map.
 - [`TESTING.md`](TESTING.md) - deterministic, live, package, and eval test policy.
+- [`TEST-COVERAGE-MAP.md`](TEST-COVERAGE-MAP.md) - snapshot map of tests to B2 capabilities, with known gaps.
 - [`EVALS.md`](EVALS.md) - LLM eval harness runbook.
 
 ## Filename Convention

@@ -232,6 +232,12 @@ Biome is also the only formatter. `pnpm run format` and `pnpm run format:check`
 cover Biome-supported file types; Markdown and YAML files are not part of the
 automated format gate.
 
+## Coverage Map
+
+[`TEST-COVERAGE-MAP.md`](TEST-COVERAGE-MAP.md) maps the existing tests to a shared list of
+38 B2 capabilities and records known gaps. It is a snapshot; regenerate it when
+tools or tests change.
+
 ## File Naming Convention
 
 Test files must use these suffixes so scripts do not depend on accidental paths:
