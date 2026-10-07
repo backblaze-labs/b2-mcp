@@ -6,7 +6,7 @@
 schema_version: 1
 project: Backblaze B2 MCP Server
 slug: b2-mcp
-updated: "2026-09-13"
+updated: "2026-10-07"
 
 canonical:
   repo: https://github.com/backblaze-labs/b2-mcp
@@ -30,6 +30,17 @@ references:
     status: live
     tags: [announcement, launch]
     summary: Company launch announcement for the B2 MCP server.
+
+  - id: b2-mcp-docs
+    title: Connect AI clients to cloud storage operations using the B2 MCP server
+    url: https://www.backblaze.com/docs/en/cloud-storage-connect-ai-clients-to-cloud-storage-operations-using-b2-mcp-server
+    type: docs
+    source: Backblaze Docs
+    official: true
+    added: "2026-10-07"
+    status: live
+    tags: [setup, mcp-clients]
+    summary: Official Backblaze documentation for connecting AI clients to B2 through the MCP server.
 
   - id: api-docs
     title: API reference (TypeDoc)
@@ -116,6 +127,15 @@ references:
     added: "2026-09-13"
     status: live
     summary: Published and featured listing on the FreeMCP remote-server directory.
+
+  - id: awesome-mcp-servers
+    title: Backblaze B2 MCP server on punkpeye/awesome-mcp-servers
+    url: https://github.com/punkpeye/awesome-mcp-servers/pull/13422
+    type: listing
+    source: awesome-mcp-servers
+    added: "2026-10-07"
+    status: live
+    summary: Listing PR merged 2026-09-07; the list also feeds the Glama directory.
 
   - id: awesome-remote-mcp-servers
     title: Backblaze B2 MCP Server on awesome-remote-mcp-servers
