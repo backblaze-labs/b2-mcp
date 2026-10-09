@@ -20,6 +20,7 @@ import {
 } from "@modelcontextprotocol/server";
 import { AsyncLocalStorage } from "async_hooks";
 import * as http from "http";
+import { assertLoopbackEndpointOverrideUnset } from "./utils/loopback-endpoint.js";
 import {
   type AuthenticatedIncomingMessage,
   type CredentialProvider,
@@ -895,6 +896,7 @@ function responseWithCleanup(response: Response, cleanup: () => Promise<void>): 
  * @returns Runtime-neutral B2 MCP fetch handler.
  */
 export function createB2McpFetchHandler(options: HttpPipelineOptions = {}): B2McpFetchHandler {
+  assertLoopbackEndpointOverrideUnset();
   const sessions = new Map<string, never>();
   const inFlight = createInFlightLimiter();
   // Fresh header-credential verification is bounded by its own limiter instance

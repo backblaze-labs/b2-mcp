@@ -39,6 +39,7 @@ import { CliUsageError, helpText, parseCliArgs } from "./cli.js";
 import { CredentialResolutionError, DISCOVERY_MODE_CREDENTIAL } from "./credentials.js";
 import * as serverModule from "./server.js";
 import { parseIntEnv, PortUsageError } from "./utils/config.js";
+import { activateLoopbackEndpointOverride } from "./utils/loopback-endpoint.js";
 import { flushLogsSync, initLogging, logger } from "./utils/logger.js";
 import { bootstrapErrorMessage } from "./utils/secret-sanitizer.js";
 import { VERSION } from "./version.js";
@@ -152,6 +153,7 @@ function enterStdioDiscoveryModeIfNeeded(env: NodeJS.ProcessEnv = process.env): 
  */
 export async function startStdio(): Promise<void> {
   initLogging();
+  activateLoopbackEndpointOverride();
   const discoveryMode = enterStdioDiscoveryModeIfNeeded();
   const config = serverModule.loadConfig();
   const capabilityTimeoutMs = stdioCapabilityFetchTimeoutMs();

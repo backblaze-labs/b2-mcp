@@ -79,6 +79,7 @@ import type {
 } from "../utils/types.js";
 import { DEFAULT_BOUNDED_WORKER_CONCURRENCY, forEachBounded } from "../utils/concurrency.js";
 import { isTestRuntime } from "../utils/runtime.js";
+import { isLoopbackEndpointUrl } from "../utils/loopback-endpoint.js";
 import { abortError } from "../utils/named-error.js";
 import { codedError } from "../utils/errors.js";
 import { durableSecretPostCreateFailure } from "../utils/secret-sink.js";
@@ -1377,6 +1378,7 @@ function normalizeEventNotificationRule(
  * @returns `null` when the URL is trusted, otherwise a human-readable reason.
  */
 export function validateB2ApiUrl(raw: string): string | null {
+  if (isLoopbackEndpointUrl(raw)) return null;
   let parsed: URL;
   try {
     parsed = new URL(raw);

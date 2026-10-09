@@ -103,6 +103,14 @@ Use a master key only for a separately reviewed Partner API case. The active
 Phase 1 B2 and S3-compatible tool surface is designed for non-master
 application keys.
 
+## Test-Only Endpoint Override
+
+`B2_MCP_TEST_ENDPOINT_OVERRIDE` exists only so a test harness can point a local
+stdio server at a simulator on `http://127.0.0.1` or `http://[::1]` (see
+`docs/TESTING.md`). Never set it in a deployment: the HTTP and serverless entry
+points refuse to start while it is set, and it is refused when `NODE_ENV` is
+`production`.
+
 ## Environment Baseline
 
 Every hosted guide starts from this baseline:

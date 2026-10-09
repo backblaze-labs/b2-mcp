@@ -68,7 +68,7 @@ of the default gate.
 | `api.backup` | none | Out of scope; see [`product-specs/v1-scope.md`](product-specs/v1-scope.md). | no |
 | `client.sync` (directory sync) | none | Not offered by the server. | no |
 | `client.auth_persistence` (stored credentials) | none (credentials come from the environment, request headers, or OAuth) | Authentication is tested in `auth`, `http-transport`, and the OAuth suites, but the capability as defined for client tools is not mapped here. | unknown |
-| `client.simulator` (local B2 simulator) | none | A test concern, not a server feature. | n/a |
+| `client.simulator` (local B2 simulator) | none | A test concern, not a server feature. The stdio server can be pointed at a local simulator with `B2_MCP_TEST_ENDPOINT_OVERRIDE`; see [`TESTING.md`](TESTING.md#loopback-endpoint-override). | n/a |
 | `client.progress` (transfer progress reporting) | none | Not offered by the server. | no |
 | `surface.s3` (S3-compatible API surface) | all 19 `s3_*` tools | unit: `s3-tools`, `s3-objects-fixtures`, `s3-multipart-fixtures`, `s3-coverage`; contract: `tools-schema`, `sdk-adoption`; live: 15 of 19 tools are run in `b2.integration`. | A- |
 

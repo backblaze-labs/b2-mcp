@@ -29,6 +29,7 @@ import {
   isTimeoutError,
 } from "./utils/named-error.js";
 import { consumeRetryBudgetToken } from "./utils/retry.js";
+import { loopbackEndpointOrigin } from "./utils/loopback-endpoint.js";
 import { isTestRuntime } from "./utils/runtime.js";
 import { B2AuthResponse, B2Config } from "./utils/types.js";
 import { buildUserAgent } from "./utils/user-agent.js";
@@ -526,7 +527,15 @@ class SharedRetryBudgetTransport implements HttpTransport {
 }
 
 function lockUrlGuard(client: ManagedSdkClient, auth: AuthorizeAccountResponse): void {
+  // The SDK guard rejects IP-literal hosts once locked, so a loopback simulator
+  // keeps it permissive; the endpoint validators still pin the exact origin.
+  if (loopbackEndpointOrigin()) return;
   client.urlGuard?.setAllowedSuffixes(deriveAllowedSuffixes(auth.apiInfo.storageApi));
+}
+
+function loopbackRealmOption(): { realm?: string } {
+  const realm = loopbackEndpointOrigin();
+  return realm ? { realm } : {};
 }
 
 function defaultSdkClientFactory(config: B2Config): ManagedSdkClient {
@@ -541,6 +550,7 @@ function defaultSdkClientFactory(config: B2Config): ManagedSdkClient {
       }),
     ),
     retry: SDK_RETRY_OPTIONS,
+    ...loopbackRealmOption(),
   });
   return {
     client,
@@ -568,6 +578,7 @@ export function createDefaultPartnerClient(config: B2Config): SdkPartnerClient {
       }),
     ),
     retry: SDK_RETRY_OPTIONS,
+    ...loopbackRealmOption(),
   });
 }
 

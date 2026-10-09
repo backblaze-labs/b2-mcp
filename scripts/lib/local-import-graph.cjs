@@ -4,8 +4,8 @@ const { dirname, extname, resolve } = require("path");
 const WORKER_SOURCE_GRAPH_FILES_BUDGET = 75;
 // Headroom for the documented Worker source graph and dry-run output; emitted
 // budgets still guard the deployed artifact size explicitly. Remeasured at
-// 946,261 bytes after the atomic saveToPath write path (#449).
-const WORKER_SOURCE_GRAPH_BYTES_BUDGET = 948_000;
+// 951,271 bytes after the loopback endpoint override module (#469).
+const WORKER_SOURCE_GRAPH_BYTES_BUDGET = 953_000;
 const WORKER_EMITTED_FILES_BUDGET = 8;
 // Remeasured for the @aws-sdk/client-s3 3.1144.0 bump: the Cloudflare dry run
 // now emits 10,447,871 bytes. Budget set to 10,700,000 for modest headroom.

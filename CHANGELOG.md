@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - `docs/TEST-COVERAGE-MAP.md`: snapshot map of the existing tests to a shared
   list of 38 B2 capabilities, with known gaps. (#469)
+- Opt-in `B2_MCP_TEST_ENDPOINT_OVERRIDE` so a test harness can point the stdio
+  server at a local B2 simulator over `http://127.0.0.1` or `http://[::1]`. It
+  trusts only that one origin, is refused on the HTTP and serverless entry
+  points and when `NODE_ENV=production`, and changes nothing when unset. (#469)
 
 ### Changed
 - Bumped the AWS SDK group (`@aws-sdk/client-s3`,

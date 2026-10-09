@@ -7,6 +7,10 @@ import { helpText } from "../../src/cli";
 import { CredentialResolutionError } from "../../src/credentials";
 import * as packageRoot from "../../src/index";
 import * as serverModule from "../../src/server";
+import {
+  loopbackEndpointOrigin,
+  resetLoopbackEndpointOverrideForTests,
+} from "../../src/utils/loopback-endpoint";
 import * as loggerModule from "../../src/utils/logger";
 import type { B2Config } from "../../src/utils/types";
 import { VERSION } from "../../src/version";
@@ -26,7 +30,7 @@ const credentialEnvKeys = [
   "B2_MASTER_KEY",
 ] as const;
 
-const transportEnvKeys = ["B2_MCP_TRANSPORT"] as const;
+const transportEnvKeys = ["B2_MCP_TRANSPORT", "B2_MCP_TEST_ENDPOINT_OVERRIDE"] as const;
 const bootstrapEnvKeys = [
   "B2_STDIO_CAPABILITY_TIMEOUT_MS",
   "B2_REGISTER_ALL_TOOLS",
@@ -142,6 +146,27 @@ describe("stdio entry point", () => {
     options?.onerror(new Error("stdio failed"));
     expect(createServer).toHaveBeenCalledWith(config, ["listBuckets"]);
     expect(warn).toHaveBeenCalledWith({ err: "stdio failed" }, "mcp.stdio.error");
+  });
+
+  it("activates the loopback endpoint override only when the variable is set", async () => {
+    vi.spyOn(serverModule, "loadConfig").mockReturnValue(testConfig());
+    vi.spyOn(serverModule, "fetchCapabilities").mockResolvedValue(null);
+    vi.mocked(stdioTransport.serveStdio).mockImplementation(
+      () =>
+        ({ close: vi.fn(async () => undefined) }) as ReturnType<typeof stdioTransport.serveStdio>,
+    );
+    vi.spyOn(loggerModule.logger, "warn").mockImplementation(() => undefined);
+    try {
+      await startStdio();
+      expect(loopbackEndpointOrigin()).toBeNull();
+
+      process.env.B2_MCP_TEST_ENDPOINT_OVERRIDE = "http://127.0.0.1:4566";
+      await startStdio();
+      expect(loopbackEndpointOrigin()).toBe("http://127.0.0.1:4566");
+    } finally {
+      delete process.env.B2_MCP_TEST_ENDPOINT_OVERRIDE;
+      resetLoopbackEndpointOverrideForTests();
+    }
   });
 
   it("enters credential-less discovery mode and enumerates the full surface", async () => {
@@ -497,6 +522,26 @@ describe("CLI fatal-error handler", () => {
 });
 
 describe("executable CLI entry point", () => {
+  it("refuses the loopback endpoint override when NODE_ENV is production", () => {
+    const result = runEntrypoint([], {
+      NODE_ENV: "production",
+      B2_APPLICATION_KEY_ID: "test-key-id",
+      B2_APPLICATION_KEY: "test-key-secret",
+      B2_MCP_TEST_ENDPOINT_OVERRIDE: "http://127.0.0.1:4566",
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("B2_MCP_TEST_ENDPOINT_OVERRIDE is refused");
+  });
+
+  it("refuses the loopback endpoint override on the HTTP transport", () => {
+    const result = runEntrypoint(["http", "--port", "3999"], {
+      B2_MCP_TEST_ENDPOINT_OVERRIDE: "http://127.0.0.1:4566",
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("only supported on the stdio transport");
+  });
   it("prints usage errors with help and exit code 2", () => {
     const result = runEntrypoint(["--transport", "sse"]);
 

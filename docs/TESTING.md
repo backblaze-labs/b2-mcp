@@ -320,6 +320,37 @@ Tool-surface tests inspect the repository-owned registration registry, not SDK
 private fields. The registry is sorted by tool name and mirrors the public
 `registerTool()` calls made at server construction.
 
+## Loopback Endpoint Override
+
+A test harness can point the stdio server at a local B2 simulator with the
+opt-in `B2_MCP_TEST_ENDPOINT_OVERRIDE` environment variable. The server
+normally trusts only `https` Backblaze hosts without a port, so without this
+variable nothing changes.
+
+```bash
+B2_MCP_TEST_ENDPOINT_OVERRIDE=http://127.0.0.1:8080 \
+B2_APPLICATION_KEY_ID=test-key-id B2_APPLICATION_KEY=test-key \
+B2_REGION=us-west-004 node dist/index.js
+```
+
+- The value must be a bare `http://127.0.0.1` or `http://[::1]` origin, with an
+  optional port. `localhost`, other hosts, `https`, userinfo, paths, queries,
+  and fragments are refused at startup. The B2 SDK accepts a plaintext
+  authorize realm only for loopback IP literals.
+- That origin receives the authorize request and is the only extra origin the
+  native API and S3 endpoint validators accept; a different port or loopback
+  host is still rejected. S3 requests are signed with `B2_REGION` because the
+  simulator's S3 address has no region host.
+- It is honored only by the stdio transport. The HTTP and serverless entry
+  points refuse to start while it is set, and it is refused when `NODE_ENV` is
+  `production`. Both failures are startup errors, never a silent fallback.
+- Startup logs an `endpoint.loopback_override.active` warning.
+- While it is active the SDK host guard stays permissive, so use it only with a
+  simulator you started yourself.
+
+Unit coverage is in `tests/unit/loopback-endpoint.unit.test.ts` and the
+executable cases in `tests/unit/index.unit.test.ts`.
+
 ## Deterministic Local Runtime Smoke
 
 The local runtime smoke is the credential-free startup check for clean

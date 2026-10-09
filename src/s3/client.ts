@@ -17,6 +17,7 @@ import { runWithMcpRequestSignal } from "../request-context.js";
 import { logger } from "../utils/logger.js";
 import { timeoutError } from "../utils/named-error.js";
 import { codedError } from "../utils/errors.js";
+import { isLoopbackEndpointUrl, loopbackEndpointOrigin } from "../utils/loopback-endpoint.js";
 import { PRODUCT_NAME, productVersion } from "../version.js";
 import {
   createB2S3PeerClient,
@@ -32,7 +33,7 @@ import {
  * @returns HTTPS endpoint origin for the region.
  */
 export function expectedB2S3Endpoint(region: string): string {
-  return `https://s3.${region}.backblazeb2.com`;
+  return loopbackEndpointOrigin() ?? `https://s3.${region}.backblazeb2.com`;
 }
 
 const B2_S3_ENDPOINT_HOST = /^s3\.([a-z0-9-]+)\.backblazeb2\.com$/i;
@@ -82,6 +83,7 @@ export type B2S3ApiUrlValidation = B2S3ExactRegionValidation | B2S3AuthorizedReg
  * @returns `null` when valid, otherwise a human-readable failure reason.
  */
 export function validateB2S3ApiUrl(raw: string, validation: B2S3ApiUrlValidation): string | null {
+  if (isLoopbackEndpointUrl(raw)) return null;
   let parsed: URL;
   try {
     parsed = new URL(raw);
@@ -104,7 +106,9 @@ export function validateB2S3ApiUrl(raw: string, validation: B2S3ApiUrlValidation
   return null;
 }
 
-function authorizedB2S3Endpoint(raw: string): AuthorizedB2S3Endpoint {
+function authorizedB2S3Endpoint(raw: string, fallbackRegion: string): AuthorizedB2S3Endpoint {
+  // A loopback simulator has no region host; sign with the configured region.
+  if (isLoopbackEndpointUrl(raw)) return { endpoint: new URL(raw).origin, region: fallbackRegion };
   const reason = validateB2S3ApiUrl(raw, { mode: "authorized-region" });
   // Coded, not bare: a deliberate refusal, not an internal fault.
   if (reason) {
@@ -274,7 +278,7 @@ export function buildB2S3ClientConfig(
   options: B2S3ClientOptions = {},
 ): B2S3PeerClientConfig {
   const endpoint = options.authorizedS3ApiUrl
-    ? authorizedB2S3Endpoint(options.authorizedS3ApiUrl)
+    ? authorizedB2S3Endpoint(options.authorizedS3ApiUrl, config.region)
     : {
         endpoint: expectedB2S3Endpoint(config.region),
         region: config.region,
