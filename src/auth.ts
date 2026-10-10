@@ -30,6 +30,7 @@ import {
 } from "./utils/named-error.js";
 import { consumeRetryBudgetToken } from "./utils/retry.js";
 import { isTestRuntime } from "./utils/runtime.js";
+import { testEndpointOrigin } from "./utils/test-endpoint.js";
 import { B2AuthResponse, B2Config } from "./utils/types.js";
 import { buildUserAgent } from "./utils/user-agent.js";
 
@@ -529,6 +530,11 @@ function lockUrlGuard(client: ManagedSdkClient, auth: AuthorizeAccountResponse):
   client.urlGuard?.setAllowedSuffixes(deriveAllowedSuffixes(auth.apiInfo.storageApi));
 }
 
+function testRealmOption(): { realm?: string; allowCustomAuthorizeRealm?: true } {
+  const realm = testEndpointOrigin();
+  return realm ? { realm, allowCustomAuthorizeRealm: true } : {};
+}
+
 function defaultSdkClientFactory(config: B2Config): ManagedSdkClient {
   const urlGuard = new UrlGuard();
   const client = new SdkB2Client({
@@ -541,6 +547,7 @@ function defaultSdkClientFactory(config: B2Config): ManagedSdkClient {
       }),
     ),
     retry: SDK_RETRY_OPTIONS,
+    ...testRealmOption(),
   });
   return {
     client,
@@ -568,6 +575,7 @@ export function createDefaultPartnerClient(config: B2Config): SdkPartnerClient {
       }),
     ),
     retry: SDK_RETRY_OPTIONS,
+    ...testRealmOption(),
   });
 }
 
