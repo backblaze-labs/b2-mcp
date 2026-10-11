@@ -115,7 +115,7 @@
     "@aws-sdk/client-s3": "3.1144.0",
     "@aws-sdk/s3-request-presigner": "3.1144.0",
     "@backblaze-labs/b2-sdk": "0.4.0",
-    "@modelcontextprotocol/server": "2.2.0",
+    "@modelcontextprotocol/server": "2.3.1",
     "@smithy/types": "4.19.0",
     "jose": "6.2.12",
     "opossum": "10.0.0",
