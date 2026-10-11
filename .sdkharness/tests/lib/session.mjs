@@ -1,0 +1,232 @@
+// Shared plumbing for the sdkharness checks: the built stdio server driven over MCP as a client
+// would, the one result line, and the helpers the conformance scenarios share.
+// See ../../README.md. Run by ../run-health and ../run-conformance.
+import { createHash, randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { request } from "node:https";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { Client } from "@modelcontextprotocol/client";
+import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
+
+export const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../../..");
+
+/** Start the built server (dist/index.js) and connect an MCP client to it over stdio. */
+export async function startServer(clientName) {
+  // Only the simulator's fixed test credential and the test-only endpoint reach the server.
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [
+      "--require",
+      join(ROOT, "test-support/loopback-dns-preload.cjs"),
+      join(ROOT, "dist/index.js"),
+    ],
+    cwd: ROOT,
+    env: {
+      PATH: process.env.PATH ?? "",
+      NODE_ENV: "test",
+      NODE_EXTRA_CA_CERTS: process.env.SDKHARNESS_SIMULATOR_CA,
+      B2_TEST_REALM: process.env.SDKHARNESS_REALM,
+      B2_TEST_LOOPBACK_HOST: process.env.SDKHARNESS_FIXTURE_HOST,
+      B2_APPLICATION_KEY_ID: "test-key-id",
+      B2_APPLICATION_KEY: "test-key",
+      B2_REGION: "us-west-004",
+      B2_SECRET_SINK: "off",
+    },
+    stderr: "inherit",
+  });
+  const client = new Client({ name: clientName, version: "1.0.0" });
+  await client.connect(transport);
+  return client;
+}
+
+/** Call a tool; a tool error throws with the server's text, a JSON body is parsed. */
+export async function call(client, name, args) {
+  const out = await client.callTool({ name, arguments: args });
+  const text = out.content.map((part) => part.text ?? "").join("");
+  if (out.isError) throw new Error(`${name}: ${text}`);
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { text };
+  }
+}
+
+/** Call a tool that must be refused; returns the error text (what the caller would read). */
+export async function callRefused(client, name, args) {
+  const out = await client.callTool({ name, arguments: args });
+  const text = out.content.map((part) => part.text ?? "").join("");
+  if (!out.isError) throw new Error(`${name} was accepted; the call must be refused`);
+  return text;
+}
+
+/**
+ * Run one conformance scenario and print the one result line. Every bucket made through
+ * `s.bucket()` is emptied and deleted afterwards, on failure too.
+ */
+export async function runScenario(id, scenario) {
+  const result = (outcome, reason) =>
+    console.log(`SDKHARNESS_RESULT\tconformance\t${id}\t${outcome}\t${reason}`);
+  const s = { current: "start", buckets: [] };
+  let client;
+  try {
+    client = await startServer(`sdkharness-conformance-${id}`);
+    s.client = client;
+    s.step = (name) => {
+      s.current = name;
+    };
+    s.call = (name, args) => call(client, name, args);
+    s.refused = (name, args) => callRefused(client, name, args);
+    s.forget = (bucket) => {
+      s.buckets.splice(s.buckets.indexOf(bucket), 1);
+    };
+    s.bucket = async (options = {}) => {
+      const name = `sdkharness-conf-${randomBytes(5).toString("hex")}`;
+      const created = await call(client, "b2_create_bucket", {
+        bucketName: name,
+        bucketType: "allPrivate",
+        ...options,
+      });
+      const bucket = { name, id: created.bucketId, created };
+      s.buckets.push(bucket);
+      return bucket;
+    };
+    await scenario(s);
+    result("PASS", "-");
+  } catch (error) {
+    const why = String(error?.message ?? error).replace(/\s+/g, " ");
+    result("FAIL", `${s.current} -- ${why.slice(0, 300)}`);
+    process.exitCode = 1;
+  } finally {
+    if (client) {
+      for (const bucket of s.buckets) await removeBucket(client, bucket);
+      await client.close().catch(() => undefined);
+    }
+  }
+}
+
+// Best effort: the simulator is discarded with the run, so a leftover is a NOTE, not a verdict.
+async function removeBucket(client, bucket) {
+  try {
+    let page = {};
+    do {
+      page = await call(client, "s3_list_object_versions", { bucket: bucket.name, ...page });
+      for (const v of [...(page.versions ?? []), ...(page.deleteMarkers ?? [])]) {
+        await call(client, "s3_delete_object", {
+          bucket: bucket.name,
+          key: v.Key,
+          versionId: v.VersionId,
+          confirm: true,
+        });
+      }
+      page = page.isTruncated
+        ? { keyMarker: page.nextKeyMarker, versionIdMarker: page.nextVersionIdMarker }
+        : null;
+    } while (page);
+    await call(client, "b2_delete_bucket", { bucketId: bucket.id, confirm: true });
+  } catch (error) {
+    console.error(`NOTE cleanup of ${bucket.name} failed: ${String(error?.message ?? error)}`);
+  }
+}
+
+// ---- assertions ---------------------------------------------------------------------------
+
+export function check(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
+export function eq(what, expected, actual) {
+  if (JSON.stringify(expected) !== JSON.stringify(actual)) {
+    throw new Error(`${what}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
+  }
+}
+
+// ---- data -----------------------------------------------------------------------------------
+
+/** Deterministic, incompressible-looking bytes: a different seed gives different content. */
+export function payload(length, seed) {
+  const out = Buffer.alloc(length);
+  let block = createHash("sha256").update(`sdkharness-${seed}`).digest();
+  for (let i = 0; i < length; i += block.length) {
+    block.copy(out, i, 0, Math.min(block.length, length - i));
+    block = createHash("sha256").update(block).digest();
+  }
+  return out;
+}
+
+export const b64 = (bytes) => Buffer.from(bytes).toString("base64");
+export const unb64 = (text) => Buffer.from(text, "base64");
+
+// ---- object helpers (the s3_* tools) ------------------------------------------------------
+
+/** Upload through s3_put_object (it signs a content type, so one is always sent). */
+export async function put(s, bucket, key, bytes, options = {}) {
+  await s.call("s3_put_object", {
+    bucket: bucket.name,
+    key,
+    content: b64(bytes),
+    contentType: options.contentType ?? "application/octet-stream",
+    ...(options.metadata ? { metadata: options.metadata } : {}),
+  });
+}
+
+/** Every version and delete marker under a prefix, newest first per key, across pages. */
+export async function versionsOf(s, bucket, prefix) {
+  const versions = [];
+  const markers = [];
+  let page = {};
+  do {
+    const out = await s.call("s3_list_object_versions", {
+      bucket: bucket.name,
+      ...(prefix ? { prefix } : {}),
+      ...page,
+    });
+    versions.push(...(out.versions ?? []));
+    markers.push(...(out.deleteMarkers ?? []));
+    page = out.isTruncated
+      ? { keyMarker: out.nextKeyMarker, versionIdMarker: out.nextVersionIdMarker }
+      : null;
+  } while (page);
+  return { versions, markers };
+}
+
+/** Read an object inline and return the decoded bytes. */
+export async function readBytes(s, bucket, key, extra = {}) {
+  const out = await s.call("s3_get_object", { bucket: bucket.name, key, ...extra });
+  return { ...out, bytes: unb64(out.content ?? "") };
+}
+
+// ---- a presigned URL, as a caller outside the server would use it ---------------------------
+
+/**
+ * PUT or GET a presigned URL from this process. The URL names the simulator's fixture host,
+ * which only the server process resolves; here the connection goes to the loopback listener
+ * directly and trusts only the simulator's own certificate.
+ */
+export function viaPresignedUrl(method, url, body, headers = {}) {
+  const target = new URL(url);
+  const loopback = new URL(process.env.SDKHARNESS_SIMULATOR_HTTPS_URL);
+  return new Promise((resolve, reject) => {
+    const req = request(
+      {
+        method,
+        hostname: target.hostname,
+        port: target.port,
+        path: `${target.pathname}${target.search}`,
+        ca: readFileSync(process.env.SDKHARNESS_SIMULATOR_CA),
+        lookup: (_host, options, done) =>
+          options?.all
+            ? done(null, [{ address: loopback.hostname, family: 4 }])
+            : done(null, loopback.hostname, 4),
+        headers: body ? { "content-length": body.length, ...headers } : headers,
+      },
+      (res) => {
+        const chunks = [];
+        res.on("data", (chunk) => chunks.push(chunk));
+        res.on("end", () => resolve({ status: res.statusCode, bytes: Buffer.concat(chunks) }));
+      },
+    );
+    req.on("error", reject);
+    req.end(body);
+  });
+}
