@@ -12,7 +12,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 export const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../../..");
 
 /** Start the built server (dist/index.js) and connect an MCP client to it over stdio. */
-export async function startServer(clientName) {
+export async function startServer(clientName, extraEnv = {}) {
   // Only the simulator's fixed test credential and the test-only endpoint reach the server.
   const transport = new StdioClientTransport({
     command: process.execPath,
@@ -32,6 +32,7 @@ export async function startServer(clientName) {
       B2_APPLICATION_KEY: "test-key",
       B2_REGION: "us-west-004",
       B2_SECRET_SINK: "off",
+      ...extraEnv,
     },
     stderr: "inherit",
   });
@@ -62,21 +63,27 @@ export async function callRefused(client, name, args) {
 
 /**
  * Run one conformance scenario and print the one result line. Every bucket made through
- * `s.bucket()` is emptied and deleted afterwards, on failure too.
+ * `s.bucket()` is emptied and deleted afterwards, on failure too. `options.env` adds to the
+ * server's environment (a scenario that needs a setting the default lacks says why, in its file).
+ * `s.cleanup(fn)` registers a step that runs before the buckets are removed (for example to lift
+ * a legal hold, which blocks a delete); it runs on failure too and its own failure is a NOTE.
  */
-export async function runScenario(id, scenario) {
+export async function runScenario(id, scenario, options = {}) {
   const result = (outcome, reason) =>
     console.log(`SDKHARNESS_RESULT\tconformance\t${id}\t${outcome}\t${reason}`);
-  const s = { current: "start", buckets: [] };
+  const s = { current: "start", buckets: [], cleanups: [] };
   let client;
   try {
-    client = await startServer(`sdkharness-conformance-${id}`);
+    client = await startServer(`sdkharness-conformance-${id}`, options.env);
     s.client = client;
     s.step = (name) => {
       s.current = name;
     };
     s.call = (name, args) => call(client, name, args);
     s.refused = (name, args) => callRefused(client, name, args);
+    s.cleanup = (fn) => {
+      s.cleanups.push(fn);
+    };
     s.forget = (bucket) => {
       s.buckets.splice(s.buckets.indexOf(bucket), 1);
     };
@@ -99,6 +106,11 @@ export async function runScenario(id, scenario) {
     process.exitCode = 1;
   } finally {
     if (client) {
+      for (const fn of s.cleanups.reverse()) {
+        await fn().catch((error) =>
+          console.error(`NOTE cleanup step failed: ${String(error?.message ?? error)}`),
+        );
+      }
       for (const bucket of s.buckets) await removeBucket(client, bucket);
       await client.close().catch(() => undefined);
     }
@@ -112,12 +124,15 @@ async function removeBucket(client, bucket) {
     do {
       page = await call(client, "s3_list_object_versions", { bucket: bucket.name, ...page });
       for (const v of [...(page.versions ?? []), ...(page.deleteMarkers ?? [])]) {
-        await call(client, "s3_delete_object", {
+        // A governance-retained version needs the bypass; one that is not retained ignores it.
+        const out = await call(client, "s3_delete_objects", {
           bucket: bucket.name,
-          key: v.Key,
-          versionId: v.VersionId,
+          objects: [{ key: v.Key, versionId: v.VersionId }],
+          bypassGovernance: true,
+          quiet: false,
           confirm: true,
         });
+        if (out.errors?.length) throw new Error(JSON.stringify(out.errors[0]));
       }
       page = page.isTruncated
         ? { keyMarker: page.nextKeyMarker, versionIdMarker: page.nextVersionIdMarker }
@@ -188,6 +203,31 @@ export async function versionsOf(s, bucket, prefix) {
       : null;
   } while (page);
   return { versions, markers };
+}
+
+/** A fresh listing of one bucket through b2_list_buckets, as the caller would read its settings. */
+export async function bucketInfo(s, bucket) {
+  const out = await s.call("b2_list_buckets", { bucketName: bucket.name });
+  eq(
+    "buckets listed by name",
+    [bucket.id],
+    out.buckets.map((b) => b.bucketId),
+  );
+  return out.buckets[0];
+}
+
+/** The version id (which is also the native file id) of the newest version of a key. */
+export async function newestVersionId(s, bucket, key) {
+  const { versions } = await versionsOf(s, bucket, key);
+  const mine = versions.filter((v) => v.Key === key);
+  check(mine.length > 0, `no version of ${key} is stored`);
+  return mine[0].VersionId;
+}
+
+/** Custom metadata without `src_last_modified_millis`, which B2's S3 layer adds to every upload. */
+export function userMetadata(metadata) {
+  const { src_last_modified_millis: _mtime, ...rest } = metadata ?? {};
+  return rest;
 }
 
 /** Read an object inline and return the decoded bytes. */
