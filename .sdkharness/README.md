@@ -37,7 +37,7 @@ tools, prints the result line and removes what a scenario made. Each scenario cr
 | `bucket.crud` | create, list, duplicate name refused, update type and info (revision grows), delete refused while non-empty, delete |
 | `files.server_side_copy` | `s3_copy_object`: bytes, size, type and metadata equal with COPY, REPLACE stores the new type and metadata, a chosen source version, across buckets, the source unchanged, a missing source refused |
 | `bucket.cors` | `corsRules` on create and update, read back from a fresh `b2_list_buckets`: replaced as a list, left alone when omitted, cleared by `[]`, a short rule name refused |
-| `bucket.lifecycle` | `lifecycleRules` on create and update, read back the same way; then `s3_put_bucket_lifecycle` sets and clears a rule |
+| `bucket.lifecycle` | `lifecycleRules` on create and update, read back the same way; then `s3_put_bucket_lifecycle` sets an Expiration rule with its `ExpiredObjectDeleteMarker` companion (B2 requires the pair), read back as one native rule, and clears it |
 | `bucket.replication_config` | source rules and key, destination key mapping, read back from a fresh listing; an unknown source key refused (the two keys come from `b2_create_key`, so this scenario starts its server with the local `B2_SECRET_SINK=inline`) |
 | `enc.sse_b2` | `serverSideEncryption: AES256` on `s3_put_object` and the bucket default `SSE-B2`: the stored object reports `AES256` (`s3_head_object`), a file from before the default does not, a copy into the bucket does |
 | `lock.bucket_default` | Object Lock on at create or later and never off, default retention set and read back, a new upload protected (delete refused), an older file not, cleared |

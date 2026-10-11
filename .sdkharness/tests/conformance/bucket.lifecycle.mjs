@@ -7,10 +7,9 @@
 // empty list leaves none.
 // https://www.backblaze.com/apidocs/b2-update-bucket https://www.backblaze.com/docs/cloud-storage-lifecycle-rules
 // The S3 path is asserted last, through the same fresh listing (B2 keeps one set of rules for both
-// APIs): a rule put with s3_put_bucket_lifecycle for a prefix is listed with that prefix, and an
-// empty rule list clears them. The simulator's S3 layer answers lifecycle calls with 501
-// NotImplemented at the pin, so this step fails there, with that reason; the native steps before it
-// have passed by then. A property a rule leaves out is "treated as having a null value" (the lifecycle
+// APIs): an Expiration rule put with s3_put_bucket_lifecycle is listed as one native rule with that
+// prefix, and an empty rule list clears them. Real B2 refuses an Expiration Days rule unless a
+// second rule with the same prefix sets ExpiredObjectDeleteMarker, so the step sends that pair. A property a rule leaves out is "treated as having a null value" (the lifecycle
 // page), so the delete-only and hide-only rules leave the other one out.
 import { bucketInfo, check, eq, runScenario } from "../lib/session.mjs";
 
@@ -90,14 +89,23 @@ await runScenario("bucket.lifecycle", async (s) => {
         filter: { prefix: "s3tmp/" },
         expiration: { days: 5 },
       },
+      {
+        // Real B2 rejects an Expiration Days rule (400 MalformedXML) unless a second rule with
+        // the same prefix sets ExpiredObjectDeleteMarker.
+        id: "expire-tmp-marker",
+        status: "Enabled",
+        filter: { prefix: "s3tmp/" },
+        expiration: { expiredObjectDeleteMarker: true },
+      },
     ],
     confirm: true,
   });
   const viaS3 = await bucketInfo(s, plain);
-  check(
-    viaS3.lifecycleRules.some((r) => r.fileNamePrefix === "s3tmp/"),
-    `no rule for the prefix s3tmp/ is listed after s3_put_bucket_lifecycle: ${JSON.stringify(viaS3.lifecycleRules)}`,
-  );
+  // B2 keeps one native rule for the pair: the Expiration days become daysFromUploadingToHiding.
+  const s3Rules = viaS3.lifecycleRules.filter((r) => r.fileNamePrefix === "s3tmp/");
+  eq("native rules for the prefix s3tmp/ after s3_put_bucket_lifecycle", 1, s3Rules.length);
+  eq("days from uploading to hiding", 5, s3Rules[0].daysFromUploadingToHiding);
+  eq("rules listed after s3_put_bucket_lifecycle", 1, viaS3.lifecycleRules.length);
 
   s.step("s3_put_bucket_lifecycle with no rules clears them");
   await s.call("s3_put_bucket_lifecycle", { bucket: plain.name, rules: [], confirm: true });
