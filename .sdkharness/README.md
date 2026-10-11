@@ -5,7 +5,7 @@
 assertions in `tests/`; the harness builds this checkout, starts a fresh local B2 simulator,
 and retains and reports the evidence.
 
-Scenarios so far: `health/golden-path` and eight `conformance` scenarios (below). `tests/run-health` runs
+Scenarios so far: `health/golden-path` and seventeen `conformance` scenarios (below). `tests/run-health` runs
 `tests/health/golden-path.mjs`, which starts the built stdio server (`dist/index.js`), drives
 it over MCP as a client would, and authorizes, uploads a small object (`s3_put_object`),
 downloads it and compares the bytes (`s3_get_object`), lists it (`s3_list_objects_v2`),
@@ -35,6 +35,19 @@ tools, prints the result line and removes what a scenario made. Each scenario cr
 | `files.delete_version` | one version deleted by id: gone from the listing and by id, no delete marker, the other version survives |
 | `files.hide` | the `partial` cell: `s3_delete_object` without a version id inserts a delete marker, the name leaves the listing, the earlier version still reads by id; no hide tool exists |
 | `bucket.crud` | create, list, duplicate name refused, update type and info (revision grows), delete refused while non-empty, delete |
+| `files.server_side_copy` | `s3_copy_object`: bytes, size, type and metadata equal with COPY, REPLACE stores the new type and metadata, a chosen source version, across buckets, the source unchanged, a missing source refused |
+| `bucket.cors` | `corsRules` on create and update, read back from a fresh `b2_list_buckets`: replaced as a list, left alone when omitted, cleared by `[]`, a short rule name refused |
+| `bucket.lifecycle` | `lifecycleRules` on create and update, read back the same way; then `s3_put_bucket_lifecycle` sets and clears a rule |
+| `bucket.replication_config` | source rules and key, destination key mapping, read back from a fresh listing; an unknown source key refused (the two keys come from `b2_create_key`, so this scenario starts its server with the local `B2_SECRET_SINK=inline`) |
+| `enc.sse_b2` | `serverSideEncryption: AES256` on `s3_put_object` and the bucket default `SSE-B2`: the stored object reports `AES256` (`s3_head_object`), a file from before the default does not, a copy into the bucket does |
+| `lock.bucket_default` | Object Lock on at create or later and never off, default retention set and read back, a new upload protected (delete refused), an older file not, cleared |
+| `lock.per_file_retention` | `b2_update_file_retention`: the delete of that version is refused, extending needs no bypass, shortening or clearing without it is refused, clearing with it lets the delete through |
+| `lock.legal_hold` | `b2_update_file_legal_hold`: the delete is refused, the governance bypass does not lift it, a hold and a retention are independent, off lets the delete through |
+| `lock.bypass_governance` | `bypassGovernance` on `s3_delete_objects` and `b2_update_file_retention`: refused without, done with; not a way past a legal hold; `s3_delete_object` has no such input |
+
+The server has no tool that reads a file's retention or legal hold back, so the `lock.*` scenarios read them
+from what the delete does (B2 enforces them there) and use the update's own answer only as a second witness.
+Compliance mode is not exercised: a version under it cannot be removed, so the bucket could not be cleaned up.
 
 A failing scenario prints one `SDKHARNESS_RESULT ... FAIL` line with the step and the reason.
 
