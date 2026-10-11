@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# sdkharness conformance for this checkout: one capability per call, named by SDKHARNESS_SCENARIO.
+# Every conformance row of ../tests.tsv points here. See ../README.md.
+set -u
+
+LEVEL=conformance
+SCENARIO="${SDKHARNESS_SCENARIO:-}"
+HERE="$(cd "$(dirname "$0")" && pwd -P)"
+ROOT="$(cd "$HERE/../.." && pwd -P)"
+result() { printf 'SDKHARNESS_RESULT\t%s\t%s\t%s\t%s\n' "$LEVEL" "${SCENARIO:--}" "$1" "$2"; }
+fail() { result FAIL "$1"; exit 1; }
+
+[ "${SDKHARNESS_TEST_LEVEL:-}" = "$LEVEL" ] || fail 'configuration: unexpected contract identity'
+case "$SCENARIO" in
+  files.upload|files.download_content|files.download_by_id|files.metadata|files.list|files.delete_version|files.hide|bucket.crud) ;;
+  *) fail 'configuration: unknown conformance scenario' ;;
+esac
+[[ "${SDKHARNESS_SIMULATOR_HTTPS_URL:-}" =~ ^https://127\.0\.0\.1:([0-9]{1,5})/?$ ]] \
+  || fail 'configuration: SDKHARNESS_SIMULATOR_HTTPS_URL must be an IPv4 loopback HTTPS origin'
+port="${BASH_REMATCH[1]}"
+[ -f "${SDKHARNESS_SIMULATOR_CA:-}" ] || fail 'configuration: SDKHARNESS_SIMULATOR_CA is not a file'
+command -v node >/dev/null 2>&1 || { result SKIP 'missing-runtime: no node on PATH'; exit 0; }
+[ -f "$ROOT/dist/index.js" ] || fail 'configuration: dist/index.js is missing (run pnpm run build)'
+
+# The server reaches the simulator only through the test-only endpoint override, as in run-health.
+# The check makes its own sdkharness-conf-* buckets and removes them, so no B2_BUCKET_NAME is used.
+export SDKHARNESS_FIXTURE_HOST=b2-simulator-loopback.backblaze.net
+export SDKHARNESS_REALM="https://$SDKHARNESS_FIXTURE_HOST:$port"
+exec node "$HERE/conformance/$SCENARIO.mjs"

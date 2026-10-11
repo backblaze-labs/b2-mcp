@@ -5,7 +5,7 @@
 assertions in `tests/`; the harness builds this checkout, starts a fresh local B2 simulator,
 and retains and reports the evidence.
 
-One scenario so far: `health/golden-path`, the customer golden path. `tests/run-health` runs
+Scenarios so far: `health/golden-path` and eight `conformance` scenarios (below). `tests/run-health` runs
 `tests/health/golden-path.mjs`, which starts the built stdio server (`dist/index.js`), drives
 it over MCP as a client would, and authorizes, uploads a small object (`s3_put_object`),
 downloads it and compares the bytes (`s3_get_object`), lists it (`s3_list_objects_v2`),
@@ -16,14 +16,36 @@ then prints one result line:
 SDKHARNESS_RESULT	health	golden-path	PASS	-
 ```
 
+## Conformance
+
+`tests/run-conformance` runs one capability per call, named by `SDKHARNESS_SCENARIO`; every
+conformance row in `tests.tsv` points at it. Each scenario is a program in `tests/conformance/`
+that drives the built stdio server over MCP and asserts what B2's documentation says happens
+(each file cites its pages). They share `tests/lib/session.mjs`, which starts the server, calls
+tools, prints the result line and removes what a scenario made. Each scenario creates its own
+`sdkharness-conf-*` bucket through `b2_create_bucket` and deletes everything it made, on failure too.
+
+| Scenario | What it asserts |
+|---|---|
+| `files.upload` | `s3_put_object`: bytes, size, content type and custom metadata read back, listed, an unusual key; the `partial` boundary (over 1 MiB inline is refused and stores nothing, and a presigned PutObject URL is minted for it); an empty object |
+| `files.download_content` | `s3_get_object`: bytes, headers, a range, `saveToPath`, a missing key is 404 |
+| `files.download_by_id` | `versionId` reads each version as itself, the key alone reads the newest, an unknown id reads nothing |
+| `files.metadata` | `s3_head_object`: size, type, custom metadata, version id, an older version, a missing key is 404 |
+| `files.list` | prefix, key order, paging by `maxKeys`, delimiter folders, `startAfter`, versions newest first |
+| `files.delete_version` | one version deleted by id: gone from the listing and by id, no delete marker, the other version survives |
+| `files.hide` | the `partial` cell: `s3_delete_object` without a version id inserts a delete marker, the name leaves the listing, the earlier version still reads by id; no hide tool exists |
+| `bucket.crud` | create, list, duplicate name refused, update type and info (revision grows), delete refused while non-empty, delete |
+
+A failing scenario prints one `SDKHARNESS_RESULT ... FAIL` line with the step and the reason.
+
 ## What the check can and cannot reach
 
-- **Only the loopback simulator.** `run-health` refuses any `SDKHARNESS_SIMULATOR_HTTPS_URL`
-  that is not `https://127.0.0.1:<port>`. The server reaches it through the test-only
-  endpoint override (`NODE_ENV=test`, `B2_TEST_REALM`; see `docs/TESTING.md`) at the fixture
-  host `b2-simulator-loopback.backblaze.net`, which `test-support/loopback-dns-preload.cjs`
-  resolves to `127.0.0.1` inside the server process only, trusting the simulator's
-  certificate (`SDKHARNESS_SIMULATOR_CA`).
+- **Only the loopback simulator.** `run-health` and `run-conformance` refuse any
+  `SDKHARNESS_SIMULATOR_HTTPS_URL` that is not `https://127.0.0.1:<port>`. The server reaches it
+  through the test-only endpoint override (`NODE_ENV=test`, `B2_TEST_REALM`; see `docs/TESTING.md`)
+  at the fixture host `b2-simulator-loopback.backblaze.net`, which
+  `test-support/loopback-dns-preload.cjs` resolves to `127.0.0.1` inside the server process only,
+  trusting the simulator's certificate (`SDKHARNESS_SIMULATOR_CA`).
 - **Only the simulator's fixed test credential** (`test-key-id` / `test-key`, in the source).
   The server gets an explicit environment; no ambient `B2_*` variable reaches it.
 - **No build.** The harness runs `pnpm install --frozen-lockfile` and `pnpm run build` in a
@@ -32,8 +54,8 @@ SDKHARNESS_RESULT	health	golden-path	PASS	-
 
 ## Run it by hand
 
-Requires a build and a simulator (`backblaze-labs/b2-simulator`) with a bucket named
-`sdkharness-healthcheck`:
+Requires a build and a simulator (`backblaze-labs/b2-simulator`). Health also needs a bucket named
+`sdkharness-healthcheck`; conformance makes its own:
 
 ```bash
 pnpm install --frozen-lockfile && pnpm run build
@@ -42,4 +64,9 @@ SDKHARNESS_SIMULATOR_HTTPS_URL=https://127.0.0.1:<port> \
 SDKHARNESS_SIMULATOR_CA=<simulator>/bin/simulator/loopback-cert.pem \
 B2_BUCKET_NAME=sdkharness-healthcheck \
   .sdkharness/tests/run-health
+
+SDKHARNESS_TEST_LEVEL=conformance SDKHARNESS_SCENARIO=files.list \
+SDKHARNESS_SIMULATOR_HTTPS_URL=https://127.0.0.1:<port> \
+SDKHARNESS_SIMULATOR_CA=<simulator>/bin/simulator/loopback-cert.pem \
+  .sdkharness/tests/run-conformance
 ```
