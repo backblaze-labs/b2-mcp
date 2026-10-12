@@ -16,6 +16,7 @@ case "$SCENARIO" in
   files.server_side_copy|bucket.cors|bucket.lifecycle|bucket.replication_config|enc.sse_b2) ;;
   lock.bucket_default|lock.per_file_retention|lock.legal_hold|lock.bypass_governance) ;;
   large.multipart|large.resume|large.compose_mixed|urls.s3_presign) ;;
+  keys.crud|keys.multi_bucket|bucket.notification_rules|api.partner|surface.s3) ;;
   *) fail 'configuration: unknown conformance scenario' ;;
 esac
 [[ "${SDKHARNESS_SIMULATOR_HTTPS_URL:-}" =~ ^https://127\.0\.0\.1:([0-9]{1,5})/?$ ]] \

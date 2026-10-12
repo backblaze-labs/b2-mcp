@@ -5,7 +5,7 @@
 assertions in `tests/`; the harness builds this checkout, starts a fresh local B2 simulator,
 and retains and reports the evidence.
 
-Scenarios so far: `health/golden-path` and twenty-one `conformance` scenarios (below). `tests/run-health` runs
+Scenarios so far: `health/golden-path` and twenty-six `conformance` scenarios (below). `tests/run-health` runs
 `tests/health/golden-path.mjs`, which starts the built stdio server (`dist/index.js`), drives
 it over MCP as a client would, and authorizes, uploads a small object (`s3_put_object`),
 downloads it and compares the bytes (`s3_get_object`), lists it (`s3_list_objects_v2`),
@@ -48,6 +48,11 @@ tools, prints the result line and removes what a scenario made. Each scenario cr
 | `large.resume` | the `partial` cell: a second server process finds an unfinished upload by its key, reads the parts B2 holds, presigns and sends only the missing one, completes; no tool is named for resuming |
 | `large.compose_mixed` | the `partial` cell: one object from a part copied from an older version in another bucket, a part PUT to a presigned URL and a range copied from the newest version; read back whole; a range past the end of the source is refused (InvalidArgument, 'Range specified is not valid for source object of size: n'); no tool composes in one call |
 | `urls.s3_presign` | `s3_get_presigned_url`: a SigV4 query string with the 3,600 s default or the expiry asked for, a plain GET of a GetObject URL (newest or a chosen version), a PutObject URL stores what is PUT to it, a changed signature or key is 403 SignatureDoesNotMatch, no signature is 401 UnauthorizedAccess, an expired URL is 401 'Request has expired', a 604800 s URL works and 604801 is refused by the tool's own input check (what B2 says to such a URL is not reachable through the tool), no presigned-POST tool |
+| `keys.crud` | the `partial` cell (`b2_create_key` needs a secret sink): a key made with a bucket, a prefix and a lifetime is listed as given with no secret field, a key without them lists `null` for both, delete removes it and a second delete is refused; the secret went to the sink file and is in no answer the agent read (B2 returns it in the create answer, the server does not: an intended difference); without a sink the create is an unavailable stub that makes nothing |
+| `keys.multi_bucket` | `bucketIds` on `b2_create_key`: a key for two buckets lists both ids and not a third, a key for the third alone lists only it, deleting one leaves the other; the new key is not used to sign in (its secret is in the sink file) |
+| `bucket.notification_rules` | rules start empty, a set stores name, prefix, event types, enabled and target type as given and replaces the whole set, refused sets (not https, non-public address, repeated name) change nothing, an empty set clears; the signing secret, header values and URL host, path and query are in no answer (B2 documents returning them, the server redacts them: an intended difference, not a failure); nothing is delivered |
+| `api.partner` | with the simulator's fixed master key: groups listed (paged, by name), unknown group refused, a member created (its key secret goes to the sink, not to the agent), listed, a taken email refused, ejected and gone; reserve-trial is unavailable with a file sink and creates an account with the inline sink |
+| `surface.s3` | the server's tool list: exactly the 19 `s3_*` names `docs/generated/tool-profiles.md` publishes, no native upload, download or hide tool, no `bz_*` tool, and the S3 tools answer at the S3 endpoint |
 
 B2's S3 API can read a file's retention and legal hold (GetObjectRetention, GetObjectLegalHold, and lock headers on HEAD and GET; real B2 measurement 2026-10-12), but the server has no tool that does, so the `lock.*` scenarios read them
 from what the delete does (B2 enforces them there) and use the update's own answer only as a second witness.
@@ -57,6 +62,8 @@ The part bytes of the `large.*` scenarios and the PUTs of `files.upload` and `ur
 (`viaPresignedUrl` in `tests/lib/session.mjs`: it connects to the loopback listener and trusts only the simulator's certificate), never through the server.
 
 Where the scenarios assert what real B2 answers (their headers cite it as 'real B2 measurement 2026-10-12'), the simulator at b2-simulator 8a6ce7e or later matches it. `tests/lib/session.mjs` removes a scenario's buckets after aborting the open multipart uploads `s3_list_multipart_uploads` reports, because an open upload does not show in a version listing.
+
+The scenarios that make keys or accounts (`keys.crud`, `keys.multi_bucket`, `api.partner`) start their server with a throwaway file secret sink (`secretSink` in `tests/lib/session.mjs`: `B2_SECRET_SINK=file` and a path in a private temp directory, removed afterwards) so the one-time secrets go to a file the check can read and never to the agent. `api.partner` also gives its server the simulator's fixed fake master key (`B2_MASTER_KEY_ID=sim-master-id`, `B2_MASTER_KEY=sim-master-secret`), because the server registers the Partner tools only for a master key distinct from the application key; the simulator serves the Partner API to that key with no option, so **no scenario needs a special simulator profile** (the opt-in `--partner-groups-for-test-key`, which lets the ordinary test key reach the same endpoints, is not used). All credentials are the loopback simulator's, so no real secret exists.
 
 A failing scenario prints one `SDKHARNESS_RESULT ... FAIL` line with the step and the reason.
 
