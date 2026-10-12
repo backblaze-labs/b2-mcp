@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `https:` origin, and is covered by a basic-path stdio test (bucket and object
   round trip, multipart, `saveToPath`). (#469)
 
+### Fixed
+- `s3_put_object` accepts an empty `content` string and stores a zero-byte
+  object instead of answering "Either filePath or content must be provided."
+  (#505)
+
 ### Changed
 - Bumped the AWS SDK group (`@aws-sdk/client-s3`,
   `@aws-sdk/s3-request-presigner`) `3.1125.0` → `3.1144.0` and realigned

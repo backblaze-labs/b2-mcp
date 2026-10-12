@@ -864,7 +864,7 @@ export function registerS3ObjectTools(
     },
     async (args) => {
       try {
-        if (!args.filePath && !args.content) {
+        if (!args.filePath && args.content === undefined) {
           return toolError(badRequestError("Either filePath or content must be provided."));
         }
 
@@ -876,7 +876,7 @@ export function registerS3ObjectTools(
 
         const body = safePath
           ? await readSmallRegularFile(safePath)
-          : Buffer.from(args.content!, "base64");
+          : Buffer.from(args.content ?? "", "base64");
         const size = body.byteLength;
         if (size > MAX_INLINE_OBJECT_BYTES) {
           return toolError(inlineUploadLimitError(size));

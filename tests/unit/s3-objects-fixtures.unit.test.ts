@@ -215,6 +215,20 @@ describe("S3 object tools with deterministic handler fake", () => {
     expect(s3.requests).toEqual([]);
   });
 
+  it("stores a zero-byte object for an empty inline content string", async () => {
+    const result = await tools.call("s3_put_object", {
+      bucket: "b",
+      key: "empty.bin",
+      content: "",
+      contentType: "application/octet-stream",
+    });
+
+    expect(result.isError).toBeFalsy();
+    const request = firstRequest<B2S3PutObjectOptions>("putObject");
+    expect(request).toMatchObject({ bucket: "b", key: "empty.bin", contentLength: 0 });
+    expect(putBodyBuffer(request).byteLength).toBe(0);
+  });
+
   it("refuses oversized inline uploads before calling S3", async () => {
     const result = await tools.call("s3_put_object", {
       bucket: "b",
