@@ -8,8 +8,10 @@
 //
 // The cell is `partial`, and the boundary is asserted: s3_put_object carries one object only up to
 // 1 MiB (tool contract, docs/design-docs/tool-contract.md; the card's `src/s3/objects.ts:836,770`).
-// Over that it must refuse, and store nothing; bigger data goes by a presigned PutObject URL, which
-// is checked to store the object (S3 PutObject, the same page) with the server never holding the bytes.
+// Over that it must refuse, and store nothing; bigger data goes by a presigned PutObject URL: the
+// object is PUT to it from this process, with no credential but the URL, and stored as sent (S3
+// PutObject, the same page; B2 supports uploads to pre-signed URLs made by an S3 SDK:
+// https://www.backblaze.com/docs/cloud-storage-use-the-aws-cli-with-backblaze-b2).
 import {
   b64,
   check,
@@ -17,8 +19,10 @@ import {
   payload,
   put,
   readBytes,
+  readWhole,
   runScenario,
   versionsOf,
+  viaPresignedUrl,
 } from "../lib/session.mjs";
 
 const MIB = 1024 * 1024;
@@ -86,13 +90,26 @@ await runScenario("files.upload", async (s) => {
   eq("presigned path", `/${bucket.name}/st/upload/over.bin`, url.pathname);
   eq("presigned algorithm", "AWS4-HMAC-SHA256", url.searchParams.get("X-Amz-Algorithm"));
   check(url.searchParams.has("X-Amz-Signature"), "the presigned URL carries no signature");
-  // The transfer through the URL is not exercised: the server's output sanitizer redacts the
-  // application key wherever it appears, and the simulator's fixed key id (`test-key-id`) contains
-  // its key (`test-key`), so the credential in the minted URL reads `[redacted]-id` and no PUT can
-  // be signed for it. A real key id never contains its key. Repairing the URL here would be a
-  // simulator special case, so the leg is left out and said so.
-  console.error(
-    "NOTE files.upload: the presigned PUT is not sent; the simulator's fixed key id contains its key, so the server redacts it in the URL",
+
+  s.step("boundary: the bigger object goes through the presigned URL");
+  // The bytes travel from this process to the URL, not through the server (a client of its own,
+  // sending the one signed content-type header and no credential), and are read back by other tools.
+  const sent = await viaPresignedUrl("PUT", presigned.url, over, {
+    "content-type": "application/octet-stream",
+  });
+  eq("presigned PUT status", 200, sent.status);
+  const overVersions = (await versionsOf(s, bucket, "st/upload/over.bin")).versions;
+  eq("versions of the presigned key", 1, overVersions.length);
+  eq("listed size of the presigned object", over.length, overVersions[0].Size);
+  const overHead = await s.call("s3_head_object", {
+    bucket: bucket.name,
+    key: "st/upload/over.bin",
+  });
+  eq("presigned object contentLength", over.length, overHead.contentLength);
+  eq("presigned object contentType", "application/octet-stream", overHead.contentType);
+  check(
+    (await readWhole(s, bucket, "st/upload/over.bin")).equals(over),
+    "the bytes read back from the presigned upload differ from the bytes sent",
   );
 
   // Last, so the legs above still run: B2 stores a zero-byte object (S3 PutObject with an empty body).

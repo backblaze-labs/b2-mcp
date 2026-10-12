@@ -2,8 +2,9 @@
 // would, the one result line, and the helpers the conformance scenarios share.
 // See ../../README.md. Run by ../run-health and ../run-conformance.
 import { createHash, randomBytes } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { request } from "node:https";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/client";
@@ -13,7 +14,8 @@ export const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../../..");
 
 /** Start the built server (dist/index.js) and connect an MCP client to it over stdio. */
 export async function startServer(clientName, extraEnv = {}) {
-  // Only the simulator's fixed test credential and the test-only endpoint reach the server.
+  // Only the simulator's fixed test credential and the test-only endpoint reach the server. The key
+  // id must not contain the key: the server redacts the key wherever it appears, in a presigned URL too.
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [
@@ -28,8 +30,8 @@ export async function startServer(clientName, extraEnv = {}) {
       NODE_EXTRA_CA_CERTS: process.env.SDKHARNESS_SIMULATOR_CA,
       B2_TEST_REALM: process.env.SDKHARNESS_REALM,
       B2_TEST_LOOPBACK_HOST: process.env.SDKHARNESS_FIXTURE_HOST,
-      B2_APPLICATION_KEY_ID: "test-key-id",
-      B2_APPLICATION_KEY: "test-key",
+      B2_APPLICATION_KEY_ID: "sim-test-id",
+      B2_APPLICATION_KEY: "sim-test-secret",
       B2_REGION: "us-west-004",
       B2_SECRET_SINK: "off",
       ...extraEnv,
@@ -263,10 +265,118 @@ export function viaPresignedUrl(method, url, body, headers = {}) {
       (res) => {
         const chunks = [];
         res.on("data", (chunk) => chunks.push(chunk));
-        res.on("end", () => resolve({ status: res.statusCode, bytes: Buffer.concat(chunks) }));
+        res.on("end", () =>
+          resolve({ status: res.statusCode, bytes: Buffer.concat(chunks), headers: res.headers }),
+        );
       },
     );
     req.on("error", reject);
     req.end(body);
   });
+}
+
+// ---- multipart upload helpers (the s3_*multipart* tools and presigned part URLs) ------------
+
+/** B2's minimum size of every part but the last is 5 MB; the tool contract says 5 MiB. */
+export const PART_SIZE = 5 * 1024 * 1024;
+
+/** An ETag as a header or a listing shows it, with or without its quotes. */
+export const bareEtag = (etag) => String(etag ?? "").replace(/^"|"$/g, "");
+
+export const md5Hex = (bytes) => createHash("md5").update(bytes).digest("hex");
+
+/**
+ * Start a multipart upload through s3_create_multipart_upload. It is aborted at cleanup unless the
+ * scenario finished or aborted it (set `upload.finished = true`), so no unfinished upload is left
+ * to block the bucket's removal.
+ */
+export async function startUpload(s, bucket, key, options = {}) {
+  const out = await s.call("s3_create_multipart_upload", { bucket: bucket.name, key, ...options });
+  const upload = {
+    bucket: bucket.name,
+    key,
+    uploadId: out.uploadId,
+    created: out,
+    finished: false,
+  };
+  s.cleanup(async () => {
+    if (upload.finished) return;
+    await s.call("s3_abort_multipart_upload", {
+      bucket: bucket.name,
+      key,
+      uploadId: upload.uploadId,
+      confirm: true,
+    });
+  });
+  return upload;
+}
+
+/**
+ * Mint presigned part URLs for the given part numbers (one s3_get_presigned_upload_part_url call),
+ * then PUT each part's bytes to its own URL from this process, as a client outside the server
+ * would. `bytesByNumber` maps a part number to its bytes. Returns `{ partNumber, etag }` per part,
+ * the ETag read from the PUT response header.
+ */
+export async function putParts(s, upload, bytesByNumber) {
+  const numbers = Object.keys(bytesByNumber).map(Number);
+  const minted = await s.call("s3_get_presigned_upload_part_url", {
+    bucket: upload.bucket,
+    key: upload.key,
+    uploadId: upload.uploadId,
+    partNumbers: numbers,
+  });
+  eq(
+    "presigned part numbers",
+    numbers,
+    minted.parts.map((p) => p.partNumber),
+  );
+  const done = [];
+  for (const part of minted.parts) {
+    const sent = await viaPresignedUrl("PUT", part.url, bytesByNumber[part.partNumber]);
+    eq(`PUT of part ${part.partNumber}`, 200, sent.status);
+    check(sent.headers.etag, `the PUT of part ${part.partNumber} returned no ETag header`);
+    done.push({ partNumber: part.partNumber, etag: sent.headers.etag });
+  }
+  return done;
+}
+
+/** Every part s3_list_parts reports for an upload, across pages. */
+export async function partsOf(s, upload) {
+  const parts = [];
+  let marker;
+  do {
+    const out = await s.call("s3_list_parts", {
+      bucket: upload.bucket,
+      key: upload.key,
+      uploadId: upload.uploadId,
+      ...(marker === undefined ? {} : { partNumberMarker: marker }),
+    });
+    parts.push(...out.parts);
+    marker = out.isTruncated ? Number(out.nextPartNumberMarker) : undefined;
+  } while (marker !== undefined);
+  return parts;
+}
+
+/** The in-progress uploads s3_list_multipart_uploads reports for a bucket, optionally by prefix. */
+export async function uploadsOf(s, bucket, prefix) {
+  const out = await s.call("s3_list_multipart_uploads", {
+    bucket: bucket.name,
+    ...(prefix ? { prefix } : {}),
+  });
+  return out.uploads;
+}
+
+/**
+ * Save a whole stored object to a temporary file through s3_get_object (the only way it reads more
+ * than 1 MiB), return its bytes and remove the file.
+ */
+export async function readWhole(s, bucket, key, extra = {}) {
+  const dir = mkdtempSync(join(tmpdir(), "sdkharness-whole-"));
+  try {
+    const path = join(dir, "saved.bin");
+    await s.call("s3_get_object", { bucket: bucket.name, key, saveToPath: path, ...extra });
+    return readFileSync(path);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }

@@ -5,7 +5,7 @@
 assertions in `tests/`; the harness builds this checkout, starts a fresh local B2 simulator,
 and retains and reports the evidence.
 
-Scenarios so far: `health/golden-path` and seventeen `conformance` scenarios (below). `tests/run-health` runs
+Scenarios so far: `health/golden-path` and twenty-one `conformance` scenarios (below). `tests/run-health` runs
 `tests/health/golden-path.mjs`, which starts the built stdio server (`dist/index.js`), drives
 it over MCP as a client would, and authorizes, uploads a small object (`s3_put_object`),
 downloads it and compares the bytes (`s3_get_object`), lists it (`s3_list_objects_v2`),
@@ -27,7 +27,7 @@ tools, prints the result line and removes what a scenario made. Each scenario cr
 
 | Scenario | What it asserts |
 |---|---|
-| `files.upload` | `s3_put_object`: bytes, size, content type and custom metadata read back, listed, an unusual key; the `partial` boundary (over 1 MiB inline is refused and stores nothing, and a presigned PutObject URL is minted for it); an empty object |
+| `files.upload` | `s3_put_object`: bytes, size, content type and custom metadata read back, listed, an unusual key; the `partial` boundary (over 1 MiB inline is refused and stores nothing; the bigger object goes by a presigned PutObject URL, PUT from the check's own client and read back by other tools); an empty object |
 | `files.download_content` | `s3_get_object`: bytes, headers, a range, `saveToPath`, a missing key is 404 |
 | `files.download_by_id` | `versionId` reads each version as itself, the key alone reads the newest, an unknown id reads nothing |
 | `files.metadata` | `s3_head_object`: size, type, custom metadata, version id, an older version, a missing key is 404 |
@@ -44,10 +44,17 @@ tools, prints the result line and removes what a scenario made. Each scenario cr
 | `lock.per_file_retention` | `b2_update_file_retention`: the delete of that version is refused, extending needs no bypass, shortening or clearing without it is refused, clearing with it lets the delete through |
 | `lock.legal_hold` | `b2_update_file_legal_hold`: the delete is refused, the governance bypass does not lift it, a hold and a retention are independent, off lets the delete through |
 | `lock.bypass_governance` | `bypassGovernance` on `s3_delete_objects` and `b2_update_file_retention`: refused without, done with; not a way past a legal hold; `s3_delete_object` has no such input |
+| `large.multipart` | create, parts PUT to presigned part URLs (ETag is the part's MD5), listed as in progress, `s3_list_parts` and its paging, complete (ETag ends in `-3`; size, type, metadata and bytes read back), abort, a non-last part under 5 MB refused |
+| `large.resume` | the `partial` cell: a second server process finds an unfinished upload by its key, reads the parts B2 holds, presigns and sends only the missing one, completes; no tool is named for resuming |
+| `large.compose_mixed` | the `partial` cell: one object from a part copied from an older version in another bucket, a part PUT to a presigned URL and a range copied from the newest version; read back whole; no tool composes in one call |
+| `urls.s3_presign` | `s3_get_presigned_url`: a SigV4 query string with the 3,600 s default or the expiry asked for, a plain GET of a GetObject URL (newest or a chosen version), a PutObject URL stores what is PUT to it, an expired URL is refused, no presigned-POST tool |
 
 The server has no tool that reads a file's retention or legal hold back, so the `lock.*` scenarios read them
 from what the delete does (B2 enforces them there) and use the update's own answer only as a second witness.
 Compliance mode is not exercised: a version under it cannot be removed, so the bucket could not be cleaned up.
+
+The part bytes of the `large.*` scenarios and the PUTs of `files.upload` and `urls.s3_presign` go to presigned URLs from a client of the check's own
+(`viaPresignedUrl` in `tests/lib/session.mjs`: it connects to the loopback listener and trusts only the simulator's certificate), never through the server.
 
 A failing scenario prints one `SDKHARNESS_RESULT ... FAIL` line with the step and the reason.
 
@@ -59,7 +66,7 @@ A failing scenario prints one `SDKHARNESS_RESULT ... FAIL` line with the step an
   at the fixture host `b2-simulator-loopback.backblaze.net`, which
   `test-support/loopback-dns-preload.cjs` resolves to `127.0.0.1` inside the server process only,
   trusting the simulator's certificate (`SDKHARNESS_SIMULATOR_CA`).
-- **Only the simulator's fixed test credential** (`test-key-id` / `test-key`, in the source).
+- **Only the simulator's fixed test credential** (`sim-test-id` / `sim-test-secret`, in the source; the key id must not contain the key, which the server redacts wherever it appears, a presigned URL included).
   The server gets an explicit environment; no ambient `B2_*` variable reaches it.
 - **No build.** The harness runs `pnpm install --frozen-lockfile` and `pnpm run build` in a
   copy of this checkout first. A missing `node` on `PATH` reports `SKIP`, which the harness
