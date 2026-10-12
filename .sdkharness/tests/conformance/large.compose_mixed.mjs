@@ -5,6 +5,10 @@
 // https://www.backblaze.com/docs/cloud-storage-large-files  (parts of 5 MB or more, but the last)
 // https://www.backblaze.com/apidocs/s3-upload-part-copy  (a part copied from `x-amz-copy-source`)
 // https://www.backblaze.com/apidocs/s3-upload-part https://www.backblaze.com/apidocs/s3-complete-multipart-upload
+// real B2 measurement 2026-10-12: an upload part copy of a range past the end of the source is 400
+// InvalidArgument 'Range specified is not valid for source object of size: <n>'; a copy of a whole
+// small part works; a single small last part completes (only a non-last part under 5 MB is
+// EntityTooSmall).
 // The card's claim is `partial`: s3_upload_part_copy copies a byte range of a stored object into a
 // part, new bytes use presigned part URLs, and there is no single compose tool. So this check builds
 // one object from three parts the way an agent would: part 1 copied from an older version of a stored
@@ -119,6 +123,28 @@ await runScenario("large.compose_mixed", async (s) => {
       size: p.Size,
       etag: bareEtag(p.ETag),
     })),
+  );
+
+  s.step("a range past the end of the source is refused (InvalidArgument)");
+  // Real B2 measurement 2026-10-12. The source version is `srcNew`, PART_SIZE + 2000 bytes long, and
+  // s3_upload_part_copy passes copySourceRange through as given, so a range ending past the end is expressible.
+  const sourceSize = srcNew.length;
+  const outOfRange = await s.refused("s3_upload_part_copy", {
+    bucket: target.name,
+    key,
+    uploadId: upload.uploadId,
+    partNumber: 4,
+    copySource: `${source.name}/${srcKey}`,
+    copySourceRange: `bytes=0-${sourceSize + 999}`,
+  });
+  check(
+    outOfRange.includes(`Range specified is not valid for source object of size: ${sourceSize}`),
+    `the out-of-range copy was refused for another reason: ${outOfRange.slice(0, 200)}`,
+  );
+  eq(
+    "the refused copy leaves the parts as they were",
+    [1, 2, 3],
+    (await partsOf(s, upload)).map((p) => p.PartNumber),
   );
 
   s.step("complete");

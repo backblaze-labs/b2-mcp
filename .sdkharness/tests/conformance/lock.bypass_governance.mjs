@@ -9,6 +9,14 @@
 // delete leaves the version listed and readable, the bypass delete removes it.
 // https://www.backblaze.com/apidocs/b2-update-file-retention https://www.backblaze.com/docs/cloud-storage-object-lock
 // https://www.backblaze.com/apidocs/s3-delete-objects https://www.backblaze.com/apidocs/s3-delete-object
+// real B2 measurement 2026-10-12: B2's S3 API supports GetObjectRetention and GetObjectLegalHold, and
+// HEAD and GET of an object carry the lock headers (ObjectLockMode, ObjectLockRetainUntilDate,
+// ObjectLockLegalHoldStatus). The server exposes no tool for any of it (no tool in src/ reads a
+// retention or a hold; s3_head_object and the listings carry no Object Lock fields), so the read-back
+// stays 'observed through the delete'.
+// Real B2 measurement 2026-10-12 settles: a delete of a locked version is 403 AccessDenied; shortening
+// retention needs the bypass (403 AccessDenied without) and extending does not; the bypass does not lift
+// a legal hold (403 AccessDenied with it).
 // NOTE the card names exactly these two tools. s3_delete_object (one object) has no bypass input, which
 // is asserted too, so a card that grows a third path has to be re-inspected.
 // NOTE compliance mode is not exercised: it is not bypassable and would leave a bucket this check

@@ -10,6 +10,11 @@
 // https://www.backblaze.com/apidocs/s3-upload-part https://www.backblaze.com/apidocs/s3-complete-multipart-upload
 // (an in-progress upload "has been initiated ... but has not yet been completed or aborted"; the
 // part-number-marker pages a listing). Part sizes: https://www.backblaze.com/docs/cloud-storage-large-files
+// real B2 measurement 2026-10-12: the last part may be small (even a single part of 10 bytes
+// completes, ETag ending -1; the 4,321-byte last part here is that case), while a small part that is
+// not the last is 400 EntityTooSmall; the open upload and its parts are listed by
+// ListMultipartUploads and ListParts only (not as an object or a version), which is why a second
+// process finds it by those two calls.
 // The boundary is asserted too: the server exposes no tool that resumes an upload.
 import {
   bareEtag,

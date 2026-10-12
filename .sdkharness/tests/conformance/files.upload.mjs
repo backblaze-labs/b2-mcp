@@ -6,6 +6,10 @@
 // object and an unusual key are stored as sent. https://www.backblaze.com/apidocs/s3-put-object
 // https://www.backblaze.com/apidocs/s3-head-object https://www.backblaze.com/apidocs/s3-get-object
 //
+// real B2 measurement 2026-10-12: an object stored with no content type at all is reported as
+// `binary/octet-stream` (not `application/octet-stream`). s3_put_object always signs a content type,
+// so this check sends an explicit one everywhere and asserts only that; the default is not asserted.
+//
 // The cell is `partial`, and the boundary is asserted: s3_put_object carries one object only up to
 // 1 MiB (tool contract, docs/design-docs/tool-contract.md; the card's `src/s3/objects.ts:836,770`).
 // Over that it must refuse, and store nothing; bigger data goes by a presigned PutObject URL: the

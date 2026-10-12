@@ -9,8 +9,15 @@
 // still read afterwards. A bucket without Object Lock refuses a hold.
 // https://www.backblaze.com/apidocs/b2-update-file-legal-hold https://www.backblaze.com/docs/cloud-storage-object-lock
 // https://www.backblaze.com/apidocs/s3-delete-object https://www.backblaze.com/apidocs/s3-delete-objects
-// The server has no tool that reads a hold back, so it is read from what the delete does, and from the
-// answer of the update itself as a second witness, never alone.
+// real B2 measurement 2026-10-12: B2's S3 API supports GetObjectRetention and GetObjectLegalHold, and
+// HEAD and GET of an object carry the lock headers (ObjectLockMode, ObjectLockRetainUntilDate,
+// ObjectLockLegalHoldStatus). The server exposes no tool for any of it (no tool in src/ reads a
+// retention or a hold; s3_head_object and the listings carry no Object Lock fields), so the read-back
+// stays 'observed through the delete'.
+// So a hold is read from what the delete does, and from the answer of the update itself as a second
+// witness, never alone. Real B2 measurement 2026-10-12 settles that a delete of a held version is 403
+// AccessDenied and that the governance bypass does not lift a hold (still 403 with the bypass); turning
+// the hold off lets the delete through.
 import {
   check,
   eq,

@@ -15,6 +15,11 @@
 // Every part but the last must be at least 5 MB (every part of this check is 5 MiB, the tool's own
 // minimum, except the last), the last at least one byte:
 // https://www.backblaze.com/docs/cloud-storage-large-files
+// real B2 measurement 2026-10-12 (the Backblaze docs above do not say these; the answers of real B2 do):
+// while an upload is open, ListObjectVersions is empty and ListObjectsV2 has KeyCount 0 (the upload
+// shows only in ListMultipartUploads and ListParts); a complete of three parts gives an ETag ending
+// -3; a complete with a non-last part under 5 MB is 400 EntityTooSmall; after an abort, ListParts is
+// 404 NoSuchUpload.
 // The effects are read back through other tools than the ones that set them: list uploads, list
 // parts, head, list versions, and s3_get_object (a range, and the whole object saved to disk).
 import {
@@ -61,6 +66,13 @@ await runScenario("large.multipart", async (s) => {
     [other.uploadId, upload.uploadId].sort(),
     (await uploadsOf(s, bucket)).map((u) => u.UploadId).sort(),
   );
+  // Real B2 measurement 2026-10-12: an open upload is not an object and not a version.
+  const openVersions = await versionsOf(s, bucket);
+  eq("versions while uploads are open", 0, openVersions.versions.length);
+  eq("delete markers while uploads are open", 0, openVersions.markers.length);
+  const openObjects = await s.call("s3_list_objects_v2", { bucket: bucket.name });
+  eq("objects listed while uploads are open", 0, openObjects.objects.length);
+  eq("keyCount while uploads are open", 0, openObjects.keyCount);
 
   s.step("parts go to their presigned URLs");
   const partOne = payload(PART_SIZE, 101);
@@ -165,6 +177,13 @@ await runScenario("large.multipart", async (s) => {
     confirm: true,
   });
   doomed.finished = true;
+  // Real B2 measurement 2026-10-12: the parts of an aborted upload are gone, 404 NoSuchUpload.
+  const gone = await s.refused("s3_list_parts", {
+    bucket: bucket.name,
+    key: doomed.key,
+    uploadId: doomed.uploadId,
+  });
+  check(/NoSuchUpload|404/.test(gone), `parts of an aborted upload: ${gone.slice(0, 160)}`);
   eq(
     "uploads after abort",
     [other.uploadId],
@@ -176,14 +195,16 @@ await runScenario("large.multipart", async (s) => {
     (await versionsOf(s, bucket, doomed.key)).versions.length,
   );
 
-  s.step("a non-last part under the minimum is refused at complete");
+  s.step("a non-last part under the minimum is refused at complete (EntityTooSmall)");
   const small = await startUpload(s, bucket, "st/large/small-parts.bin");
   const smallSent = await putParts(s, small, { 1: payload(1000, 105), 2: payload(1000, 106) });
-  await s.refused("s3_complete_multipart_upload", {
+  const tooSmall = await s.refused("s3_complete_multipart_upload", {
     bucket: bucket.name,
     key: small.key,
     uploadId: small.uploadId,
     parts: smallSent.map((p) => ({ partNumber: p.partNumber, etag: p.etag })),
   });
+  // Real B2 measurement 2026-10-12: 400 EntityTooSmall, not another refusal.
+  check(/EntityTooSmall/.test(tooSmall), `refused for another reason: ${tooSmall.slice(0, 160)}`);
   // The upload is still unfinished, so the cleanup aborts it.
 });
