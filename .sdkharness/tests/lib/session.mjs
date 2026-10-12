@@ -65,14 +65,16 @@ export async function callRefused(client, name, args) {
 
 /**
  * Run one conformance scenario and print the one result line. Every bucket made through
- * `s.bucket()` is emptied and deleted afterwards, on failure too. `options.env` adds to the
+ * `s.bucket()` is emptied and deleted afterwards, on failure too. `options.level` names the level on the
+ * result line (default `conformance`; the resilience scenarios say `resilience`). `options.env` adds to the
  * server's environment (a scenario that needs a setting the default lacks says why, in its file).
  * `s.cleanup(fn)` registers a step that runs before the buckets are removed (for example to lift
  * a legal hold, which blocks a delete); it runs on failure too and its own failure is a NOTE.
  */
 export async function runScenario(id, scenario, options = {}) {
+  const level = options.level ?? "conformance";
   const result = (outcome, reason) =>
-    console.log(`SDKHARNESS_RESULT\tconformance\t${id}\t${outcome}\t${reason}`);
+    console.log(`SDKHARNESS_RESULT\t${level}\t${id}\t${outcome}\t${reason}`);
   const s = { current: "start", buckets: [], cleanups: [] };
   let client;
   try {
