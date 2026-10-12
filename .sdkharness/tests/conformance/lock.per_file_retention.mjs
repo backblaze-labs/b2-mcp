@@ -9,9 +9,15 @@
 // versionId), and the version must still read afterwards.
 // https://www.backblaze.com/apidocs/b2-update-file-retention https://www.backblaze.com/docs/cloud-storage-object-lock
 // https://www.backblaze.com/apidocs/s3-delete-object
-// The server has no tool that reads a file's retention back (s3_head_object and the listings carry no
-// Object Lock fields), so the stored value is read from what the delete does, and from the answer of
-// the update itself as a second witness, never alone.
+// real B2 measurement 2026-10-12: B2's S3 API supports GetObjectRetention and GetObjectLegalHold, and
+// HEAD and GET of an object carry the lock headers (ObjectLockMode, ObjectLockRetainUntilDate,
+// ObjectLockLegalHoldStatus). The server exposes no tool for any of it (no tool in src/ reads a
+// retention or a hold; s3_head_object and the listings carry no Object Lock fields), so the read-back
+// stays 'observed through the delete'.
+// So the stored value is read from what the delete does, and from the answer of the update itself as a
+// second witness, never alone. Real B2 measurement 2026-10-12 settles the expectations below: a delete
+// of a locked version is 403 AccessDenied; extending governance retention needs no bypass; shortening it
+// is 403 AccessDenied without the bypass and done with it.
 // NOTE compliance mode is not exercised: a version under compliance retention cannot be removed by
 // anyone before its date, so it would leave a bucket this check could not clean up.
 import {

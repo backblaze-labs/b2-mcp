@@ -140,6 +140,17 @@ async function removeBucket(client, bucket) {
         ? { keyMarker: page.nextKeyMarker, versionIdMarker: page.nextVersionIdMarker }
         : null;
     } while (page);
+    // An open multipart upload is not a version (real B2 measurement 2026-10-12: ListObjectVersions is
+    // empty while one is open), and it blocks the bucket's removal, so abort what s3_list_multipart_uploads reports.
+    const open = await call(client, "s3_list_multipart_uploads", { bucket: bucket.name });
+    for (const upload of open.uploads ?? []) {
+      await call(client, "s3_abort_multipart_upload", {
+        bucket: bucket.name,
+        key: upload.Key,
+        uploadId: upload.UploadId,
+        confirm: true,
+      });
+    }
     await call(client, "b2_delete_bucket", { bucketId: bucket.id, confirm: true });
   } catch (error) {
     console.error(`NOTE cleanup of ${bucket.name} failed: ${String(error?.message ?? error)}`);

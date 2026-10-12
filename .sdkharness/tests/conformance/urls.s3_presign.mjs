@@ -8,6 +8,13 @@
 // GetObject URL returns the object, and uploads through a pre-signed URL are possible
 // (https://www.backblaze.com/docs/cloud-storage-use-the-aws-cli-with-backblaze-b2); browser-based
 // uploads by POST are not supported, so no presigned-POST tool may exist.
+// real B2 measurement 2026-10-12 (what real B2 answers to a URL that is not valid; the docs do not
+// say): a changed signature character or a changed key is 403 SignatureDoesNotMatch 'Signature
+// validation failed'; a URL with the signature removed is 401 UnauthorizedAccess; an expired URL
+// (X-Amz-Expires 1, used after a few seconds) is 401 UnauthorizedAccess 'Request has expired';
+// X-Amz-Expires 604800 (7 days) is served (200) and 604801 is refused by the server (403, 'X-Amz-Expires
+// 604801 must be less than 7 days'). The tool itself limits expiresIn to 604800 in its input schema, so
+// 604801 never reaches B2 through it; this check asserts the tool's refusal and the 604800 URL used.
 // Every URL is used from this process with no credential but the URL, as a client of its own, and
 // what a PUT stored is read back through other tools (head, list versions, get object).
 import {
@@ -167,7 +174,41 @@ await runScenario("urls.s3_presign", async (s) => {
     "the GET URL of the small object returned other bytes",
   );
 
-  s.step("an expired URL is refused and returns no bytes");
+  s.step("a changed signature or a changed key is 403 SignatureDoesNotMatch");
+  // Real B2 measurement 2026-10-12.
+  const tamperedSig = new URL(get.url);
+  const sig = tamperedSig.searchParams.get("X-Amz-Signature");
+  tamperedSig.searchParams.set("X-Amz-Signature", `${sig[0] === "0" ? "1" : "0"}${sig.slice(1)}`);
+  const badSig = await viaPresignedUrl("GET", tamperedSig.href);
+  eq("status of a changed signature", 403, badSig.status);
+  check(
+    /SignatureDoesNotMatch/.test(badSig.bytes.toString()) &&
+      /Signature validation failed/.test(badSig.bytes.toString()),
+    `a changed signature answered: ${badSig.bytes.toString().slice(0, 200)}`,
+  );
+  const otherKey = new URL(get.url);
+  otherKey.pathname = `/${bucket.name}/st/presign/uploaded.bin`;
+  const badKey = await viaPresignedUrl("GET", otherKey.href);
+  eq("status of a changed key", 403, badKey.status);
+  check(
+    /SignatureDoesNotMatch/.test(badKey.bytes.toString()) &&
+      /Signature validation failed/.test(badKey.bytes.toString()),
+    `a changed key answered: ${badKey.bytes.toString().slice(0, 200)}`,
+  );
+  check(!badKey.bytes.equals(big), "a URL with a changed key still returned the other object");
+
+  s.step("a URL with the signature removed is 401 UnauthorizedAccess");
+  const unsigned = new URL(get.url);
+  unsigned.searchParams.delete("X-Amz-Signature");
+  const noSig = await viaPresignedUrl("GET", unsigned.href);
+  eq("status without a signature", 401, noSig.status);
+  check(
+    /UnauthorizedAccess/.test(noSig.bytes.toString()),
+    `no signature answered: ${noSig.bytes.toString().slice(0, 200)}`,
+  );
+  check(!noSig.bytes.equals(newData), "a URL with no signature returned the object");
+
+  s.step("an expired URL is 401 'Request has expired' and returns no bytes");
   const brief = await s.call("s3_get_presigned_url", {
     bucket: bucket.name,
     key,
@@ -175,10 +216,38 @@ await runScenario("urls.s3_presign", async (s) => {
     expiresIn: 1,
   });
   eq("brief X-Amz-Expires", "1", new URL(brief.url).searchParams.get("X-Amz-Expires"));
-  await sleep(2500);
+  await sleep(3500);
   const expired = await viaPresignedUrl("GET", brief.url);
-  check(expired.status >= 400, `an expired URL answered ${expired.status}`);
+  eq("status of an expired URL", 401, expired.status);
+  check(
+    /Request has expired/.test(expired.bytes.toString()),
+    `an expired URL answered: ${expired.bytes.toString().slice(0, 200)}`,
+  );
   check(!expired.bytes.equals(newData), "an expired URL still returned the object");
+
+  s.step("the expiry limit is 604800 seconds (7 days)");
+  const week = await s.call("s3_get_presigned_url", {
+    bucket: bucket.name,
+    key,
+    operation: "GetObject",
+    expiresIn: 604800,
+  });
+  eq("week X-Amz-Expires", "604800", new URL(week.url).searchParams.get("X-Amz-Expires"));
+  const weekFetched = await viaPresignedUrl("GET", week.url);
+  eq("GET status of the 604800 s URL", 200, weekFetched.status);
+  check(weekFetched.bytes.equals(newData), "the 604800 s URL did not return the object");
+  // Above the limit the tool's own input validation refuses before any URL exists, so what B2 says
+  // to such a URL (403, must be less than 7 days) cannot be reached through the tool and is not asserted.
+  const tooLong = await s.refused("s3_get_presigned_url", {
+    bucket: bucket.name,
+    key,
+    operation: "GetObject",
+    expiresIn: 604801,
+  });
+  check(
+    /604800|too big|expiresIn/i.test(tooLong),
+    `refused for another reason: ${tooLong.slice(0, 200)}`,
+  );
 
   s.step("the stored objects are untouched by the reads");
   eq(

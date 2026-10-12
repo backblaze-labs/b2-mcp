@@ -9,8 +9,12 @@
 // later uploads no more. The protection is observed where B2 enforces it, on the delete.
 // https://www.backblaze.com/apidocs/b2-update-bucket https://www.backblaze.com/docs/cloud-storage-object-lock
 // https://www.backblaze.com/apidocs/s3-delete-object
-// The server has no tool that reads a file's retention back, so a file's protection is read from what
-// a delete does; the per-file tools are checked in lock.per_file_retention.
+// real B2 measurement 2026-10-12: B2's S3 API supports GetObjectRetention and GetObjectLegalHold, and
+// HEAD and GET of an object carry the lock headers (ObjectLockMode, ObjectLockRetainUntilDate,
+// ObjectLockLegalHoldStatus). The server exposes no tool for any of it (no tool in src/ reads a
+// retention or a hold; s3_head_object and the listings carry no Object Lock fields), so the read-back
+// stays 'observed through the delete'.
+// A file's protection is read from what a delete does; the per-file tools are checked in lock.per_file_retention.
 import {
   bucketInfo,
   check,
