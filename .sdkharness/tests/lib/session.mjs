@@ -2,7 +2,7 @@
 // would, the one result line, and the helpers the conformance scenarios share.
 // See ../../README.md. Run by ../run-health and ../run-conformance.
 import { createHash, randomBytes } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { request } from "node:https";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -390,4 +390,43 @@ export async function readWhole(s, bucket, key, extra = {}) {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+// ---- secret sink (the scenarios that make keys or accounts) ---------------------------------
+
+/**
+ * A throwaway file secret sink for one scenario: pass `sink.env` to `runScenario` (`options.env`) and the
+ * server writes the one-time secrets of `b2_create_key` and `b2_create_group_member` to a file in
+ * a private temp directory instead of returning them. `sink.records()` reads that file back (what
+ * only the operator can see) and `sink.remove()` deletes it. The credentials involved belong to the
+ * loopback simulator, so no real secret exists.
+ */
+export function secretSink() {
+  const dir = mkdtempSync(join(tmpdir(), "sdkharness-sink-"));
+  const file = join(dir, "secrets.jsonl");
+  return {
+    env: { B2_SECRET_SINK: "file", B2_SECRET_SINK_FILE: file },
+    records: () =>
+      existsSync(file)
+        ? readFileSync(file, "utf8")
+            .split("\n")
+            .filter(Boolean)
+            .map((line) => JSON.parse(line))
+        : [],
+    remove: () => rmSync(dir, { recursive: true, force: true }),
+  };
+}
+
+/** Call a tool and return its raw answer text (what the agent reads), parsed when it is JSON. */
+export async function callRaw(client, name, args) {
+  const out = await client.callTool({ name, arguments: args });
+  const text = out.content.map((part) => part.text ?? "").join("");
+  if (out.isError) throw new Error(`${name}: ${text}`);
+  let json = null;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    /* not JSON */
+  }
+  return { text, json };
 }
