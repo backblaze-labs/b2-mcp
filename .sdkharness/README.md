@@ -5,7 +5,7 @@
 assertions in `tests/`; the harness builds this checkout, starts a fresh local B2 simulator,
 and retains and reports the evidence.
 
-Scenarios so far: `health/golden-path` and twenty-six `conformance` scenarios (below). `tests/run-health` runs
+Scenarios so far: `health/golden-path`, twenty-six `conformance` scenarios and five `resilience` scenarios (below). `tests/run-health` runs
 `tests/health/golden-path.mjs`, which starts the built stdio server (`dist/index.js`), drives
 it over MCP as a client would, and authorizes, uploads a small object (`s3_put_object`),
 downloads it and compares the bytes (`s3_get_object`), lists it (`s3_list_objects_v2`),
@@ -67,9 +67,32 @@ The scenarios that make keys or accounts (`keys.crud`, `keys.multi_bucket`, `api
 
 A failing scenario prints one `SDKHARNESS_RESULT ... FAIL` line with the step and the reason.
 
+## Resilience
+
+`tests/run-resilience` runs one scenario per call, named by `SDKHARNESS_SCENARIO`; every resilience row of
+`tests.tsv` points at it. The harness starts the simulator with its fault-control listener and passes its
+address in `SDKHARNESS_SIMULATOR_CONTROL_URL` (a loopback http origin, checked like the HTTPS one). Each scenario
+in `tests/resilience/` makes a bucket with one object, proves the server's native listing (`b2_list_largest_files`,
+the only tool that calls `b2_list_file_names`) works, arms **one** documented fault once, makes the call again and
+reads the simulator's journal to see which recovery path ran (`tests/lib/fault.mjs`, `tests/lib/resilience.mjs`).
+The expected behaviour comes from B2's Integration Checklist, not from what the server does; timing is a lower bound
+on the whole call only (the journal has no timestamps), never an upper one.
+
+| Scenario | What it asserts |
+|---|---|
+| `api.backoff_503` | one 503 on the listing, then a 200; the call took at least 1 s (the Checklist's first backoff step) |
+| `api.retry_after_503` | one 503 with `Retry-After: 2`, then a 200; the call took at least 2 s |
+| `api.retry_after_429` | one 429 with `Retry-After: 2`, then a 200; the call took at least 2 s |
+| `auth.expired_401` | one 401 `bad_auth_token` on the listing (the answer real B2 gives a rejected token, measured 2026-10-12): the journal shows `b2_authorize_account` after it, then a 200. A one-off `expired_auth_token` on a live token never happens on real B2; the realistic persistent expiry is `auth.clock_expiry`. A token that stays expired is retried three times first (about 7 s), tracked as a low-priority improvement in b2-mcp#511 |
+| `auth.clock_expiry` | the clock moves 24 h and 1 ms past the token's life: a real 401 (no injected fault), then `b2_authorize_account`, then a 200. (The 401 lands on `b2_list_buckets`, which the listing calls first; the SDK retries it four times, about 7 s, before it authorizes again) |
+
+The other eleven resilience scenarios the card claims (nine `upload.*`, `part.retry_503`, `download.retry_503`) are not
+checks of this repository: the server has no native upload or download, so those faults never reach it. The harness lists
+them as `n/a` with that reason (`bin/resilience/not-applicable.tsv` there).
+
 ## What the check can and cannot reach
 
-- **Only the loopback simulator.** `run-health` and `run-conformance` refuse any
+- **Only the loopback simulator.** `run-health`, `run-conformance` and `run-resilience` refuse any
   `SDKHARNESS_SIMULATOR_HTTPS_URL` that is not `https://127.0.0.1:<port>`. The server reaches it
   through the test-only endpoint override (`NODE_ENV=test`, `B2_TEST_REALM`; see `docs/TESTING.md`)
   at the fixture host `b2-simulator-loopback.backblaze.net`, which

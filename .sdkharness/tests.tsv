@@ -26,3 +26,8 @@ conformance	keys.multi_bucket	simulator	./.sdkharness/tests/run-conformance
 conformance	bucket.notification_rules	simulator	./.sdkharness/tests/run-conformance
 conformance	api.partner	simulator	./.sdkharness/tests/run-conformance
 conformance	surface.s3	simulator	./.sdkharness/tests/run-conformance
+resilience	api.backoff_503	simulator	./.sdkharness/tests/run-resilience
+resilience	api.retry_after_503	simulator	./.sdkharness/tests/run-resilience
+resilience	api.retry_after_429	simulator	./.sdkharness/tests/run-resilience
+resilience	auth.expired_401	simulator	./.sdkharness/tests/run-resilience
+resilience	auth.clock_expiry	simulator	./.sdkharness/tests/run-resilience
