@@ -7,6 +7,13 @@
 // encryption on encrypts what is uploaded into it, or copied into it, from then on, and not the files
 // that were already there; encryption is transparent to a reader. The effect asserted is the one a
 // caller sees on the stored object: the `serverSideEncryption` s3_head_object reports.
+// Measured against real B2 on 2026-10-13 (b2-simulator PR 42, ledger F-111): every object B2 stores is
+// encrypted with SSE-B2, so HEAD, GET, put, copy and multipart answers carry
+// `x-amz-server-side-encryption: AES256` whether or not the request asked for it, and in a bucket with
+// or without a default mode. A check can therefore not tell a file stored before a default was turned
+// on from one stored after it by the header; what the default mode adds is its own listing
+// (`defaultServerSideEncryption`), asserted below. Needs the simulator that reports AES256 on every
+// object (b2-simulator 3907358 or later); an older build leaves the header off a plain upload.
 // https://www.backblaze.com/apidocs/s3-put-object https://www.backblaze.com/apidocs/s3-copy-object
 // https://www.backblaze.com/docs/cloud-storage-server-side-encryption
 // https://www.backblaze.com/apidocs/b2-update-bucket
@@ -32,10 +39,10 @@ await runScenario("enc.sse_b2", async (s) => {
     (await bucketInfo(s, bucket)).defaultServerSideEncryption.mode,
   );
 
-  s.step("a plain upload is not reported as encrypted");
+  s.step("a plain upload is reported as encrypted too (B2 encrypts every object)");
   const plain = payload(2048, 80);
   await put(s, bucket, "st/enc/plain.bin", plain);
-  eq("encryption of a plain upload", undefined, await encryptionOf(bucket, "st/enc/plain.bin"));
+  eq("encryption of a plain upload", "AES256", await encryptionOf(bucket, "st/enc/plain.bin"));
 
   s.step("an upload with serverSideEncryption AES256 is encrypted");
   const secret = payload(4096, 81);
@@ -60,7 +67,7 @@ await runScenario("enc.sse_b2", async (s) => {
     await encryptionOf(born, "st/enc/default.bin"),
   );
 
-  s.step("turning the default on later covers new files only");
+  s.step("turning the default on later is listed, and new files are encrypted");
   const later = await s.bucket();
   await put(s, later, "st/enc/before.bin", plain);
   await s.call("b2_update_bucket", {
@@ -76,8 +83,8 @@ await runScenario("enc.sse_b2", async (s) => {
     await encryptionOf(later, "st/enc/after.bin"),
   );
   eq(
-    "an upload from before the default",
-    undefined,
+    "an upload from before the default (B2 encrypts it too)",
+    "AES256",
     await encryptionOf(later, "st/enc/before.bin"),
   );
 
