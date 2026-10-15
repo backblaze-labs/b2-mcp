@@ -14,6 +14,11 @@
 // on from one stored after it by the header; what the default mode adds is its own listing
 // (`defaultServerSideEncryption`), asserted below. Needs the simulator that reports AES256 on every
 // object (b2-simulator 3907358 or later); an older build leaves the header off a plain upload.
+// Measured against real B2 on 2026-10-14 (b2-simulator PR 43, ledger F-11): a bucket created with no
+// `defaultServerSideEncryption` is listed with `{mode: "SSE-B2", algorithm: "AES256"}`, as the b2_create_bucket
+// page says ("If this field is omitted, the bucket uses SSE-B2 with AES256"). Accounts observed in
+// 2026-09 listed `null` there; the simulator keeps that behaviour behind `--default-encryption none`, which
+// this check does not use. Needs b2-simulator 64f038e or later.
 // https://www.backblaze.com/apidocs/s3-put-object https://www.backblaze.com/apidocs/s3-copy-object
 // https://www.backblaze.com/docs/cloud-storage-server-side-encryption
 // https://www.backblaze.com/apidocs/b2-update-bucket
@@ -31,12 +36,13 @@ await runScenario("enc.sse_b2", async (s) => {
       serverSideEncryption: "AES256",
     });
 
-  s.step("bucket with no default encryption");
+  s.step("a bucket created with no encryption setting defaults to SSE-B2");
   const bucket = await s.bucket();
+  const plainDefault = (await bucketInfo(s, bucket)).defaultServerSideEncryption;
   eq(
-    "default mode of a plain bucket",
-    null,
-    (await bucketInfo(s, bucket)).defaultServerSideEncryption.mode,
+    "default mode and algorithm of a plain bucket",
+    ["SSE-B2", "AES256"],
+    [plainDefault.mode, plainDefault.algorithm],
   );
 
   s.step("a plain upload is reported as encrypted too (B2 encrypts every object)");
