@@ -617,6 +617,25 @@ describe("HTTP handler (MCP 2026-07-28)", () => {
     expect(parsedJson(res.body).result.tools.length).toBeGreaterThan(0);
   });
 
+  it("rejects oversized tool collections before schema validation (#524)", async () => {
+    const res = await request(port, "POST", "/mcp", {
+      headers: { ...creds, ...modernHeaders("tools/call", "b2_list_buckets") },
+      body: callToolBody("b2_list_buckets", { extra: Array(10_001).fill(0) }),
+    });
+
+    expect(res.status).toBe(200);
+    const result = parsedJson(res.body).result;
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result)).toMatch(/maximum of 10000 elements/);
+
+    const valid = await request(port, "POST", "/mcp", {
+      headers: { ...creds, ...modernHeaders("tools/call", "b2_list_buckets") },
+      body: callToolBody("b2_list_buckets"),
+    });
+    expect(valid.status).toBe(200);
+    expect(parsedJson(valid.body).result.isError).not.toBe(true);
+  });
+
   it("returns controlled JSON-RPC errors for invalid tool names and schemas", async () => {
     const invalidName = await request(port, "POST", "/mcp", {
       headers: { ...creds, ...modernHeaders("tools/call", "missing_tool") },

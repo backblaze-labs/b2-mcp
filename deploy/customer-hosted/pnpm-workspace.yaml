@@ -38,7 +38,7 @@ overrides:
   '@vercel/backends>path-to-regexp': 8.4.0
   # Dev-only transitive dep via @vercel/blob; force the patched build off the
   # undici WebSocket permessage-deflate DoS (GHSA-3wwx-pv8p-q78v, fixed 6.28.1).
-  '@vercel/blob>undici': '>=6.28.1 <7'
+  '@vercel/blob>undici': '>=6.29.1 <7'
   '@vercel/express>path-to-regexp': 8.4.0
   '@vercel/fun>path-to-regexp': 8.4.0
   '@vercel/fun>tar': 7.5.21
@@ -48,7 +48,7 @@ overrides:
   '@vercel/fun>@tootallnate/once': 2.0.1
   '@vercel/hono>path-to-regexp': 8.4.0
   '@vercel/node>path-to-regexp': 6.3.0
-  '@vercel/node>undici': '>=6.28.1 <7'
+  '@vercel/node>undici': '>=6.29.1 <7'
   '@vercel/python-analysis>js-yaml': 4.3.2
   '@vercel/python-analysis>minimatch': 10.2.3
   '@vercel/python-analysis>smol-toml': '>=1.8.1 <2'
@@ -58,13 +58,13 @@ overrides:
   esbuild: 0.28.1
   vercel>path-to-regexp: 8.4.0
   vercel>smol-toml: '>=1.8.1 <2'
-  vercel>undici: '>=6.28.1 <7'
+  vercel>undici: '>=6.29.1 <7'
   'minimatch@3.1.5>brace-expansion': 1.1.21
   nanoid: 3.3.18
   # Dev-only transitive deps (via ajv/vercel); force patched builds off the
   # fast-uri host-confusion/SSRF advisories (incl. GHSA-58mr-gqgx-xq4g, fixed in
   # 3.1.7) and the qs array-limit/DoS advisories.
-  fast-uri: '>=3.1.7 <4'
+  fast-uri: '>=3.1.9 <4'
   qs: '>=6.16.0'
   # Dev-only transitive dep; force the patched build off GHSA-2vr4-cq9g-pvrc
   # (ip-address ReDoS/parse advisory affecting >=10.2.0 <=10.5.0, fixed 10.5.1).
@@ -80,12 +80,12 @@ overrides:
   # (<1.7.1) arrives via @vercel/container. Each major-selector is upper-bounded
   # so consumers stay on their own reviewed major (miniflare and @vercel/sandbox
   # are undici-7 consumers) — patched, without an unreviewed cross-major upgrade.
-  'undici@7': '>=7.29.1 <8'
-  'undici@8': '>=8.10.2 <9'
+  'undici@7': '>=7.30.1 <8'
+  'undici@8': '>=8.12.2 <9'
   'smol-toml@1': '>=1.8.1 <2'
   # Dev-only transitive dep via typedoc; force the patched build off the
   # markdown-it linkify quadratic-time DoS (GHSA-253c-mchw-3w2r, fixed 14.3.1).
-  markdown-it: '>=14.3.1 <15'
+  markdown-it: '>=14.3.3 <15'
   # Dev-only transitive deps; force patched builds off the brace-expansion
   # recursion/quadratic-time DoS advisories (GHSA-q2hr-2g5m-vwhr,
   # GHSA-qhr7-859c-m2p7, GHSA-6j4f-fj2g-mc7p; fixed 5.0.12 / 1.1.21), the
@@ -97,3 +97,9 @@ overrides:
   'brace-expansion@5': '>=5.0.12 <6'
   proxy-addr: '>=2.0.8 <3'
   source-map-js: '>=1.2.2 <2'
+  vite: '>=8.2.4 <9'
+  hono: '>=4.13.11 <5'
+  '@modelcontextprotocol/server': 2.4.0
+  '@modelcontextprotocol/client': 2.4.0
+  '@modelcontextprotocol/core': 2.4.0
+  'zod@4': '>=4.6.7 <5'
