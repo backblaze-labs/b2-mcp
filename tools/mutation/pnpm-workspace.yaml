@@ -5,7 +5,7 @@
 # pnpm-workspace.yaml overrides do not reach here, so the security-relevant ones
 # are mirrored to keep the advisory job off versions the root policy excludes.
 overrides:
-  qs: '>=6.16.0'
+  qs: '>=6.16.1'
   fast-uri: '>=3.1.9 <4'
   nanoid: 3.3.18
   vite: '>=8.2.4 <9'

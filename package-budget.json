@@ -29,17 +29,17 @@
     "@aws-sdk/client-s3": {
       "purpose": "Permanent primary AWS S3 SDK dependency for B2's S3-compatible s3_* data-plane tools and usage-report object reads.",
       "policy": "Must remain isolated behind src/s3/aws-sdk-adapter.ts; tool handlers must not construct AWS clients directly.",
-      "version": "3.1144.0",
-      "resolved": "https://registry.npmjs.org/@aws-sdk/client-s3/-/client-s3-3.1144.0.tgz",
-      "integrity": "sha512-CAicFlKAuCAUEU1tIptCTh6Eikr4rig9CWYwofZdEuJm9i24XNclgCspV4DKXlOY2nK2AMGHRt88oxmwDdNW7w==",
+      "version": "3.1156.0",
+      "resolved": "https://registry.npmjs.org/@aws-sdk/client-s3/-/client-s3-3.1156.0.tgz",
+      "integrity": "sha512-Z2PqQqKMDVX56tNZ6ggmjoI5o/8+4+8ArmjLwE5ktYsEzs1BrvklBT1ZzI+s0Vcf3wfPguoEMD7EkMswmEta/A==",
       "owner": "@goanpeca"
     },
     "@aws-sdk/s3-request-presigner": {
       "purpose": "Permanent primary presigning dependency for B2 S3-compatible GetObject, PutObject, and UploadPart bearer URLs.",
       "policy": "Must remain isolated behind src/s3/aws-sdk-adapter.ts; presigned URL tool handlers use the repository-owned adapter contract.",
-      "version": "3.1144.0",
-      "resolved": "https://registry.npmjs.org/@aws-sdk/s3-request-presigner/-/s3-request-presigner-3.1144.0.tgz",
-      "integrity": "sha512-2dTx+VJx0bpCsDIhbLRI0D4DY0NvuTBpqTf/CKcwF3hXxaN4NcLC/IKasAdwvgckgZf0cjLiBc3VfgQ6vzFU/A==",
+      "version": "3.1156.0",
+      "resolved": "https://registry.npmjs.org/@aws-sdk/s3-request-presigner/-/s3-request-presigner-3.1156.0.tgz",
+      "integrity": "sha512-M4yj4HmAPydhIMxKK90eTcnHr5FHBl000d2oFMAWpt+XPX86c2kmNJpiYbKrPLIe8jyK9sweRt5CDdWrhq/QTg==",
       "owner": "@goanpeca"
     },
     "@backblaze-labs/b2-sdk": {
@@ -81,9 +81,9 @@
     "pino": {
       "purpose": "Structured server logging with existing secret-redaction policy.",
       "policy": "No wrapper logging package may be added without review.",
-      "version": "10.3.1",
-      "resolved": "https://registry.npmjs.org/pino/-/pino-10.3.1.tgz",
-      "integrity": "sha512-r34yH/GlQpKZbU1BvFFqOjhISRo1MNx1tWYsYvmj6KIRHSPMT2+yHOEb1SG6NMvRoHRF0a07kCOox/9yakl1vg=="
+      "version": "10.4.0",
+      "resolved": "https://registry.npmjs.org/pino/-/pino-10.4.0.tgz",
+      "integrity": "sha512-bk1ZMTwG/Vymx+zPoa28MhNzucFvXJWp3csrSuxuHPSMeUettaCoQ5Jvg07mtC4JGNpcfTwz41oVCnNgBK9+vA=="
     },
     "zod": {
       "purpose": "MCP tool input schemas supplied to the server runtime.",
@@ -129,10 +129,5 @@
       "owner": "@goanpeca"
     }
   },
-  "approvedDuplicatePackageVersions": {
-    "real-require": {
-      "versions": ["0.2.0", "1.0.0"],
-      "reason": "Pinned production transitive packages currently require both pino's helper and thread-stream's nested helper."
-    }
-  }
+  "approvedDuplicatePackageVersions": {}
 }

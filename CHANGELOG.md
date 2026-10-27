@@ -22,6 +22,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (#505)
 
 ### Changed
+- Consolidated the open Dependabot updates: `@aws-sdk/client-s3` and
+  `@aws-sdk/s3-request-presigner` `3.1144.0` → `3.1156.0`, `pino` `10.3.1` →
+  `10.4.0`, the dev-tooling group (`@modelcontextprotocol/inspector` `2.12.0`, `@toon-format/toon` `4.4.0`,
+  `typescript-eslint` `8.72.0`, `wrangler` `4.152.0`
+  with the direct `miniflare` pin moved to `5.20261019.2-beta`),
+  `eslint-plugin-jsdoc` `65.1.0`, and the GitHub Actions minor/patch group.
+  `eslint` stays at `10.9.1` because `10.13.0` pulls the quarantined
+  `@cacheable/*` packages, and `@biomejs/biome` stays at `2.5.15` because
+  `2.6.x` formats Markdown and YAML by default and needs a config migration,
+  and `@types/node` stays at `22.20.4`, the pinned Node engine floor.
+  (#518, #500, #503, #504, #526)
 - Bumped the AWS SDK group (`@aws-sdk/client-s3`,
   `@aws-sdk/s3-request-presigner`) `3.1125.0` → `3.1144.0` and realigned
   `@smithy/types` `4.17.2` → `4.19.0` so the S3 peer adapter's command/type
@@ -50,6 +61,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `deploy/customer-hosted` lockfiles. `braces` and `node-forge` have no patched
   release on npm yet, so they carry time-boxed `audit-policy.json` exceptions
   (dev-only, expiring 2026-11-05). (#481)
+- Patched the dev-only `node-forge` (GHSA-86w9-cpqp-85rv, fixed in 1.4.1) and
+  `qs` (GHSA-6pq8-jhm2-2vcw, fixed in 6.16.1) advisories via pnpm overrides in
+  the root, `deploy/customer-hosted`, and `tools/mutation` workspaces, and
+  retired the `node-forge` and stale `braces` audit exceptions. The dev-only
+  `zod` 3.x exception remains until a patched 3.x or the upstream tooling
+  moves. (#524)
 
 ## [0.2.2] - 2026-09-29
 
