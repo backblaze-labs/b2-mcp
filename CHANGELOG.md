@@ -50,6 +50,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `deploy/customer-hosted` lockfiles. `braces` and `node-forge` have no patched
   release on npm yet, so they carry time-boxed `audit-policy.json` exceptions
   (dev-only, expiring 2026-11-05). (#481)
+- Patched the dev-only `node-forge` (GHSA-86w9-cpqp-85rv, fixed in 1.4.1) and
+  `qs` (GHSA-6pq8-jhm2-2vcw, fixed in 6.16.1) advisories via pnpm overrides in
+  the root, `deploy/customer-hosted`, and `tools/mutation` workspaces, and
+  retired the `node-forge` and stale `braces` audit exceptions. The dev-only
+  `zod` 3.x exception remains until a patched 3.x or the upstream tooling
+  moves. (#524)
 
 ## [0.2.2] - 2026-09-29
 

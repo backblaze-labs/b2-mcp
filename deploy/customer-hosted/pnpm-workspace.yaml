@@ -26,6 +26,7 @@ minimumReleaseAgeExclude:
   - '@vercel/vc-native-linux-arm64@59.3.0'
   - '@vercel/vc-native-linux-x64@59.3.0'
   - vercel@59.3.0
+  - node-forge@1.4.1
 overrides:
   # Force the dev-only mcpb packer's interactive-editor path off vulnerable
   # tmp 0.0.33 (GHSA path-traversal); mcpb pack never prompts, but the audit
@@ -65,7 +66,10 @@ overrides:
   # fast-uri host-confusion/SSRF advisories (incl. GHSA-58mr-gqgx-xq4g, fixed in
   # 3.1.7) and the qs array-limit/DoS advisories.
   fast-uri: '>=3.1.9 <4'
-  qs: '>=6.16.0'
+  qs: '>=6.16.1'
+  # Dev-only mcpb dependency; force the patched build off the RSA PKCS#1 v1.5
+  # signature verification advisory (GHSA-86w9-cpqp-85rv, fixed 1.4.1).
+  node-forge: '>=1.4.1 <2'
   # Dev-only transitive dep; force the patched build off GHSA-2vr4-cq9g-pvrc
   # (ip-address ReDoS/parse advisory affecting >=10.2.0 <=10.5.0, fixed 10.5.1).
   ip-address: '>=10.5.1 <11'

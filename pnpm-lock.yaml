@@ -33,7 +33,8 @@ overrides:
   minimatch@3.1.5>brace-expansion: 1.1.21
   nanoid: 3.3.18
   fast-uri: '>=3.1.9 <4'
-  qs: '>=6.16.0'
+  qs: '>=6.16.1'
+  node-forge: '>=1.4.1 <2'
   ip-address: '>=10.5.1 <11'
   miniflare>sharp: '>=0.35.5'
   undici@7: '>=7.30.1 <8'
@@ -3427,8 +3428,8 @@ packages:
       encoding:
         optional: true
 
-  node-forge@1.4.0:
-    resolution: {integrity: sha512-LarFH0+6VfriEhqMMcLX2F7SwSXeWwnEAJEsYm5QKWchiVYVvJyV9v7UDvUv+w5HO23ZpQTXDv/GxdDdMyOuoQ==}
+  node-forge@1.4.1:
+    resolution: {integrity: sha512-w5/MfWaeMrpR/5ba6fZyAUTLSuE6aYz7H/3cYrqwZEmf5eQS3IaaLgJt4MBv7HglGFWmV22K8h4U18RJQmw/ow==}
     engines: {node: '>= 6.13.0'}
 
   node-gyp-build@4.8.4:
@@ -4320,7 +4321,7 @@ snapshots:
       fflate: 0.8.3
       galactus: 1.0.0(supports-color@10.2.2)
       ignore: 7.0.6
-      node-forge: 1.4.0
+      node-forge: 1.4.1
       pretty-bytes: 5.6.0
       zod: 3.25.76
       zod-to-json-schema: 3.25.2(zod@3.25.76)
@@ -7524,7 +7525,7 @@ snapshots:
     dependencies:
       whatwg-url: 5.0.0
 
-  node-forge@1.4.0: {}
+  node-forge@1.4.1: {}
 
   node-gyp-build@4.8.4: {}
 

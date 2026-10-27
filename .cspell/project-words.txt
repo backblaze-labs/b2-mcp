@@ -20,6 +20,7 @@ BuildKit
 cgroup
 cobertura
 corepack
+cpqp
 cosign
 cspell
 CycloneDX
