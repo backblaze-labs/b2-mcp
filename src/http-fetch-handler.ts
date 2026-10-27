@@ -40,7 +40,7 @@ import {
   sweepCapabilityCache,
 } from "./server.js";
 import { parseIntEnv } from "./utils/config.js";
-import { readCappedBodyBytes } from "./utils/http-body-limit.js";
+import { MAX_MCP_BODY_BYTES, readCappedBodyBytes } from "./utils/http-body-limit.js";
 import { logger } from "./utils/logger.js";
 import { allowRequest, sweepIdleBuckets } from "./utils/rate-limiter.js";
 import { safeErrorText, webRequestSecrets } from "./utils/secret-sanitizer.js";
@@ -918,6 +918,7 @@ export function createB2McpFetchHandler(options: HttpPipelineOptions = {}): B2Mc
     createPreparedMcpServerFactory(preparedRequestScope, createServerForRequest),
     {
       legacy: "stateless",
+      maxRequestBodySize: MAX_MCP_BODY_BYTES,
       onerror: (error) => logger.warn({ err: error.message }, "mcp.http.error"),
     },
   );

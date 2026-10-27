@@ -78,7 +78,36 @@
         "dependencyRange": "1.4.0"
       },
       "expires": "2026-11-05",
-      "reason": "GHSA-86w9-cpqp-85rv: no patched node-forge release is reachable (needs >=1.4.1); @anthropic-ai/mcpb 2.1.2, its latest, pins 1.4.0. Dev-only MCPB packaging tooling; not in the published package or any runtime dependency. Time-boxed: re-check for a fixed mcpb release before expiry."
+      "reason": "GHSA-86w9-cpqp-85rv (#524): registry rechecked 2026-10-26; no patched node-forge release is published (needs >=1.4.1); @anthropic-ai/mcpb 2.1.2, its latest, pins 1.4.0. Dev-only MCPB packaging tooling; not in the published package or any runtime dependency. Time-boxed: re-check for a fixed mcpb release before expiry."
+    },
+    {
+      "name": "zod",
+      "source": 1243066,
+      "maxSeverity": "high",
+      "isDirect": false,
+      "nodes": [
+        ".>@anthropic-ai/mcpb>zod",
+        ".>@anthropic-ai/mcpb>zod-to-json-schema>zod",
+        ".>vercel>@vercel/backends>zod",
+        ".>vercel>@vercel/express>@vercel/cervel>@vercel/backends>zod",
+        ".>vercel>@vercel/express>zod",
+        ".>vercel>@vercel/hono>zod",
+        ".>vercel>@vercel/python>@vercel/python-analysis>zod",
+        ".>vercel>@vercel/python-analysis>zod"
+      ],
+      "effects": [],
+      "package": {
+        "version": "4.6.7",
+        "integrity": "sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg=="
+      },
+      "via": {
+        "path": "node_modules/@anthropic-ai/mcpb",
+        "name": "@anthropic-ai/mcpb",
+        "version": "2.1.2",
+        "dependencyRange": "3.25.76"
+      },
+      "expires": "2026-11-05",
+      "reason": "GHSA-mrhx-c7xc-m3w5 (#524): no patched 3.x release; dev-only via @anthropic-ai/mcpb / vercel; forcing zod 4 would cross a major in third-party tooling. Covers only Zod 3.25.76 and 3.22.4 at the exact listed paths. Production and all Zod 4 paths use patched 4.6.7. Re-check upstream before expiry."
     }
   ]
 }
