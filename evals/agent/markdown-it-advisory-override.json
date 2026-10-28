@@ -8,7 +8,8 @@
     "pnpm-lock.yaml",
     "deploy/customer-hosted/pnpm-workspace.yaml",
     "deploy/customer-hosted/pnpm-lock.yaml",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    ".changes"
   ],
   "checks": [
     {
@@ -27,6 +28,9 @@
       "name": "frozen install succeeds",
       "run": "CI=true pnpm install --frozen-lockfile --ignore-scripts"
     },
-    { "name": "no audit exception added", "run": "git diff --quiet HEAD -- audit-policy.json" }
+    {
+      "name": "no audit exception added",
+      "run": "git diff --quiet HEAD -- audit-policy.json"
+    }
   ]
 }

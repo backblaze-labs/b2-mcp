@@ -19,7 +19,9 @@ concurrency:
 
 jobs:
   detect:
-    if: github.repository == 'backblaze-labs/b2-mcp'
+    # Only trusted main code may hold issues: write (and, below, the provider
+    # secret); a feature-branch dispatch must not reach this path.
+    if: github.repository == 'backblaze-labs/b2-mcp' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -119,7 +121,7 @@ jobs:
   diagnose:
     name: read-only diagnosis
     needs: detect
-    if: needs.detect.outputs.issue != ''
+    if: github.ref == 'refs/heads/main' && needs.detect.outputs.issue != ''
     runs-on: ubuntu-latest
     environment: llm-evals
     timeout-minutes: 20
