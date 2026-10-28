@@ -144,6 +144,11 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+      # pnpm/action-setup v6.1.0, reviewed 2026-09-13.
+      - if: steps.key.outputs.enabled == 'true'
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
+        with:
+          run_install: false
       # actions/setup-node v7, reviewed 2026-08-06.
       - if: steps.key.outputs.enabled == 'true'
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
@@ -158,8 +163,8 @@ jobs:
           ISSUE: ${{ needs.detect.outputs.issue }}
         run: |
           set -euo pipefail
-          npm install --global --no-audit --no-fund @anthropic-ai/claude-code@2.1.296
-          claude -p "Read issue ${ISSUE} in ${GITHUB_REPOSITORY} with gh issue view. Diagnose the CI failure-rate breach on main from the recent failed runs (gh run list --workflow test.yml --branch main, gh run view --log-failed). Cite run IDs, commit SHAs and log lines as evidence; say whether each failure looks flaky or real. Do not speculate about root cause as fact. Output Markdown for the issue's Problem and Open questions sections only." \
+          pnpm --dir tools/agent-cli install --frozen-lockfile --ignore-scripts
+          node tools/agent-cli/node_modules/@anthropic-ai/claude-code/cli-wrapper.cjs -p "Read issue ${ISSUE} in ${GITHUB_REPOSITORY} with gh issue view. Diagnose the CI failure-rate breach on main from the recent failed runs (gh run list --workflow test.yml --branch main, gh run view --log-failed). Cite run IDs, commit SHAs and log lines as evidence; say whether each failure looks flaky or real. Do not speculate about root cause as fact. Output Markdown for the issue's Problem and Open questions sections only." \
             --allowedTools "Read,Grep,Glob,Bash(gh issue view *),Bash(gh run view *),Bash(gh run list *)" \
             --permission-mode dontAsk > "${RUNNER_TEMP}/diagnosis.md"
           gh issue comment "${ISSUE}" --repo "${GITHUB_REPOSITORY}" --body-file "${RUNNER_TEMP}/diagnosis.md"
