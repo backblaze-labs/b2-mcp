@@ -1,0 +1,102 @@
+name: Agent Evals
+
+# Regression tests for the agent configuration (AGENTS.md, CLAUDE.md, .claude/,
+# REVIEW.md, docs/review-lessons.md) against real past tasks in evals/agent/.
+# See evals/agent/README.md. Like evals.yml, this never runs on pull_request, so
+# ANTHROPIC_API_KEY (llm-evals environment) never meets unreviewed code. Without
+# the secret the guard skips the run with a notice instead of failing.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-evals-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    if: github.repository == 'backblaze-labs/b2-mcp'
+    runs-on: ubuntu-latest
+    environment: llm-evals
+    timeout-minutes: 5
+    outputs:
+      enabled: ${{ steps.ref.outputs.enabled }}
+    steps:
+      - name: Require main and an API key
+        id: ref
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" != "refs/heads/main" ]]; then
+            echo "::error::agent evals run only against main; got ${GITHUB_REF}"
+            exit 1
+          fi
+          if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
+            echo "::notice::ANTHROPIC_API_KEY is not configured in the llm-evals environment; skipping agent evals."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+
+  evals:
+    name: agent configuration evals
+    needs: guard
+    if: needs.guard.outputs.enabled == 'true'
+    runs-on: ubuntu-latest
+    environment: llm-evals
+    timeout-minutes: 90
+    steps:
+      # actions/checkout v7, reviewed 2026-08-25.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0 # each eval starts from an older commit
+          persist-credentials: false
+      # pnpm/action-setup v6.1.0, reviewed 2026-09-13.
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
+        with:
+          run_install: false
+      # actions/setup-node v7, reviewed 2026-08-06.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 22.23.1
+          package-manager-cache: false
+      - name: Install the pinned Claude Code CLI
+        run: npm install --global --no-audit --no-fund @anthropic-ai/claude-code@2.1.296
+      - name: Run agent eval suite
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          set -euo pipefail
+          git config --global user.name agent-evals
+          git config --global user.email agent-evals@users.noreply.github.com
+          evals="${RUNNER_TEMP}/evals"
+          run="${RUNNER_TEMP}/run"
+          cp -r evals/agent "${evals}" # grade from a copy made before any run
+          failed=0
+          for eval in "${evals}"/*.json; do
+            git worktree add -q --detach "${run}" "$(jq -r '.from' "${eval}")"
+            rm -rf "${run}/evals/agent" "${run}/.claude"
+            # The configuration under test.
+            cp -r AGENTS.md CLAUDE.md REVIEW.md .claude "${run}/"
+            mkdir -p "${run}/docs" && cp docs/review-lessons.md "${run}/docs/"
+            git -C "${run}" add -A
+            git -C "${run}" commit -q --allow-empty -m "configuration under test"
+            (
+              cd "${run}"
+              CI=true pnpm install --frozen-lockfile --ignore-scripts > /dev/null
+              claude -p "$(jq -r '.prompt' "${eval}")" \
+                --allowedTools "Read,Edit,Write,Grep,Glob,Bash(pnpm *),Bash(git diff *),Bash(git status *)" \
+                --permission-mode dontAsk \
+                --output-format json > "${RUNNER_TEMP}/result.json"
+              "${evals}/check.sh" "${eval}" "${RUNNER_TEMP}/result.json"
+            ) || failed=$((failed + 1))
+            git worktree remove --force "${run}"
+          done
+          echo "${failed} eval(s) failed"
+          [ "${failed}" -eq 0 ]

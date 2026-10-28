@@ -63,6 +63,7 @@
     "evals": "pnpm run build && vitest run --config evals/vitest.config.mts",
     "evals:provider-comparison": "tsx evals/run-provider-comparison.ts",
     "verify": "pnpm run typecheck && pnpm run build && pnpm run check:doc-examples && pnpm run check:deployment-contracts && pnpm run lint && pnpm run lint:docs && pnpm run lint:links && pnpm run validate:skills && pnpm run format:check && pnpm run spell && pnpm run test:runtime-security && pnpm run test:diagnostics",
+    "ci": "node scripts/ci-local.mjs",
     "test:cross-platform": "node scripts/run-cross-platform-tests.mjs",
     "smoke": "node scripts/smoke-test.mjs",
     "smoke:local": "node scripts/local-mcp-smoke.mjs",
