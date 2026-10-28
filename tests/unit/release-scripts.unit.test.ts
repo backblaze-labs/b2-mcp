@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { spawnSync } from "child_process";
@@ -179,6 +187,23 @@ function withFixture(run: (fixtureRoot: string) => void): void {
         "",
       ].join("\n"),
     );
+    mkdirSync(join(fixtureRoot, ".changes", "unreleased"), { recursive: true });
+    writeFileSync(
+      join(fixtureRoot, ".changie.yaml"),
+      readFileSync(join(root, ".changie.yaml"), "utf8"),
+    );
+    writeFileSync(
+      join(fixtureRoot, ".changes", "header.tpl.md"),
+      "# Changelog\n\n## [Unreleased]\n",
+    );
+    writeFileSync(
+      join(fixtureRoot, ".changes", "v0.1.0.md"),
+      "## [0.1.0] - 2026-08-07\n\n### Added\n- Initial public package.\n",
+    );
+    writeFileSync(
+      join(fixtureRoot, ".changes", "unreleased", "Added-20260901-120000.yaml"),
+      'kind: Added\nbody: "Future change."\ntime: 2026-09-01T12:00:00.000000+00:00\n',
+    );
     writeFileSync(
       join(fixtureRoot, "runtime-policy.json"),
       JSON.stringify({ engineRange: "^22.22.2 || ^24 || ^26" }, null, 2),
@@ -296,15 +321,52 @@ describe("release scripts", () => {
 
       const changelog = readFileSync(join(fixtureRoot, "CHANGELOG.md"), "utf8");
       expect(result.status).toBe(0);
-      expect(result.stdout).toContain("cut-changelog: promoted [Unreleased] to [0.2.0]");
+      expect(result.stdout).toContain("cut-changelog: batched 1 change(s) into [0.2.0]");
       expect(changelog).toMatch(/^## \[Unreleased\]\n\n## \[0\.2\.0\] - \d{4}-\d{2}-\d{2}/m);
-      expect(changelog).toContain("Future change.");
-      expect(changelog).toContain(
-        "[Unreleased]: https://github.com/backblaze-labs/b2-mcp/compare/v0.2.0...HEAD",
-      );
+      expect(changelog).toMatch(/## \[0\.2\.0\][\s\S]*- Future change\.[\s\S]*## \[0\.1\.0\]/);
       expect(changelog).toContain(
         "[0.2.0]: https://github.com/backblaze-labs/b2-mcp/compare/v0.1.0...v0.2.0",
       );
+      expect(existsSync(join(fixtureRoot, ".changes", "v0.2.0.md"))).toBe(true);
+      expect(readdirSync(join(fixtureRoot, ".changes", "unreleased"))).not.toContain(
+        "Added-20260901-120000.yaml",
+      );
+    });
+  });
+
+  it("refuses to cut a version that already has a changie release file", () => {
+    withFixture((fixtureRoot) => {
+      const packagePath = join(fixtureRoot, "package.json");
+      const pkg = JSON.parse(readFileSync(packagePath, "utf8"));
+      writeFileSync(packagePath, JSON.stringify({ ...pkg, version: "0.1.0" }, null, 2));
+
+      const result = spawnSync(process.execPath, ["scripts/cut-changelog.mjs"], {
+        cwd: root,
+        env: scriptEnv(fixtureRoot),
+        encoding: "utf8",
+      });
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(".changes/v0.1.0.md already exists");
+    });
+  });
+
+  it("cuts an empty release with a warning when no fragments are pending", () => {
+    withFixture((fixtureRoot) => {
+      rmSync(join(fixtureRoot, ".changes", "unreleased", "Added-20260901-120000.yaml"));
+      const packagePath = join(fixtureRoot, "package.json");
+      const pkg = JSON.parse(readFileSync(packagePath, "utf8"));
+      writeFileSync(packagePath, JSON.stringify({ ...pkg, version: "0.1.1" }, null, 2));
+
+      const result = spawnSync(process.execPath, ["scripts/cut-changelog.mjs"], {
+        cwd: root,
+        env: scriptEnv(fixtureRoot),
+        encoding: "utf8",
+      });
+
+      expect(result.status).toBe(0);
+      expect(result.stderr).toContain("no unreleased entries; releasing v0.1.1 with no notes");
+      expect(readFileSync(join(fixtureRoot, "CHANGELOG.md"), "utf8")).toMatch(/## \[0\.1\.1\]/);
     });
   });
 
@@ -1199,7 +1261,7 @@ describe("release scripts", () => {
               version: [
                 `node ${join(root, "scripts/cut-changelog.mjs")}`,
                 `node ${join(root, "scripts/update-server-json-version.mjs")}`,
-                "git add CHANGELOG.md server.json lhm.plugin.json mcpb/manifest.json",
+                "git add CHANGELOG.md .changes server.json lhm.plugin.json mcpb/manifest.json",
               ].join(" && "),
             },
           },
@@ -1229,7 +1291,7 @@ describe("release scripts", () => {
       const stagedFiles = runGit(fixtureRoot, ["diff", "--cached", "--name-only"]);
 
       expect(result.status).toBe(0);
-      expect(result.stdout).toContain("cut-changelog: promoted [Unreleased] to [0.1.1]");
+      expect(result.stdout).toContain("cut-changelog: batched 1 change(s) into [0.1.1]");
       expect(bumpedPackage.version).toBe("0.1.1");
       expect(bumpedServerJson.version).toBe("0.1.1");
       expect(bumpedServerJson.packages[0].version).toBe("0.1.1");
@@ -1237,6 +1299,7 @@ describe("release scripts", () => {
       expect(bumpedMcpb.version).toBe("0.1.1");
       expect(changelog).toMatch(/^## \[Unreleased\]\n\n## \[0\.1\.1\] - \d{4}-\d{2}-\d{2}/m);
       expect(stagedFiles.split(/\r?\n/)).toContain("CHANGELOG.md");
+      expect(stagedFiles.split(/\r?\n/)).toContain(".changes/v0.1.1.md");
       expect(stagedFiles.split(/\r?\n/)).toContain("server.json");
       expect(stagedFiles.split(/\r?\n/)).toContain("lhm.plugin.json");
       expect(stagedFiles.split(/\r?\n/)).toContain("mcpb/manifest.json");

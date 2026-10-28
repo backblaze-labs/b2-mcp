@@ -7,66 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-- `docs/TEST-COVERAGE-MAP.md`: snapshot map of the existing tests to a shared
-  list of 38 B2 capabilities, with known gaps. (#469)
-- Test-only `B2_TEST_REALM` endpoint override and a local HTTPS fake endpoint,
-  so the built server can be driven in the protocol layer with no real
-  credentials. The override is inert unless `NODE_ENV=test`, trusts exactly one
-  `https:` origin, and is covered by a basic-path stdio test (bucket and object
-  round trip, multipart, `saveToPath`). (#469)
-
-### Fixed
-- `s3_put_object` accepts an empty `content` string and stores a zero-byte
-  object instead of answering "Either filePath or content must be provided."
-  (#505)
-
-### Changed
-- Consolidated the open Dependabot updates: `@aws-sdk/client-s3` and
-  `@aws-sdk/s3-request-presigner` `3.1144.0` → `3.1156.0`, `pino` `10.3.1` →
-  `10.4.0`, the dev-tooling group (`@modelcontextprotocol/inspector` `2.12.0`, `@toon-format/toon` `4.4.0`,
-  `typescript-eslint` `8.72.0`, `wrangler` `4.152.0`
-  with the direct `miniflare` pin moved to `5.20261019.2-beta`),
-  `eslint-plugin-jsdoc` `65.1.0`, and the GitHub Actions minor/patch group.
-  `eslint` stays at `10.9.1` because `10.13.0` pulls the quarantined
-  `@cacheable/*` packages, and `@biomejs/biome` stays at `2.5.15` because
-  `2.6.x` formats Markdown and YAML by default and needs a config migration,
-  and `@types/node` stays at `22.20.4`, the pinned Node engine floor.
-  (#518, #500, #503, #504, #526)
-- Bumped the AWS SDK group (`@aws-sdk/client-s3`,
-  `@aws-sdk/s3-request-presigner`) `3.1125.0` → `3.1144.0` and realigned
-  `@smithy/types` `4.17.2` → `4.19.0` so the S3 peer adapter's command/type
-  boundary stays on a single version. `@smithy/core` is re-resolved to `3.35.1`
-  so the committed lockfile matches a clean consumer install. (#481)
-- Bumped `@modelcontextprotocol/server` `2.0.0` → `2.2.0` and the dev-only
-  `@modelcontextprotocol/client` to `2.2.0`, which also clears the client OAuth
-  advisory (GHSA-6qxp-vccf-f47h). The dev-only `@modelcontextprotocol/node`
-  adapter stays on `2.1.0`, its newest release whose peer range accepts
-  `server` 2.2.x, and the SDK contract tests now check that declared peer range
-  instead of an identical version string. The generated tool and prompt
-  contracts are unchanged apart from the recorded SDK versions. (#481)
-- Bumped dev and build tooling: `vercel` `59.26.0` → `60.1.3`, `@vercel/node`
-  `13.0.0` → `16.0.1`, `wrangler` `4.138.0` → `4.146.0` with the direct `miniflare` pin moved to
-  `5.20261001.0-alpha` to stay on Wrangler's workerd release,
-  `@modelcontextprotocol/inspector` `2.8.0` → `2.9.0`, `@biomejs/biome` `2.5.15`,
-  `typescript-eslint` `8.71.0`, `eslint-plugin-tsdoc` `0.5.4`, and
-  `@microsoft/tsdoc-config` `0.18.3`; re-pinned `github/codeql-action` to
-  `v4.38.2`. `eslint` stays on `10.9.1` because `10.11.0` pulls the
-  quarantined `@cacheable/*` packages. (#481)
-
-### Security
-- Patched transitive dev-toolchain advisories via pinned pnpm overrides:
-  `brace-expansion`, `proxy-addr`, `smol-toml`, `source-map-js`, and `sharp`
-  (the librsvg advisory fixed in 0.35.5), in both the root and
-  `deploy/customer-hosted` lockfiles. `braces` and `node-forge` have no patched
-  release on npm yet, so they carry time-boxed `audit-policy.json` exceptions
-  (dev-only, expiring 2026-11-05). (#481)
-- Patched the dev-only `node-forge` (GHSA-86w9-cpqp-85rv, fixed in 1.4.1) and
-  `qs` (GHSA-6pq8-jhm2-2vcw, fixed in 6.16.1) advisories via pnpm overrides in
-  the root, `deploy/customer-hosted`, and `tools/mutation` workspaces, and
-  retired the `node-forge` and stale `braces` audit exceptions. The dev-only
-  `zod` 3.x exception remains until a patched 3.x or the upstream tooling
-  moves. (#524)
+Unreleased entries live in [`.changes/unreleased/`](https://github.com/backblaze-labs/b2-mcp/tree/main/.changes/unreleased) until the next release. Add one with `pnpm run changelog:new` (see [CONTRIBUTING.md](https://github.com/backblaze-labs/b2-mcp/blob/main/CONTRIBUTING.md#changelog-entries)).
 
 ## [0.2.2] - 2026-09-29
 
@@ -96,6 +37,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Overrode the dev-only `markdown-it` (via `typedoc`) to the patched 14.3.x line
   for the `linkify` quadratic-time DoS (GHSA-253c-mchw-3w2r), published after
   the batch above. (#458)
+
+[0.2.2]: https://github.com/backblaze-labs/b2-mcp/compare/v0.2.1...v0.2.2
 
 ## [0.2.1] - 2026-09-04
 
@@ -199,6 +142,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     retired header/env names for the migration window so a still-in-flight
     legacy secret is never written to logs in cleartext.
 
+[0.2.1]: https://github.com/backblaze-labs/b2-mcp/compare/v0.2.0...v0.2.1
+
 ## [0.2.0] - 2026-09-01
 
 ### Added
@@ -251,6 +196,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `b2_usage_growth` and `b2_egress_leaders`; added regression coverage closing
   the QA F12–F20 error-classification and fault-injection detection gaps. (#345)
 
+[0.2.0]: https://github.com/backblaze-labs/b2-mcp/compare/v0.1.2...v0.2.0
+
 ## [0.1.2] - 2026-08-23
 
 ### Changed
@@ -298,6 +245,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   post-publish verification retry and legacy rerun allowance for immutable
   `0.1.0` and `0.1.1` metadata.
 
+[0.1.2]: https://github.com/backblaze-labs/b2-mcp/compare/v0.1.1...v0.1.2
+
 ## [0.1.1] - 2026-08-18
 
 ### Changed
@@ -315,6 +264,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead of an ephemeral one.
 - Exercise the Partner API read paths in CI against a Partner-entitled account
   via a master key (`B2_MASTER_KEY_ID`/`B2_MASTER_KEY`).
+
+[0.1.1]: https://github.com/backblaze-labs/b2-mcp/compare/v0.1.0...v0.1.1
 
 ## [0.1.0] - 2026-08-18
 
@@ -499,10 +450,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added explicit read-only workflow permissions and consolidated the safe AWS
   SDK, Axios, and TypeScript dependency updates from superseded Dependabot PRs.
 
-[Unreleased]: https://github.com/backblaze-labs/b2-mcp/compare/v0.2.2...HEAD
-[0.2.2]: https://github.com/backblaze-labs/b2-mcp/compare/v0.2.1...v0.2.2
-[0.2.1]: https://github.com/backblaze-labs/b2-mcp/compare/v0.2.0...v0.2.1
-[0.2.0]: https://github.com/backblaze-labs/b2-mcp/compare/v0.1.2...v0.2.0
-[0.1.2]: https://github.com/backblaze-labs/b2-mcp/compare/v0.1.1...v0.1.2
-[0.1.1]: https://github.com/backblaze-labs/b2-mcp/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/backblaze-labs/b2-mcp/releases/tag/v0.1.0

@@ -1,0 +1,9 @@
+metric: ci_failure_rate_main # daily share of failed `CI` runs on pushes to main
+baseline: rolling_90d
+rules: western_electric
+tiers:
+  1sigma: { action: log }
+  2sigma: { action: diagnose,
+            tools: "Read,Grep,Glob,Bash(gh run view *),Bash(gh run list *)" }
+  3sigma: { action: propose,
+            routes: [issue, pull_request] }

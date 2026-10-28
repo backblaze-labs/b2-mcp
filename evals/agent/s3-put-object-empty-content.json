@@ -1,0 +1,22 @@
+{
+  "name": "s3-put-object-empty-content",
+  "source": "Fix 884e44b: s3_put_object rejected an empty content string",
+  "from": "3f10b4373e16cdecaaab3c95b4d91bde72fa7cd6",
+  "prompt": "s3_put_object answers \"Either filePath or content must be provided.\" when a client sends content as an empty string. An empty string is valid base64 for a zero-byte object, so the tool should store a zero-byte object instead. Fix it test-first and run the tests before you finish.",
+  "may_change": ["src/s3", "tests/unit", "CHANGELOG.md"],
+  "checks": [
+    { "name": "typecheck and unit tests pass", "run": "pnpm test" },
+    {
+      "name": "held-out regression test passes",
+      "run": "$EVALS/run-hidden-test.sh s3-objects-fixtures.unit.test.ts.txt tests/unit/eval-hidden-s3-objects.unit.test.ts"
+    },
+    {
+      "name": "no line removed from existing tests",
+      "run": "! git diff HEAD -- tests | grep '^-[^-]'"
+    },
+    {
+      "name": "changelog entry under Unreleased",
+      "run": "git diff HEAD -- CHANGELOG.md | grep -q '^+'"
+    }
+  ]
+}

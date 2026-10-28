@@ -18,6 +18,7 @@ biomejs
 buildx
 BuildKit
 cgroup
+cicd
 cobertura
 corepack
 cpqp
@@ -40,6 +41,7 @@ pino
 presigner
 QEMU
 SARIF
+sdlc
 SLSA
 spdxjson
 slsaprovenance
@@ -58,9 +60,11 @@ zizmorcore
 zod
 
 # People and account names
+ffumero
 goanpeca
 Gonza
 Lopopolo
+Peña
 sophiecarreras
 
 # Cloud, network, storage, and security terms
@@ -81,6 +85,7 @@ punkpeye
 sessionful
 Smithery
 unallowed
+unforgeable
 unparseable
 unreviewed
 
@@ -102,3 +107,9 @@ linkify
 librsvg
 vccf
 mchw
+changie
+cicd
+srcs
+stdev
+unforgeable
+misroute

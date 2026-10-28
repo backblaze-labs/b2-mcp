@@ -47,6 +47,10 @@ files:
   - 'skills/**/*.md'
   - '*.md'
   - 'CLAUDE.md'
+  - '.claude/**/*.md'
+  - 'intent/**/*.md'
+  - 'evals/agent/*.md'
+  - 'ops/**/*.{md,mjs}'
   - '.github/**/*.yml'
 
 # Patterns we never want to flag, even inside otherwise-scanned files.
