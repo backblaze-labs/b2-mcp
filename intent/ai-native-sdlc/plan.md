@@ -20,6 +20,8 @@ Issue: #528. Status: draft, for the engineer's review.
   `.github/workflows/changelog.yml`, `tests/unit/check-changelog.unit.test.ts`
   (new); `scripts/cut-changelog.mjs`, `tests/unit/release-scripts.unit.test.ts`,
   `CHANGELOG.md` (generated), `package.json`, lockfiles.
+- `ops/review-metrics/`, `.github/workflows/review-metrics.yml`,
+  `tests/unit/review-metrics.unit.test.ts` (new).
 - `CONTRIBUTING.md`, `RELEASE.md`, `.github/CODEOWNERS`,
   `.github/PULL_REQUEST_TEMPLATE.md`, docs indexes, `cspell.config.yaml`.
 

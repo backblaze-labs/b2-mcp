@@ -97,6 +97,7 @@ Changes to this posture start as an intent; see
 | Agent configuration keeps working | Agent evals in [`evals/agent/`](../evals/agent/README.md), nightly and on dispatch |
 | CI health regressions become work | Control bands in [`ops/control-bands/`](../ops/control-bands/README.md) open a draft intent on a breach |
 | User-visible changes have a changelog entry | `changelog` PR check (`pnpm run changelog:check`) over changie fragments in `.changes/` |
+| Human time per change and review rounds are visible | Weekly [`ops/review-metrics/`](../ops/review-metrics/README.md) job summary |
 | Recurring review findings are not repeated | [`docs/review-lessons.md`](../docs/review-lessons.md), read through `AGENTS.md` and `REVIEW.md` |
 
 ## Measures
@@ -106,6 +107,6 @@ Changes to this posture start as an intent; see
 | Plan | Time from issue to committed `intent.md` | Intents accepted vs closed |
 | Design | Time from `intent.md` to `spec.md` commit | `spec.md` edits after the first `plan.md` commit |
 | Build | PRs green on the first CI run | Review rounds per PR |
-| Review | Time to first review | Lessons that recur after being recorded |
+| Review | Time to first human review, automated rounds to pass ([`ops/review-metrics/`](../ops/review-metrics/README.md)) | Human approvals per PR; reverts; lessons that recur after being recorded |
 | Evals | Agent-eval pass rate | Regressions caught in CI vs after merge |
 | Maintain | Time from band breach to draft intent | Repeat breaches of the same class |

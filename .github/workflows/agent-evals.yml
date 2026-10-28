@@ -66,8 +66,8 @@ jobs:
         with:
           node-version: 22.23.1
           package-manager-cache: false
-      - name: Install the pinned Claude Code CLI
-        run: npm install --global --no-audit --no-fund @anthropic-ai/claude-code@2.1.296
+      - name: Install the locked Claude Code CLI
+        run: pnpm --dir tools/agent-cli install --frozen-lockfile --ignore-scripts
       - name: Run agent eval suite
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -75,6 +75,7 @@ jobs:
           set -euo pipefail
           git config --global user.name agent-evals
           git config --global user.email agent-evals@users.noreply.github.com
+          claude="${GITHUB_WORKSPACE}/tools/agent-cli/node_modules/@anthropic-ai/claude-code/cli-wrapper.cjs"
           evals="${RUNNER_TEMP}/evals"
           run="${RUNNER_TEMP}/run"
           cp -r evals/agent "${evals}" # grade from a copy made before any run
@@ -90,7 +91,7 @@ jobs:
             (
               cd "${run}"
               CI=true pnpm install --frozen-lockfile --ignore-scripts > /dev/null
-              claude -p "$(jq -r '.prompt' "${eval}")" \
+              node "${claude}" -p "$(jq -r '.prompt' "${eval}")" \
                 --allowedTools "Read,Edit,Write,Grep,Glob,Bash(pnpm *),Bash(git diff *),Bash(git status *)" \
                 --permission-mode dontAsk \
                 --output-format json > "${RUNNER_TEMP}/result.json"
