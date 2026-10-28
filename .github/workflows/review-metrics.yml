@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   metrics:
-    if: github.repository == 'backblaze-labs/b2-mcp'
+    if: github.repository == 'backblaze-labs/b2-mcp' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

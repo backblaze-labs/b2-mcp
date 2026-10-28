@@ -1,5 +1,5 @@
 import { spawnSync } from "child_process";
-import { readFileSync } from "fs";
+import { readFileSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { pathToFileURL } from "url";
 import { root } from "./support";
@@ -31,11 +31,15 @@ function workflowCommands(): string[] {
   return [...new Set(workflow.match(pattern) ?? [])];
 }
 
-function hookDecision(hook: string, filePath: string) {
-  const result = spawnSync(process.execPath, [join(root, ".claude/hooks", hook)], {
+function runHook(hook: string, filePath: string) {
+  return spawnSync(process.execPath, [join(root, ".claude/hooks", hook)], {
     input: JSON.stringify({ tool_name: "Edit", tool_input: { file_path: filePath } }),
     encoding: "utf8",
   });
+}
+
+function hookDecision(hook: string, filePath: string) {
+  const result = runHook(hook, filePath);
   return { status: result.status, stdout: result.stdout.trim() };
 }
 
@@ -149,6 +153,20 @@ describe("Claude Code hooks", () => {
   it("skips the Biome check for files Biome does not handle", () => {
     expect(hookDecision("biome-check.mjs", "intent/README.md")).toEqual({ status: 0, stdout: "" });
     expect(hookDecision("biome-check.mjs", "../outside.ts")).toEqual({ status: 0, stdout: "" });
+  });
+
+  it("returns Biome findings to Claude with exit 2 for a badly formatted file", () => {
+    const fixture = join("scripts", `.biome-hook-fixture-${process.pid}.mjs`);
+    writeFileSync(join(root, fixture), "export const   value = {a:1,\n    b : 2}\n");
+    try {
+      const result = runHook("biome-check.mjs", fixture);
+      expect(result.status).toBe(2);
+      expect(result.stdout).toBe("");
+      expect(result.stderr).toContain(`Biome check failed for ${fixture}`);
+      expect(result.stderr).toMatch(/format|Formatter/);
+    } finally {
+      rmSync(join(root, fixture), { force: true });
+    }
   });
 
   it("passes a clean source file through the Biome check", () => {

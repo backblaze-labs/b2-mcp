@@ -367,6 +367,22 @@ describe("release scripts", () => {
       expect(result.status).toBe(0);
       expect(result.stderr).toContain("no unreleased entries; releasing v0.1.1 with no notes");
       expect(readFileSync(join(fixtureRoot, "CHANGELOG.md"), "utf8")).toMatch(/## \[0\.1\.1\]/);
+
+      // The empty batch still carries changie's compare-link footer; the release
+      // guard must not count that reference definition as release notes.
+      const sync = spawnSync(process.execPath, ["scripts/update-server-json-version.mjs"], {
+        cwd: root,
+        env: scriptEnv(fixtureRoot),
+        encoding: "utf8",
+      });
+      expect(sync.status).toBe(0);
+      const guard = spawnSync(
+        process.execPath,
+        ["scripts/verify-release-input.mjs", "--tag", "v0.1.1"],
+        { cwd: root, env: scriptEnv(fixtureRoot), encoding: "utf8" },
+      );
+      expect(guard.status).not.toBe(0);
+      expect(guard.stderr).toContain("release section [0.1.1] is empty");
     });
   });
 

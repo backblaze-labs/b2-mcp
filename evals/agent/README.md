@@ -33,7 +33,17 @@ test how models use the B2 tools.
 Prefer behavior checks (held-out tests, `cmp` of mirrored files, a frozen
 install) over text greps.
 
+Seeds start from commits that predate changie, while the configuration under
+test asks for a changie fragment. Their changelog checks therefore accept either
+a new file under `.changes/` or a `CHANGELOG.md` edit, and `may_change` allows
+both.
+
 ## Running
+
+Each run happens inside the repository's digest-pinned `node:22.23.1-bookworm-slim`
+container with only its worktree and the read-only CLI mounted; the grader, the
+eval definitions and `hidden/` stay on the host and are graded after the
+container exits, so the agent can neither read nor rewrite them.
 
 `.github/workflows/agent-evals.yml` runs the suite nightly and on
 `workflow_dispatch` against `main`, with `ANTHROPIC_API_KEY` from the
