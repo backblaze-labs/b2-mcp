@@ -7,7 +7,7 @@
 // missing here, so keep both files in the same PR.
 
 import { spawnSync } from "node:child_process";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { vercelBuildKnownSecretCanaries } from "./b2-credential-env.mjs";
@@ -103,7 +103,7 @@ export const ciLocalSteps = [
     id: "vercel-output",
     job: "Vercel build output scan",
     env: { CI: "true", ...vercelBuildKnownSecretCanaries },
-    cleanup: [".vercel"],
+    preserve: [".vercel"],
     commands: [
       ["pnpm", "run", "typecheck"],
       ["pnpm", "run", "build"],
@@ -231,31 +231,58 @@ function hasDocker() {
   return result.status === 0;
 }
 
+/**
+ * Runs `fn` with each existing path in `paths` moved aside, then removes what
+ * `fn` created there and restores the originals, even when `fn` throws.
+ * @param {string} base - Directory the paths are relative to.
+ * @param {string[]} paths
+ * @param {() => T} fn
+ * @template T
+ */
+export function withPreservedPaths(base, paths, fn) {
+  const saved = [];
+  for (const path of paths) {
+    const target = join(base, path);
+    if (!existsSync(target)) continue;
+    const backup = `${target}.ci-local-backup-${process.pid}`;
+    if (existsSync(backup)) throw new Error(`${backup} already exists; move it before rerunning`);
+    renameSync(target, backup);
+    saved.push([target, backup]);
+  }
+  try {
+    return fn();
+  } finally {
+    for (const path of paths) rmSync(join(base, path), { recursive: true, force: true });
+    for (const [target, backup] of saved) renameSync(backup, target);
+  }
+}
+
 function runStep(step) {
   const logPath = join(logDir, `${step.id}.log`);
   const chunks = [];
   const started = Date.now();
   let status = 0;
   try {
-    for (const [command, ...args] of step.commands) {
-      chunks.push(`$ ${[command, ...args].join(" ")}\n`);
-      const result = spawnSync(command, args, {
-        cwd: root,
-        // CI sets CI=true; without it pnpm can stop on a no-TTY modules purge prompt.
-        env: { ...process.env, CI: "true", ...step.env },
-        encoding: "utf8",
-        maxBuffer: 256 * 1024 * 1024,
-        shell: process.platform === "win32",
-        timeout: defaultTimeoutMs,
-      });
-      chunks.push(result.stdout ?? "", result.stderr ?? "");
-      if (result.error) chunks.push(`\n${result.error.message}\n`);
-      status = result.status ?? 1;
-      if (status !== 0) break;
-    }
+    status = withPreservedPaths(root, step.preserve ?? [], () => {
+      for (const [command, ...args] of step.commands) {
+        chunks.push(`$ ${[command, ...args].join(" ")}\n`);
+        const result = spawnSync(command, args, {
+          cwd: root,
+          // CI sets CI=true; without it pnpm can stop on a no-TTY modules purge prompt.
+          env: { ...process.env, CI: "true", ...step.env },
+          encoding: "utf8",
+          maxBuffer: 256 * 1024 * 1024,
+          shell: process.platform === "win32",
+          timeout: defaultTimeoutMs,
+        });
+        chunks.push(result.stdout ?? "", result.stderr ?? "");
+        if (result.error) chunks.push(`\n${result.error.message}\n`);
+        const commandStatus = result.status ?? 1;
+        if (commandStatus !== 0) return commandStatus;
+      }
+      return 0;
+    });
   } finally {
-    for (const path of step.cleanup ?? [])
-      rmSync(join(root, path), { recursive: true, force: true });
     writeFileSync(logPath, chunks.join(""));
   }
   return { status, seconds: (Date.now() - started) / 1000, logPath };
