@@ -7,8 +7,9 @@
 #   No later objects, the grader, the eval files or hidden/ are reachable.
 # - grader: no credentials. It builds its own working copy from a trusted copy
 #   of the baseline repository plus the agent's files (without the agent's .git
-#   and node_modules), reinstalls dependencies, and runs check.sh; the grader
-#   inputs, the baseline and the agent's output are mounted read-only.
+#   and node_modules), installs a root-owned dependency tree, and runs check.sh
+#   as the unprivileged runner uid; the grader inputs, the baseline and the
+#   agent's output are mounted read-only.
 # After the agent starts, the host only mounts directories and deletes them; it
 # never copies into, follows links in, or runs git on agent-written paths.
 set -euo pipefail
@@ -55,22 +56,33 @@ for eval in "${repo}"/evals/agent/*.json; do
         --permission-mode dontAsk --output-format json
     ' > "${dir}/result.json" || true
 
+  # The grader starts as root only to install a root-owned dependency tree, then
+  # drops to the runner's uid, so agent-authored tests run by an earlier check
+  # cannot replace the test runner that a later held-out check uses.
   # shellcheck disable=SC2016 # expanded inside the container
-  sandbox --env NAME="${name}" \
+  docker run --rm \
+    --env CI=true --env COREPACK_ENABLE_DOWNLOAD_PROMPT=0 --env HOME=/tmp/home \
+    --env NAME="${name}" --env RUN_UID="$(id -u)" --env RUN_GID="$(id -g)" \
     --env GIT_CONFIG_COUNT=2 \
     --env GIT_CONFIG_KEY_0=core.fsmonitor --env GIT_CONFIG_VALUE_0=false \
     --env GIT_CONFIG_KEY_1=core.hooksPath --env GIT_CONFIG_VALUE_1=/dev/null \
     --workdir /tmp --volume "${run}:/candidate:ro" --volume "${dir}/baseline.git:/baseline.git:ro" \
     --volume "${dir}/grader:/evals:ro" --volume "${dir}/result.json:/result.json:ro" "${image}" bash -c '
       set -euo pipefail
-      mkdir -p /tmp/home/bin /tmp/grade
+      mkdir -p /tmp/home/bin /tmp/grade /tmp/grader-home
       cp -a /baseline.git /tmp/grade/.git
       tar -C /candidate --exclude=./.git --exclude=./node_modules -cf - . | tar -C /tmp/grade -xf -
       cd /tmp/grade
       corepack enable --install-directory /tmp/home/bin
       export PATH="/tmp/home/bin:${PATH}"
       pnpm install --frozen-lockfile --ignore-scripts >&2
-      /evals/check.sh "/evals/${NAME}.json" /result.json
+      chown -R "${RUN_UID}:${RUN_GID}" /tmp/grade /tmp/grader-home
+      chown -R 0:0 /tmp/grade/node_modules
+      chmod -R go-w /tmp/grade/node_modules
+      mkdir -p /tmp/grade/node_modules/.vite
+      chown "${RUN_UID}:${RUN_GID}" /tmp/grade/node_modules/.vite
+      exec setpriv --reuid="${RUN_UID}" --regid="${RUN_GID}" --clear-groups \
+        env HOME=/tmp/grader-home PATH="${PATH}" /evals/check.sh "/evals/${NAME}.json" /result.json
     ' || failed=$((failed + 1))
 done
 echo "${failed} eval(s) failed"
