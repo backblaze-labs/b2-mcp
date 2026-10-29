@@ -74,6 +74,10 @@ for eval in "${repo}"/evals/agent/*.json; do
       set -euo pipefail
       mkdir -p /tmp/home/bin /tmp/grade /tmp/grader-home
       cp -a /baseline.git /tmp/grade/.git
+      # git refuses repositories not owned by the current user ("dubious
+      # ownership"), so everything git touches as root stays root-owned until
+      # the hand-off to the runner uid below.
+      chown -R 0:0 /tmp/grade/.git
       cd /tmp/grade
       # Install as root from the trusted baseline only: no candidate file, hook
       # or pnpmfile is present or executed while the grader holds root.
@@ -82,7 +86,8 @@ for eval in "${repo}"/evals/agent/*.json; do
       export PATH="/tmp/home/bin:${PATH}"
       pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile >&2
       # Then apply the candidate: its files over the baseline, and its deletions.
-      tar -C /candidate --exclude=./.git --exclude=./node_modules -cf - . | tar -C /tmp/grade -xf -
+      tar -C /candidate --exclude=./.git --exclude=./node_modules -cf - . \
+        | tar -C /tmp/grade --no-same-owner -xf -
       git ls-files -z | while IFS= read -r -d "" tracked; do
         if [ ! -e "/candidate/${tracked}" ] && [ ! -L "/candidate/${tracked}" ]; then rm -f -- "${tracked}"; fi
       done
