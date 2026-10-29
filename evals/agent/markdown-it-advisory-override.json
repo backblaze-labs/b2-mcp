@@ -26,7 +26,7 @@
     },
     {
       "name": "frozen install succeeds",
-      "run": "CI=true pnpm install --frozen-lockfile --ignore-scripts"
+      "run": "tmp=\"$(mktemp -d)\" && for f in package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc; do if [ -e \"$f\" ]; then cp \"$f\" \"$tmp/\"; fi; done && cd \"$tmp\" && CI=true pnpm install --frozen-lockfile --ignore-scripts"
     },
     {
       "name": "no audit exception added",
