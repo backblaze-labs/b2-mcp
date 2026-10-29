@@ -114,3 +114,4 @@ stdev
 unforgeable
 misroute
 fsmonitor
+pnpmfile
