@@ -31,7 +31,9 @@ test how models use the B2 tools.
 ```
 
 Prefer behavior checks (held-out tests, `cmp` of mirrored files, a frozen
-install) over text greps.
+install) over text greps. The grader's `node_modules` is root-owned and read-only
+to checks, so a check that installs dependencies must copy the manifests and
+lockfile to a temporary directory and install there.
 
 Seeds start from commits that predate changie, while the configuration under
 test asks for a changie fragment. Their changelog checks therefore accept either
@@ -50,7 +52,9 @@ repository's digest-pinned `node:22.23.1-bookworm-slim` plus `git` and `jq`):
 - **grader**: no credentials. It builds its own working copy from a trusted copy
   of the baseline repository, taken before the agent started, plus the agent's
   files without the agent's `.git` and `node_modules`. It installs dependencies
-  as root, disables git hooks and fsmonitor, and runs `check.sh` as the
+  as root from the trusted baseline (no candidate file, hook or pnpmfile is
+  present yet), then applies the agent's files and deletions, disables git
+  hooks and fsmonitor, and runs `check.sh` as the
   unprivileged runner uid, so tests the agent wrote cannot rewrite the test
   runner a later held-out check uses. The
   baseline, the grader inputs, the agent's files and its result are mounted

@@ -7,8 +7,9 @@
 #   No later objects, the grader, the eval files or hidden/ are reachable.
 # - grader: no credentials. It builds its own working copy from a trusted copy
 #   of the baseline repository plus the agent's files (without the agent's .git
-#   and node_modules), installs a root-owned dependency tree, and runs check.sh
-#   as the unprivileged runner uid; the grader inputs, the baseline and the
+#   and node_modules). It installs a root-owned dependency tree from the trusted
+#   baseline before any candidate file is present, then runs check.sh as the
+#   unprivileged runner uid; the grader inputs, the baseline and the
 #   agent's output are mounted read-only.
 # After the agent starts, the host only mounts directories and deletes them; it
 # never copies into, follows links in, or runs git on agent-written paths.
@@ -58,7 +59,9 @@ for eval in "${repo}"/evals/agent/*.json; do
 
   # The grader starts as root only to install a root-owned dependency tree, then
   # drops to the runner's uid, so agent-authored tests run by an earlier check
-  # cannot replace the test runner that a later held-out check uses.
+  # cannot replace the test runner that a later held-out check uses. pnpm's
+  # verify-deps-before-run is off for the checks: the trusted install fixes the
+  # dependencies, and a reinstall would try to write the read-only tree.
   # shellcheck disable=SC2016 # expanded inside the container
   docker run --rm \
     --env CI=true --env COREPACK_ENABLE_DOWNLOAD_PROMPT=0 --env HOME=/tmp/home \
@@ -71,18 +74,26 @@ for eval in "${repo}"/evals/agent/*.json; do
       set -euo pipefail
       mkdir -p /tmp/home/bin /tmp/grade /tmp/grader-home
       cp -a /baseline.git /tmp/grade/.git
-      tar -C /candidate --exclude=./.git --exclude=./node_modules -cf - . | tar -C /tmp/grade -xf -
       cd /tmp/grade
+      # Install as root from the trusted baseline only: no candidate file, hook
+      # or pnpmfile is present or executed while the grader holds root.
+      git checkout -q -f HEAD
       corepack enable --install-directory /tmp/home/bin
       export PATH="/tmp/home/bin:${PATH}"
-      pnpm install --frozen-lockfile --ignore-scripts >&2
+      pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile >&2
+      # Then apply the candidate: its files over the baseline, and its deletions.
+      tar -C /candidate --exclude=./.git --exclude=./node_modules -cf - . | tar -C /tmp/grade -xf -
+      git ls-files -z | while IFS= read -r -d "" tracked; do
+        if [ ! -e "/candidate/${tracked}" ] && [ ! -L "/candidate/${tracked}" ]; then rm -f -- "${tracked}"; fi
+      done
       chown -R "${RUN_UID}:${RUN_GID}" /tmp/grade /tmp/grader-home
       chown -R 0:0 /tmp/grade/node_modules
       chmod -R go-w /tmp/grade/node_modules
       mkdir -p /tmp/grade/node_modules/.vite
       chown "${RUN_UID}:${RUN_GID}" /tmp/grade/node_modules/.vite
       exec setpriv --reuid="${RUN_UID}" --regid="${RUN_GID}" --clear-groups \
-        env HOME=/tmp/grader-home PATH="${PATH}" /evals/check.sh "/evals/${NAME}.json" /result.json
+        env HOME=/tmp/grader-home PATH="${PATH}" pnpm_config_verify_deps_before_run=false \
+        /evals/check.sh "/evals/${NAME}.json" /result.json
     ' || failed=$((failed + 1))
 done
 echo "${failed} eval(s) failed"
