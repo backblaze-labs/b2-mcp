@@ -49,8 +49,10 @@ repository's digest-pinned `node:22.23.1-bookworm-slim` plus `git` and `jq`):
   files and `hidden/` are not reachable.
 - **grader**: no credentials. It builds its own working copy from a trusted copy
   of the baseline repository, taken before the agent started, plus the agent's
-  files without the agent's `.git` and `node_modules`. It reinstalls
-  dependencies, disables git hooks and fsmonitor, and runs `check.sh`. The
+  files without the agent's `.git` and `node_modules`. It installs dependencies
+  as root, disables git hooks and fsmonitor, and runs `check.sh` as the
+  unprivileged runner uid, so tests the agent wrote cannot rewrite the test
+  runner a later held-out check uses. The
   baseline, the grader inputs, the agent's files and its result are mounted
   read-only.
 
