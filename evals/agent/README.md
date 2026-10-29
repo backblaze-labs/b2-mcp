@@ -43,16 +43,19 @@ both.
 `run-suite.sh` runs every eval in two containers built from `Dockerfile` (the
 repository's digest-pinned `node:22.23.1-bookworm-slim` plus `git` and `jq`):
 
-- **agent**: `ANTHROPIC_API_KEY`, its own clone of the repository at `from` with
-  the configuration under test, and the read-only CLI. It never sees the grader,
-  the eval files or `hidden/`.
-- **grader**: no credentials. The grader copy and the agent's result are mounted
-  read-only, dependencies are reinstalled from the lockfile, the clone's git
-  config is restored and hooks and fsmonitor are disabled, and `HEAD` must not
-  have moved. Then `check.sh` runs.
+- **agent**: `ANTHROPIC_API_KEY`, a working copy of `from` (from `git archive`)
+  with the configuration under test, in a fresh repository whose only commit is
+  that baseline, and the read-only CLI. Later commits, the grader, the eval
+  files and `hidden/` are not reachable.
+- **grader**: no credentials. It builds its own working copy from a trusted copy
+  of the baseline repository, taken before the agent started, plus the agent's
+  files without the agent's `.git` and `node_modules`. It reinstalls
+  dependencies, disables git hooks and fsmonitor, and runs `check.sh`. The
+  baseline, the grader inputs, the agent's files and its result are mounted
+  read-only.
 
-The host only copies files and starts containers; it never runs `git` on the
-agent's clone.
+After the agent starts, the host only mounts and deletes directories; it never
+copies into, follows links in, or runs `git` on what the agent wrote.
 
 `.github/workflows/agent-evals.yml` runs the suite nightly and on
 `workflow_dispatch` against `main`, with `ANTHROPIC_API_KEY` from the
