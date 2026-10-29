@@ -1,5 +1,6 @@
 import { spawnSync } from "child_process";
-import { readFileSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
 import { join } from "path";
 import { pathToFileURL } from "url";
 import { root } from "./support";
@@ -23,6 +24,7 @@ async function loadCiLocal() {
   return (await import(pathToFileURL(join(root, "scripts/ci-local.mjs")).href)) as {
     ciLocalSteps: CiLocalStep[];
     ciOnlyCommands: Record<string, string>;
+    withPreservedPaths: <T>(base: string, paths: string[], fn: () => T) => T;
   };
 }
 
@@ -89,6 +91,40 @@ describe("pnpm run ci mirrors .github/workflows/test.yml", () => {
     expect(ciLocalSteps.find((step) => step.id === "changelog")?.commands).toEqual([
       ["pnpm", "run", "changelog:check"],
     ]);
+  });
+
+  it("restores an existing .vercel directory after the Vercel step, even when it fails", async () => {
+    const { ciLocalSteps, withPreservedPaths } = await loadCiLocal();
+    expect(ciLocalSteps.find((step) => step.id === "vercel-output")).toMatchObject({
+      preserve: [".vercel"],
+    });
+    const base = mkdtempSync(join(tmpdir(), "ci-local-preserve-"));
+    try {
+      mkdirSync(join(base, ".vercel"));
+      writeFileSync(join(base, ".vercel", "project.json"), '{"projectId":"linked"}');
+      expect(() =>
+        withPreservedPaths(base, [".vercel"], () => {
+          expect(existsSync(join(base, ".vercel"))).toBe(false);
+          mkdirSync(join(base, ".vercel", "output"), { recursive: true });
+          throw new Error("typecheck failed");
+        }),
+      ).toThrow("typecheck failed");
+      expect(readFileSync(join(base, ".vercel", "project.json"), "utf8")).toBe(
+        '{"projectId":"linked"}',
+      );
+      expect(existsSync(join(base, ".vercel", "output"))).toBe(false);
+
+      rmSync(join(base, ".vercel"), { recursive: true });
+      expect(
+        withPreservedPaths(base, [".vercel"], () => {
+          mkdirSync(join(base, ".vercel", "output"), { recursive: true });
+          return 0;
+        }),
+      ).toBe(0);
+      expect(existsSync(join(base, ".vercel"))).toBe(false);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
   });
 
   it("reads the zizmor image from the workflow instead of pinning a second copy", () => {

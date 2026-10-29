@@ -40,10 +40,19 @@ both.
 
 ## Running
 
-Each run happens inside the repository's digest-pinned `node:22.23.1-bookworm-slim`
-container with only its worktree and the read-only CLI mounted; the grader, the
-eval definitions and `hidden/` stay on the host and are graded after the
-container exits, so the agent can neither read nor rewrite them.
+`run-suite.sh` runs every eval in two containers built from `Dockerfile` (the
+repository's digest-pinned `node:22.23.1-bookworm-slim` plus `git` and `jq`):
+
+- **agent**: `ANTHROPIC_API_KEY`, its own clone of the repository at `from` with
+  the configuration under test, and the read-only CLI. It never sees the grader,
+  the eval files or `hidden/`.
+- **grader**: no credentials. The grader copy and the agent's result are mounted
+  read-only, dependencies are reinstalled from the lockfile, the clone's git
+  config is restored and hooks and fsmonitor are disabled, and `HEAD` must not
+  have moved. Then `check.sh` runs.
+
+The host only copies files and starts containers; it never runs `git` on the
+agent's clone.
 
 `.github/workflows/agent-evals.yml` runs the suite nightly and on
 `workflow_dispatch` against `main`, with `ANTHROPIC_API_KEY` from the

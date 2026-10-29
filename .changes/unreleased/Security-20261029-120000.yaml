@@ -1,0 +1,3 @@
+kind: Security
+body: "Moved the dev-only `@hono/node-server` (via `@modelcontextprotocol/inspector` and `@modelcontextprotocol/node`) from the exact `2.0.10` override to `>=2.1.3 <3` (resolves `2.1.5`) for the `serveStatic` double-decoding middleware bypass (GHSA-rmxm-3fg6-px4f); the published package is unaffected. (#529)"
+time: 2026-10-29T12:00:00.000000+00:00
