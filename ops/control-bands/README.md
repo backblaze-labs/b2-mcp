@@ -6,7 +6,7 @@ pipeline: the daily failure rate of the `CI` workflow on pushes to `main`.
 
 - `readings.mjs` builds daily failure rates (oldest first) for the last 90 days
   from the GitHub Actions API. Cancelled, skipped and running runs are ignored;
-  days without runs are left out.
+  days without runs and the unfinished current UTC day are left out.
 - `detect.mjs` is a Node port of the playbook's `detect.py`: the baseline is
   every reading before the newest; it reports the worst tier the newest reading
   reaches, including the Western Electric drift rules. `MIN_SIGMA` is 0.05 (five
