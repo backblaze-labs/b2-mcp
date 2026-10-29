@@ -4,21 +4,27 @@
 
 // Builds daily CI failure rates for pushes to main from the GitHub Actions API.
 // Prints a JSON list (oldest first) for detect.mjs. Days without runs are left
-// out. Needs GITHUB_TOKEN with actions: read and GITHUB_REPOSITORY.
+// out, and so is the current UTC day, which is still incomplete. Needs
+// GITHUB_TOKEN with actions: read and GITHUB_REPOSITORY.
 
 import { pathToFileURL } from "node:url";
 
 /**
  * Groups completed workflow runs by UTC day and returns failure rates, oldest first.
+ * Runs from the UTC day of `now` or later are dropped so a partial day is never
+ * compared with full-day baselines.
  * @param {Array<{created_at: string, conclusion: string | null}>} runs
+ * @param {Date} [now]
  */
-export function dailyFailureRates(runs) {
+export function dailyFailureRates(runs, now = new Date()) {
+  const today = now.toISOString().slice(0, 10);
   const days = new Map();
   for (const run of runs) {
     if (run.conclusion === null || run.conclusion === "cancelled" || run.conclusion === "skipped") {
       continue;
     }
     const day = run.created_at.slice(0, 10);
+    if (day >= today) continue;
     const entry = days.get(day) ?? { total: 0, failed: 0 };
     entry.total += 1;
     if (run.conclusion !== "success") entry.failed += 1;

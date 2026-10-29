@@ -13,7 +13,10 @@ async function load() {
   const readings = (await import(
     pathToFileURL(join(root, "ops/control-bands/readings.mjs")).href
   )) as {
-    dailyFailureRates: (runs: Array<{ created_at: string; conclusion: string | null }>) => number[];
+    dailyFailureRates: (
+      runs: Array<{ created_at: string; conclusion: string | null }>,
+      now?: Date,
+    ) => number[];
   };
   return { ...detect, ...readings };
 }
@@ -62,15 +65,28 @@ describe("control-band detector", () => {
 describe("daily CI failure rates", () => {
   it("groups by UTC day, oldest first, ignoring cancelled, skipped and running runs", async () => {
     const { dailyFailureRates } = await load();
-    const rates = dailyFailureRates([
-      { created_at: "2026-10-02T10:00:00Z", conclusion: "failure" },
-      { created_at: "2026-10-01T23:59:00Z", conclusion: "success" },
-      { created_at: "2026-10-02T11:00:00Z", conclusion: "success" },
-      { created_at: "2026-10-02T12:00:00Z", conclusion: "cancelled" },
-      { created_at: "2026-10-02T13:00:00Z", conclusion: "skipped" },
-      { created_at: "2026-10-02T14:00:00Z", conclusion: null },
-      { created_at: "2026-10-03T09:00:00Z", conclusion: "timed_out" },
-    ]);
+    const rates = dailyFailureRates(
+      [
+        { created_at: "2026-10-02T10:00:00Z", conclusion: "failure" },
+        { created_at: "2026-10-01T23:59:00Z", conclusion: "success" },
+        { created_at: "2026-10-02T11:00:00Z", conclusion: "success" },
+        { created_at: "2026-10-02T12:00:00Z", conclusion: "cancelled" },
+        { created_at: "2026-10-02T13:00:00Z", conclusion: "skipped" },
+        { created_at: "2026-10-02T14:00:00Z", conclusion: null },
+        { created_at: "2026-10-03T09:00:00Z", conclusion: "timed_out" },
+      ],
+      new Date("2026-10-04T06:41:00Z"),
+    );
     expect(rates).toEqual([0, 0.5, 1]);
+  });
+
+  it("drops the unfinished current UTC day", async () => {
+    const { dailyFailureRates } = await load();
+    const runs = [
+      { created_at: "2026-10-03T12:00:00Z", conclusion: "success" },
+      { created_at: "2026-10-04T00:30:00Z", conclusion: "failure" },
+    ];
+    expect(dailyFailureRates(runs, new Date("2026-10-04T06:41:00Z"))).toEqual([0]);
+    expect(dailyFailureRates(runs, new Date("2026-10-05T00:00:00Z"))).toEqual([0, 1]);
   });
 });
