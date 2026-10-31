@@ -5,3 +5,4 @@ This is the engineering-security domain map. The root
 
 - [`design-docs/security-review.md`](design-docs/security-review.md) - pre-public security and provenance review checklist.
 - [`design-docs/supply-chain-security.md`](design-docs/supply-chain-security.md) - npm/GHCR compromise denylist, branch and artifact scanning, and incident response.
+- [`../.snyk`](../.snyk) - Snyk policy: the test and fixture paths excluded from Snyk Code scanning, and why.
