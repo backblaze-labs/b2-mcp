@@ -77,12 +77,12 @@ describe("security dependency policy", () => {
     expect(lock.packages["node_modules/@modelcontextprotocol/node"]?.dev).toBe(true);
     expect(pkg).not.toHaveProperty("overrides");
     expect(readFileSync(join(root, "pnpm-workspace.yaml"), "utf8")).toContain(
-      "'@hono/node-server': 2.0.10",
+      "'@hono/node-server': '>=2.1.3 <3'",
     );
     expect(readFileSync(join(root, "pnpm-workspace.yaml"), "utf8")).toContain(
       "'@typescript-eslint/visitor-keys>eslint-visitor-keys': 4.2.1",
     );
-    expect(lock.packages["node_modules/@hono/node-server"]?.version).toBe("2.0.10");
+    expect(lock.packages["node_modules/@hono/node-server"]?.version).toBe("2.1.5");
     expect(lock.packages["node_modules/@hono/node-server"]?.dev).toBe(true);
   });
 
