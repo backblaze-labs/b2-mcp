@@ -1,4 +1,7 @@
-# TypeScript 7 Migration Record
+# Plan: TypeScript 7 migration
+
+Author: Gonza (`@goanpeca`). Status: accepted (decision record; waiting on the trigger below).
+Moved from `docs/exec-plans/active/` when the repository adopted the `intent/` layout (#528).
 
 Issue: [#114](https://github.com/backblaze-labs/b2-mcp/issues/114)
 

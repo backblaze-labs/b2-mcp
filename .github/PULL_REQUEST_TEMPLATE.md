@@ -14,10 +14,31 @@
 
 -
 
+## Design Artifacts
+
+<!-- intent/<slug>/ (intent.md, spec.md, plan.md) for larger changes (intent/README.md), or "n/a". -->
+
+-
+
+## Risk
+
+<!-- What could break, for whom, and the review depth from REVIEW.md (Quick, Standard, Deep). -->
+
+-
+
+## How to Revert
+
+<!-- Revert the merge commit, or the extra steps needed (released package, migrated config, published registry entry). -->
+
+-
+
 ## Verification
 
 - [ ] `pnpm install --frozen-lockfile` passes
-- [ ] `pnpm run verify` passes locally
+- [ ] `pnpm run ci` passes locally (paste the summary line; note skipped Docker steps), or `pnpm run verify` plus the layers listed below
+- [ ] Changelog fragment added (`pnpm run changelog:new`), or the PR is labelled `skip-changelog`
+- [ ] I directed this change and own it after merge, including any part an agent wrote
+- [ ] Fresh-context self-review against `REVIEW.md` and `docs/review-lessons.md`; the PR description matches the final diff
 - [ ] `pnpm run test:contract` passes, or the PR explains why it is not applicable
 - [ ] `pnpm run test:protocol` passes, or the PR explains why it is not applicable
 - [ ] `pnpm run test:package` passes, or the PR explains why it is not applicable

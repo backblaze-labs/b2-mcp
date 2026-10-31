@@ -13,6 +13,9 @@ open the smallest document that covers the task at hand.
 - [`TESTING.md`](TESTING.md) - deterministic, live, package, and eval test policy.
 - [`TEST-COVERAGE-MAP.md`](TEST-COVERAGE-MAP.md) - snapshot map of tests to B2 capabilities, with known gaps.
 - [`EVALS.md`](EVALS.md) - LLM eval harness runbook.
+- [`../intent/README.md`](../intent/README.md) - how a change moves from `intent.md` to `spec.md`, `plan.md`, review and release.
+- [`review-lessons.md`](review-lessons.md) - recurring review findings; read before writing code.
+- [`../REVIEW.md`](../REVIEW.md) - review instructions for humans and review agents.
 
 ## Filename Convention
 
@@ -31,8 +34,7 @@ temporary. Machine-generated, verified references live under
 - [`design-docs/security-review.md`](design-docs/security-review.md) - pre-public security and provenance review.
 - [`design-docs/supply-chain-security.md`](design-docs/supply-chain-security.md) - supply-chain denylist and incident response.
 - [`product-specs/index.md`](product-specs/index.md) - product specification index.
-- [`exec-plans/active/typescript-7-migration.md`](exec-plans/active/typescript-7-migration.md) - active TypeScript migration plan.
-- [`exec-plans/tech-debt-tracker.md`](exec-plans/tech-debt-tracker.md) - known technical debt tracker.
+- [`../intent/`](../intent/README.md) - per-change intents, specs and plans, including the TypeScript 7 migration plan.
 - [`references/discoverability.md`](references/discoverability.md) - registry and directory listing runbook.
 - [`references/deployment/security-and-credentials.md`](references/deployment/security-and-credentials.md) - shared hosted security contract.
 - [`references/harness-engineering.md`](references/harness-engineering.md) - taxonomy reference note.

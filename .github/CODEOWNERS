@@ -17,6 +17,7 @@ SECURITY.md @goanpeca @sophiecarreras
 PRIVACY.md @goanpeca @sophiecarreras
 RELEASE.md @goanpeca @sophiecarreras
 CHANGELOG.md @goanpeca
+.changie.yaml @goanpeca @sophiecarreras @ffumero2003
 
 # CI, package metadata, and release automation.
 .github/workflows/ @goanpeca
@@ -28,3 +29,11 @@ package-budget.json @goanpeca @sophiecarreras
 
 # Bundled skills are model-facing instructions and require explicit review.
 skills/ @goanpeca @sophiecarreras
+
+# Agent instructions, review policy, and Claude Code hooks shape every
+# agent-written change.
+AGENTS.md @goanpeca @sophiecarreras @ffumero2003
+REVIEW.md @goanpeca @sophiecarreras @ffumero2003
+intent/README.md @goanpeca @sophiecarreras @ffumero2003
+docs/review-lessons.md @goanpeca @sophiecarreras @ffumero2003
+.claude/ @goanpeca @sophiecarreras @ffumero2003

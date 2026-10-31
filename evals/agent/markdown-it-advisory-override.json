@@ -1,0 +1,36 @@
+{
+  "name": "markdown-it-advisory-override",
+  "source": "Fix f77a140 (#458): GHSA-253c-mchw-3w2r in dev-only markdown-it",
+  "from": "e261bfe77f3c7bcca6cbc8f6844c713a2cab525e",
+  "prompt": "Dependabot reports GHSA-253c-mchw-3w2r (quadratic-time linkify in markdown-it, fixed in 14.3.1) for the markdown-it that typedoc pulls in. Patch it without adding an audit exception, and run the checks before you finish.",
+  "may_change": [
+    "pnpm-workspace.yaml",
+    "pnpm-lock.yaml",
+    "deploy/customer-hosted/pnpm-workspace.yaml",
+    "deploy/customer-hosted/pnpm-lock.yaml",
+    "CHANGELOG.md",
+    ".changes"
+  ],
+  "checks": [
+    {
+      "name": "lockfile resolves a patched markdown-it",
+      "run": "grep -E '^  markdown-it@14\\.(3\\.[1-9]|[4-9])' pnpm-lock.yaml && ! grep -q '^  markdown-it@14\\.3\\.0:' pnpm-lock.yaml"
+    },
+    {
+      "name": "customer-hosted workspace mirrors the root",
+      "run": "cmp pnpm-workspace.yaml deploy/customer-hosted/pnpm-workspace.yaml"
+    },
+    {
+      "name": "customer-hosted lockfile mirrors the root",
+      "run": "cmp pnpm-lock.yaml deploy/customer-hosted/pnpm-lock.yaml"
+    },
+    {
+      "name": "frozen install succeeds",
+      "run": "tmp=\"$(mktemp -d)\" && for f in package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc; do if [ -e \"$f\" ]; then cp \"$f\" \"$tmp/\"; fi; done && cd \"$tmp\" && CI=true pnpm install --frozen-lockfile --ignore-scripts"
+    },
+    {
+      "name": "no audit exception added",
+      "run": "git diff --quiet HEAD -- audit-policy.json"
+    }
+  ]
+}

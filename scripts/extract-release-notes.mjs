@@ -74,7 +74,14 @@ export function extractReleaseNotes(changelogText, version) {
     .slice(start + 1, end === -1 ? lines.length : end)
     .join("\n")
     .trim();
-  if (!body) throw new Error(`CHANGELOG.md release section [${normalized}] is empty`);
+  // changie writes a compare-link reference definition even for an empty batch;
+  // it renders as nothing, so it does not count as release notes.
+  const notes = body
+    .split("\n")
+    .filter((line) => !/^\[[^\]]+\]:\s*\S+\s*$/.test(line))
+    .join("\n")
+    .trim();
+  if (!notes) throw new Error(`CHANGELOG.md release section [${normalized}] is empty`);
   return `# @backblaze-labs/b2-mcp v${normalized}\n\n${body}\n`;
 }
 

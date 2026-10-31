@@ -23,5 +23,11 @@ docs/
   generated/  # Phase 2 target; not present in Phase 1.
 ```
 
+Since #528 the per-change records follow the AI-native SDLC playbook instead:
+`exec-plans/` moved to `intent/<slug>/` (`intent.md`, `spec.md`, `plan.md`; see
+[`../../intent/README.md`](../../intent/README.md)), and deferred work becomes a
+new intent rather than a tech-debt tracker row. `design-docs/` and
+`product-specs/` keep the long-lived public contracts.
+
 Phase 1 moves the non-generated system-of-record docs into that shape. The
 generated tool-profile artifacts remain in `docs/` until the Phase 2 move.
