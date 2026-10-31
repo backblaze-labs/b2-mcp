@@ -60,7 +60,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the dev-only `glob` 13.0.6 (GHSA-3g3m-2fjr-6pw4) and `minimatch` 3.x/10.x
   (GHSA-g3hv-75wg-m249) advisories: their only fixes are new majors
   (`glob` 14, `minimatch` 11) that the Vercel, ESLint and TypeDoc tooling does
-  not accept yet. The published package is unaffected.
+  not accept yet. The published package is unaffected. Advisory exceptions now
+  bind every copy of the package in the lockfile (`additionalResolutions`), so a
+  drifted or new copy fails the audit; the existing `zod` exception declares its
+  3.22.4 and 3.25.76 copies.
 - Patched transitive dev-toolchain advisories via pinned pnpm overrides:
   `brace-expansion`, `proxy-addr`, `smol-toml`, `source-map-js`, and `sharp`
   (the librsvg advisory fixed in 0.35.5), in both the root and

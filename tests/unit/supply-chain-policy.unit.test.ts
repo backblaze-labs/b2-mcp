@@ -83,6 +83,12 @@ describe("supply-chain audit policy", () => {
     mcpName?: string;
     scripts: Record<string, string>;
   };
+  type AdditionalResolution = {
+    path: string;
+    version: string;
+    integrity: string;
+    via: { path: string; name: string; version: string; dependencyRange: string };
+  };
   const auditPolicy = JSON.parse(readFileSync(join(root, "audit-policy.json"), "utf8")) as {
     allowedAdvisories: Array<{
       name: string;
@@ -93,6 +99,7 @@ describe("supply-chain audit policy", () => {
       effects: string[];
       package: { version: string; integrity: string };
       via: { path: string; name: string; version: string; dependencyRange: string };
+      additionalResolutions?: AdditionalResolution[];
       expires: string;
       reason: string;
     }>;
@@ -219,6 +226,11 @@ describe("supply-chain audit policy", () => {
       },
     ],
   };
+  function zodAdditionalResolutions(): AdditionalResolution[] {
+    const entry = auditPolicy.allowedAdvisories.find((advisory) => advisory.name === "zod");
+    return entry?.additionalResolutions ?? [];
+  }
+
   const directPnpmPolicy = {
     allowedAdvisories: [
       {
@@ -234,6 +246,7 @@ describe("supply-chain audit policy", () => {
           name: "zod",
           version: zodPackage.version,
         },
+        additionalResolutions: zodAdditionalResolutions(),
         expires: "2026-10-01",
         reason: "Test-only direct pnpm advisory exception fixture.",
       },
@@ -1772,6 +1785,61 @@ describe("supply-chain audit policy", () => {
 
     expect(result.status).toBe(0);
     expect(result.stderr).toContain("zod:998000 (high) allowed until 2026-10-01");
+  });
+
+  describe("every resolution of an excepted package is bound", () => {
+    const zodPolicy = (resolutions: AdditionalResolution[]) => ({
+      allowedAdvisories: [
+        { ...directPnpmPolicy.allowedAdvisories[0], additionalResolutions: resolutions },
+      ],
+    });
+
+    it("fails closed when a copy of the package is not declared", () => {
+      const [first] = zodAdditionalResolutions();
+      const result = runAudit(directPnpmAuditReport(), {}, zodPolicy([first]));
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("zod:998000: resolutions expected");
+    });
+
+    it("fails closed when a declared copy's integrity drifts", () => {
+      const [first, second] = zodAdditionalResolutions();
+      const drifted = { ...second, integrity: "sha512-drifted" };
+      const result = runAudit(directPnpmAuditReport(), {}, zodPolicy([first, drifted]));
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(`resolution ${second.path} integrity drifted for zod`);
+    });
+
+    it("fails closed when a declared copy's version or parent drifts", () => {
+      const [first, second] = zodAdditionalResolutions();
+      const wrongVersion = { ...second, version: "0.0.1" };
+      const wrongParent = { ...first, via: { ...first.via, dependencyRange: "0.0.1" } };
+      const result = runAudit(directPnpmAuditReport(), {}, zodPolicy([wrongParent, wrongVersion]));
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(`resolution ${second.path} version expected 0.0.1`);
+      expect(result.stderr).toContain(
+        `resolution ${first.path} via dependency range expected 0.0.1`,
+      );
+    });
+
+    it("binds every copy in the shipped exceptions", () => {
+      for (const entry of auditPolicy.allowedAdvisories) {
+        const declared = [
+          `node_modules/${entry.name}`,
+          ...(entry.additionalResolutions ?? []).map((resolution) => resolution.path),
+        ].sort();
+        const resolved = Object.keys(lock.packages)
+          .filter(
+            (packagePath) =>
+              packagePath === `node_modules/${entry.name}` ||
+              packagePath.endsWith(`/node_modules/${entry.name}`),
+          )
+          .sort();
+        expect(declared, `${entry.name} exception must bind every resolution`).toEqual(resolved);
+      }
+    });
   });
 
   it("evaluates parseable pnpm audit reports with severity exit codes", () => {

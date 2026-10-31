@@ -27,7 +27,31 @@
         "dependencyRange": "3.25.76"
       },
       "expires": "2026-11-05",
-      "reason": "GHSA-mrhx-c7xc-m3w5 (#524): no patched 3.x release; dev-only via @anthropic-ai/mcpb / vercel; forcing zod 4 would cross a major in third-party tooling. Covers only Zod 3.25.76 and 3.22.4 at the exact listed paths. Production and all Zod 4 paths use patched 4.6.7. Re-check upstream before expiry."
+      "reason": "GHSA-mrhx-c7xc-m3w5 (#524): no patched 3.x release; dev-only via @anthropic-ai/mcpb / vercel; forcing zod 4 would cross a major in third-party tooling. Covers only Zod 3.25.76 and 3.22.4 at the exact listed paths. Production and all Zod 4 paths use patched 4.6.7. Re-check upstream before expiry.",
+      "additionalResolutions": [
+        {
+          "path": "node_modules/.pnpm/zod@3.22.4/node_modules/zod",
+          "version": "3.22.4",
+          "integrity": "sha512-iC+8Io04lddc+mVqQ9AZ7OQ2MrUKGN+oIQyq1vemgt46jwCwLfhq7/pwnBnNXXXZb8VTVLKwp9EDkx+ryxIWmg==",
+          "via": {
+            "path": "node_modules/@vercel/backends",
+            "name": "@vercel/backends",
+            "version": "11.0.1",
+            "dependencyRange": "3.22.4"
+          }
+        },
+        {
+          "path": "node_modules/.pnpm/zod@3.25.76/node_modules/zod",
+          "version": "3.25.76",
+          "integrity": "sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==",
+          "via": {
+            "path": "node_modules/@anthropic-ai/mcpb",
+            "name": "@anthropic-ai/mcpb",
+            "version": "2.1.2",
+            "dependencyRange": "3.25.76"
+          }
+        }
+      ]
     },
     {
       "name": "glob",
@@ -188,7 +212,31 @@
         "dependencyRange": "3.1.5"
       },
       "expires": "2026-11-13",
-      "reason": "GHSA-g3hv-75wg-m249: fixed only in minimatch 11.0.1 (2026-10-27), a breaking major that removes makeRe(), Minimatch#regexp and the AST class; no 3.x or 10.x fix. Dev-only via eslint, typescript-eslint, typedoc, ts-morph and the Vercel CLI; forcing 11 would break that tooling. Covers only minimatch 3.1.5, 10.2.3 and 10.2.6 at the exact listed paths; nothing in the published package or production graph. Re-check upstream before expiry."
+      "reason": "GHSA-g3hv-75wg-m249: fixed only in minimatch 11.0.1 (2026-10-27), a breaking major that removes makeRe(), Minimatch#regexp and the AST class; no 3.x or 10.x fix. Dev-only via eslint, typescript-eslint, typedoc, ts-morph and the Vercel CLI; forcing 11 would break that tooling. Covers only minimatch 3.1.5, 10.2.3 and 10.2.6 at the exact listed paths; nothing in the published package or production graph. Re-check upstream before expiry.",
+      "additionalResolutions": [
+        {
+          "path": "node_modules/.pnpm/minimatch@10.2.3/node_modules/minimatch",
+          "version": "10.2.3",
+          "integrity": "sha512-Rwi3pnapEqirPSbWbrZaa6N3nmqq4Xer/2XooiOKyV3q12ML06f7MOuc5DVH8ONZIFhwIYQ3yzPH4nt7iWHaTg==",
+          "via": {
+            "path": "node_modules/@vercel/python-analysis",
+            "name": "@vercel/python-analysis",
+            "version": "0.14.0",
+            "dependencyRange": "10.2.3"
+          }
+        },
+        {
+          "path": "node_modules/.pnpm/minimatch@10.2.6/node_modules/minimatch",
+          "version": "10.2.6",
+          "integrity": "sha512-vpLQEs+VLCr1nU0BXS07maYoFwlDAH0gngQuuttxIwutDFEMHq2blX+8vpgxDdK3J1PwjCJiep77OitTZ4Ll1A==",
+          "via": {
+            "path": "node_modules/eslint",
+            "name": "eslint",
+            "version": "10.9.1",
+            "dependencyRange": "10.2.6"
+          }
+        }
+      ]
     }
   ]
 }
