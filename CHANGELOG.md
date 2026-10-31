@@ -55,6 +55,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   quarantined `@cacheable/*` packages. (#481)
 
 ### Security
+- Moved the dev-only `@hono/node-server` override from `2.0.10` to `>=2.1.3 <3`
+  (resolves `2.1.5`) for GHSA-rmxm-3fg6-px4f, and time-boxed (until 2026-11-13)
+  the dev-only `glob` 13.0.6 (GHSA-3g3m-2fjr-6pw4) and `minimatch` 3.x/10.x
+  (GHSA-g3hv-75wg-m249) advisories: their only fixes are new majors
+  (`glob` 14, `minimatch` 11) that the Vercel, ESLint and TypeDoc tooling does
+  not accept yet. The published package is unaffected.
 - Patched transitive dev-toolchain advisories via pinned pnpm overrides:
   `brace-expansion`, `proxy-addr`, `smol-toml`, `source-map-js`, and `sharp`
   (the librsvg advisory fixed in 0.35.5), in both the root and
