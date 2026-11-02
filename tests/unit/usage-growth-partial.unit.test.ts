@@ -4,7 +4,8 @@ import { parseResult, ToolHarness } from "../support/deterministic-fakes";
 
 const DAY_MS = 86400_000;
 const day = (n: number) => new Date(Date.now() - n * DAY_MS).toISOString().slice(0, 10);
-const HDR = "account_id,date,bucket_id,bucket_name,stored_gb,downloaded_gb,uploaded_gb,api_txn_class_c\n";
+const HDR =
+  "account_id,date,bucket_id,bucket_name,stored_gb,downloaded_gb,uploaded_gb,api_txn_class_c\n";
 
 describe("b2_report_usage_growth with partially loaded day", () => {
   beforeEach(() => {
@@ -22,7 +23,9 @@ describe("b2_report_usage_growth with partially loaded day", () => {
     };
     const client = {
       async listReportObjectKeys(_b: string, o: { prefix?: string } = {}) {
-        const keys = Object.keys(files).filter((k) => !o.prefix || k.startsWith(o.prefix)).sort();
+        const keys = Object.keys(files)
+          .filter((k) => !o.prefix || k.startsWith(o.prefix))
+          .sort();
         return { keys, isTruncated: false };
       },
       async downloadReportObjectText(_b: string, key: string) {

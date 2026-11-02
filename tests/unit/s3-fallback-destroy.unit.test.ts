@@ -14,8 +14,11 @@ import { createAuthorizedS3Client } from "../../src/s3/client";
 describe("fallback client lifetime", () => {
   it("does not destroy the one-shot client before the body is consumed", async () => {
     const facade = createAuthorizedS3Client({
-      getConfig: () => ({ region: "us-west-004", applicationKeyId: "a", applicationKey: "b" }) as never,
-      getAuth: async () => { throw Object.assign(new Error("down"), { status: 503 }); },
+      getConfig: () =>
+        ({ region: "us-west-004", applicationKeyId: "a", applicationKey: "b" }) as never,
+      getAuth: async () => {
+        throw Object.assign(new Error("down"), { status: 503 });
+      },
     });
     await (facade as never as { getObject: (i: unknown) => Promise<unknown> }).getObject({});
     expect(destroys[0]).not.toHaveBeenCalled();

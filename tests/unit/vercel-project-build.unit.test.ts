@@ -1,4 +1,12 @@
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -18,12 +26,16 @@ function runInTempProject(pnpmScript: string) {
     }
     writeFileSync(path.join(binDir, "pnpm"), pnpmScript);
     chmodSync(path.join(binDir, "pnpm"), 0o755);
-    const result = spawnSync(process.execPath, [path.join(scriptsDir, "run-vercel-project-build.mjs")], {
-      cwd: path.join(tmpDir, "project"),
-      encoding: "utf8",
-      timeout: 20_000,
-      env: { PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}` },
-    });
+    const result = spawnSync(
+      process.execPath,
+      [path.join(scriptsDir, "run-vercel-project-build.mjs")],
+      {
+        cwd: path.join(tmpDir, "project"),
+        encoding: "utf8",
+        timeout: 20_000,
+        env: { PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}` },
+      },
+    );
     const vercelDir = path.join(tmpDir, "project", ".vercel");
     return {
       result,
