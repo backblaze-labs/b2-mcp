@@ -1,234 +1,83 @@
-# CLAUDE.md
+# b2-mcp
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Backblaze B2 MCP server (TypeScript, pnpm, Vitest). This is the canonical agent
+guidance: Codex reads it natively and `CLAUDE.md` imports it, so where the
+playbook skills in `.claude/skills/` say `CLAUDE.md`, they mean this file.
 
 ## Commands
 
-```bash
-pnpm run build          # compile TypeScript -> dist/ (src only)
-pnpm run typecheck      # type-check src + ALL tests, no emit (tsconfig.typecheck.json)
-pnpm test               # runs `typecheck` first, then unit tests, no credentials needed
-pnpm run test:contract  # deterministic MCP/schema/workflow contracts
-pnpm run test:protocol  # deterministic modern + legacy MCP protocol behavior
-pnpm run evals          # build + eval harness; provider cases gate on RUN_LLM_EVALS=1 + provider key
-pnpm run test:integration:live  # live tests, requires real B2 credentials in env
-pnpm run start          # stdio transport (local Claude Desktop use)
-pnpm run start:http     # Streamable HTTP transport, add --port 3000
-pnpm run docs           # strict TypeDoc API reference -> gitignored api-docs/
-pnpm run docs:watch     # TypeDoc watch mode with the same strict validation
-```
+- Build: `pnpm run build` (tsc to `dist/`; excludes `tests/`)
+- Test: `pnpm test` (typecheck of src and tests, then unit tests; no credentials)
+- Layers: `pnpm run test:contract`, `test:protocol`, `test:reliability`,
+  `test:observability`, `test:package`, `test:slow` (no credentials)
+- Live: `pnpm run test:live:b2` (needs real B2 keys; see `docs/TESTING.md`)
+- Lint: `pnpm run verify` (typecheck, build, Biome, doc lint, links, spelling)
+- Run: `pnpm run start` (stdio) or `pnpm run start:http -- --port 3000`
+  (Streamable HTTP on `/mcp`, `GET /health`)
+- Full gate: `pnpm run ci` (every required PR job in `.github/workflows/test.yml`)
+- Single test: `pnpm exec vitest run --config vitest.config.mts --project=unit <file>`
 
-> `pnpm run build` uses `tsconfig.json`, which **excludes `tests/`** — so it does
-> not catch compile errors in test files. `pnpm run typecheck` (wired into `pnpm test`)
-> compiles `src` **and** `tests` via `tsconfig.typecheck.json`, so live-test
-> compile errors are caught with no credentials. This closed a real gap where a
-> broken live-test reference only surfaced on a credentialed run.
+More commands, live-test env vars and TypeDoc rules: `docs/TESTING.md`
+(Command Reference).
 
-Run a single unit test file:
+## Conventions
 
-```bash
-pnpm exec vitest run --config vitest.config.mts --project=unit tests/unit/auth.unit.test.ts
-```
-
-Run a single test by name:
-
-```bash
-pnpm exec vitest run --config vitest.config.mts --project=unit --testNamePattern="should cache the token"
-```
-
-Eval harness tests:
-
-```bash
-pnpm run evals
-```
-
-The deterministic harness self-tests run without provider credentials. Provider
-adapters should gate real LLM-backed eval cases on `RUN_LLM_EVALS=1` plus their
-own provider key env var (for example `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`)
-so normal CI remains key-free.
-
-TypeDoc is strict. `typedoc.json` enumerates the public `src` entry-point
-surface, writes generated HTML to gitignored `api-docs/`, requires module,
-class, interface, function, method, property, enum, type alias, variable,
-accessor, constructor, and signature documentation, and treats warnings as
-errors. Undocumented public API members, undocumented modules, and invalid
-links fail `pnpm run docs` and the docs workflow; issue #308 closed this
-strict-validation ratchet.
-
-Integration tests require env vars. The live suite exercises native, S3, key
-management, event notifications, and the Partner API with no opt-in skips, so it
-needs the full set: a non-master application key (`B2_APPLICATION_KEY_ID` /
-`B2_APPLICATION_KEY`) for native, S3, and key management; the account master key
-(`B2_MASTER_KEY_ID` / `B2_MASTER_KEY`) for the Partner API (which rejects
-non-master keys); `B2_REGION` for the account's S3 region; and
-`B2_LIVE_NOTIFICATION_BUCKET` naming a pre-provisioned, notifications-enabled
-bucket:
-
-```bash
-B2_APPLICATION_KEY_ID=appkey_id B2_APPLICATION_KEY=appkey_secret \
-B2_MASTER_KEY_ID=master_id B2_MASTER_KEY=master_secret \
-B2_REGION=us-east-005 B2_LIVE_NOTIFICATION_BUCKET=your-notify-bucket \
-pnpm run test:integration:live
-```
-
-## Commit conventions
-
-- Commit messages are a **single line, under 72 characters**, prefixed with a
-  Conventional Commit type: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`,
-  `chore:`, `ci:`, `build:`, `perf:`. No body, no bullet list.
-- **Never** add a `Co-Authored-By` trailer or any AI/assistant/"Generated with"
-  attribution to commits or PR bodies.
-
-## Recent behavior notes (v0.1.2)
-
-- The outbound User-Agent product token is `b2-mcp/<version>` on a published release and `b2-mcp/dev` for source/CI/dev builds, on both the native B2 SDK and the AWS S3 SDK. The build channel is resolved in `src/version.ts` (`productVersion()` / `productToken()`, `PRODUCT_NAME`) via a publish-time `release-version.json` marker; plain `VERSION` keeps the numeric semver for the MCP handshake, `--version`, and logs. `B2_MCP_UA_SUFFIX` still appends a deployment tag. (Server self-identity and the log service name intentionally remain `backblaze-b2-mcp`.)
-- S3-compatible and report tools derive their endpoint/signing region from the authorized `b2_authorize_account` `s3ApiUrl`; `B2_REGION` is only a fallback/default before authorization or when authorize is temporarily unavailable.
-- The native analytics tools and `b2_list_buckets` resolve a bucket-scoped key through its authorized `allowedBuckets` scope instead of an unfiltered `listBuckets()` (which a bucket-scoped key cannot call), and reject/report out-of-scope input without enumerating the key's bucket namespace.
-- Destructive-gate refusals are stable, non-500 tool outcomes: `destructive_policy_blocked` (HTTP 403), and `destructive_confirmation_required` / `destructive_confirmation_refused` (HTTP 409); `tool.call` audit logs record those codes/statuses, not `internal_error`/500.
-- Local `TimeoutError` and `AbortError` values normalize to `request_timeout` (HTTP 504) and `request_aborted` (HTTP 499) instead of `internal_error`/500. Interrupted no-replay native/Partner writes such as `b2_create_bucket`, `b2_create_key`, and Partner account creation surface as `operation_status_unknown` (HTTP 409) with verify-before-retry guidance; because that reader is installed only after a 2xx response, *any* body-read failure there (including a plain `SyntaxError` from a truncated or malformed body, not just timeout/abort/socket-reset interruptions) is treated as unknown-status. These ambiguous write outcomes also emit a distinct warn-level `native.write.outcome_unknown` log event. Timeout and socket-loss ambiguity counts toward circuit-breaker failure accounting, but ambiguity whose originating cause is a caller abort (an in-flight no-replay cancellation) stays filtered so client disconnects cannot open the shared circuit.
-- Test layers beyond unit/contract/protocol: `reliability` (dependency failure/recovery), `runtime-security` (HTTP fault injection), `observability` (logging behavior), `package` (packed install + repack reproducibility), plus the advisory `perf:baseline`. Run a layer with `pnpm run test:<layer>`.
+- Node.js `^22.22.2 || ^24 || ^26`, TypeScript 6, pnpm 11; MCP SDK v2 with protocol
+  `2026-07-28` plus stateless 2025-era fallback.
+- Tools are `<b2|s3>_<verb>_<noun>` and follow
+  `docs/design-docs/tool-contract.md`; new tools also go in
+  `src/utils/tool-capabilities.ts`, the contract fixtures and
+  `docs/generated/`.
+- Destructive tools go through `src/utils/destructive-gate.ts`; every output
+  path goes through the secret sanitizer.
+- A changie fragment (`pnpm run changelog:new`) for every user-visible change;
+  never edit `CHANGELOG.md` by hand.
+- Commits: one line, under 72 characters, Conventional Commit prefix
+  (`feat:`, `fix:`, `docs:`, `test:`, `chore:`, `ci:`, `build:`, `perf:`,
+  `refactor:`). No `Co-Authored-By` or AI attribution in commits or PRs.
+- Larger changes live in `intent/<slug>/` as `intent.md`, `spec.md` and
+  `plan.md` (`intent/README.md`). A human accepts each one; never mark an
+  artifact approved on their behalf.
 
 ## Architecture
 
-### Entry points
+- `src/index.ts` (stdio) and `src/http-server.ts` (HTTP) call `createServer`
+  in `src/server.ts`, which registers only the tools the key's capabilities
+  allow.
+- `src/b2/` is the native B2 SDK boundary (buckets, keys, Object Lock,
+  notifications, Partner API); `src/s3/` is the S3-compatible data plane;
+  analytics tools build on B2 reports.
+- Inline object data is capped at 1 MiB; real data moves through presigned
+  URLs. HTTP is control-plane only, defaults the destructive gate to `block`,
+  and resolves credentials per request.
+- Details: `ARCHITECTURE.md` (Implementation Reference), `docs/`.
 
-- `src/index.ts` — stdio transport (Claude Desktop, local use)
-- `src/http-server.ts` — **Streamable HTTP** transport for hosted deployments. Production serving uses the MCP SDK v2 per-request handler for MCP `2026-07-28` and a stateless 2025-era transition fallback; it does not create or depend on protocol sessions. Each `/mcp` request resolves credentials through the selected provider (`headers`, `server`, or `principal`) before the SDK handler runs. B2 credential and Authorization headers are stripped before crossing into the SDK boundary; verified caller identity travels only as `authInfo`. Handles `GET /health`, Host/Origin checks, request body caps, rate limiting, in-flight caps, graceful drain, and periodic cache sweeps.
+## Things Claude gets wrong
 
-### Tool registration flow
+Full list with PR examples: `docs/review-lessons.md`. Read it before writing
+code.
 
-`server.ts` exports three functions:
+- Docs, JSDoc and tool descriptions that claim more than the code does.
+- Guards that fail open (missing claim, empty allowlist, failed lookup).
+- Tests that cannot fail; loose input parsing; partial results shown as
+  complete.
+- Auto-retrying non-idempotent writes; new entry points that skip the gate,
+  sanitizer, audit or capability checks.
+- Editing workflows, manifests or pins without the contract tests; moving linked
+  pins one at a time; not mirroring lockfile changes into
+  `deploy/customer-hosted/`.
+- PR descriptions that drift from the final diff; re-read after every push.
 
-- `loadConfig()` — reads env vars, validates required keys, returns `B2Config`
-- `fetchCapabilities(config)` — one-shot authorize that returns the key's `allowed.capabilities`; returns `null` only for `B2_REGISTER_ALL_TOOLS=true`. Lookup failures throw so HTTP fails closed.
-- `createServer(config, capabilities?)` — instantiates `B2AuthManager`, the SDK-backed `B2Client`, and the AWS S3 data-plane client (configured through `@backblaze-labs/b2-sdk/s3`), then calls all `register*Tools()` functions and, when `B2_ENABLE_MCP_PROMPTS=true`, `registerB2WorkflowPrompts()`
+## Verifying your work
 
-Each register function receives the server + client(s) and calls `server.tool(name, description, zodSchema, handler)` for each tool. Adding a new tool means adding it to the appropriate register file — no changes to `server.ts` needed unless it's a new register file. **New tools should also be added to the capability map** (`src/utils/tool-capabilities.ts`).
+- Fast loop: `pnpm test` (ends with `Test Files  N passed`).
+- Before pushing: `pnpm run ci` (must end with
+  `ci-local: N passed, 0 failed, M skipped`; Docker steps skip without Docker).
+- Lint: `pnpm run verify` (exit 0, no warnings).
 
-**Capability-aware registration.** When `createServer` is given a `capabilities` array (the entry points fetch it via `fetchCapabilities`), it wraps `server.tool` so only tools the key can use are registered — the surface auto-right-sizes to the credential (a read-only key drops every write/delete/admin tool; full ~9,719 tokens → read-only ~2,867). The map is `src/utils/tool-capabilities.ts` (any-of semantics; unmapped tools always register; Partner tools register only with a distinct master key). When `capabilities` is `null`/omitted — all unit tests, or `B2_REGISTER_ALL_TOOLS=true` — the full surface registers, so there's no behavior change. The key decides what's _possible_; the destructive gate decides what's _permitted_.
-
-### Resource registration flow
-
-`src/resources.ts` registers the read-only MCP resource surface after tools are
-committed, so `b2://capabilities` can report the active tool profile. Resources
-are JSON only:
-
-- `b2://server-config` - non-secret process configuration: transport,
-  credential mode, destructive policy, secret-sink mode, public URL, and server
-  version. It is intentionally not B2-capability-gated because it contains no
-  account identifiers or credential values and supports credential-less stdio
-  discovery.
-- `b2://capabilities` - the current credential capability set plus active tool
-  profile; omitted in credential-less discovery mode and reduced by OAuth scope
-  policy when OAuth is active.
-- `b2://bucket/{bucketName}` - capability/OAuth-gated on the same central
-  `isToolEnabled` / `isToolAllowedByOAuthScopes` policy as `b2_list_buckets`.
-  `resources/list` advertises at most the first 100 concrete bucket resources
-  because B2 has no bucket-list pagination; `resources/read` can still target a
-  known bucket name directly. Bucket reads include type/visibility, lifecycle,
-  Object Lock, retention, encryption, CORS, replication, and notification rules
-  when the caller is also allowed to use `b2_get_bucket_notification_rules`.
-
-Bucket notification rules use the same redaction helper as the bucket tools.
-Webhook URL host/path/query, HMAC signing secrets, and custom-header values are
-redacted before reaching the MCP response, and successful resource payloads pass
-through the central MCP-output sanitizer. Bucket resource reads are not given a
-client cache hint because visibility and notification targets are
-security-relevant after writes.
-
-### Prompt registration flow
-
-MCP workflow prompts are off by default; set `B2_ENABLE_MCP_PROMPTS=true` to enable them once every replica runs prompt-capable code. The flag gates both handler registration and `prompts/list` advertisement together, so it is not a decoupled two-phase rollout: flip it atomically across the fleet (or use sticky routing) so no replica advertises `prompts/list` while a sibling replica still lacks a `prompts/get` handler. Prompt definitions live in `src/prompts.ts` and register through `PromptRegistrationAdapter`, which shares the deferred registration machinery used by `ToolRegistrationAdapter`. Prompt availability is derived from the committed tool registry: every `requiredTools` entry must be a registered, available (non-stub) handler, and any `requiredCapabilities` entry must be present in the resolved B2 capability set. This keeps prompts aligned with durable-secret sink stubs, OAuth/transport gates, and future tool-registration policy.
-
-Prompts return structured message templates only; they never execute B2 tools. Destructive or credential-producing steps still happen later through `tools/call`, so the existing destructive gate and MCP elicitation remain authoritative. Four workflow prompts intentionally launch the shipped companion skills (`b2-object-lock`, `b2-incident-response`, `b2-lifecycle-cost-hygiene`, `b2-least-privilege-keys`) instead of restating those playbooks; `b2_review_bucket_notifications` is the net-new prompt workflow.
-
-### Three backing categories, two client types
-
-The public tool surface is described by backing category, with availability
-recorded per tool instead of as a separate bucket:
-
-- **Native B2 SDK** (`@backblaze-labs/b2-sdk`) — B2 control-plane operations the S3 API has no equivalent for, including buckets, application keys, Object Lock, event notifications, and Partner/Groups operations.
-- **AWS S3 SDK** (`@aws-sdk/client-s3`) — the S3-compatible data plane behind every `s3_*` tool.
-- **Neither SDK** — repository-owned MCP analytics (`b2_report_usage_growth`, `b2_rank_egress_leaders`, `b2_list_largest_files`, `b2_unfinished_uploads`) built from B2 reports and bounded live listings because no SDK exposes those aggregates as primitives.
-
-Durable-secret-producing tools stay in the Native B2 SDK category even when
-their current availability is a non-secret compatibility stub.
-
-**B2 SDK boundary** (`src/b2/`) — the official `@backblaze-labs/b2-sdk` integration boundary for B2 authorization state, endpoint data, retry semantics, and native bucket/key/Object Lock/notification/Partner operations. `B2Client` owns the shared auth/circuit wrapper and native lookups used by S3 safety guards, such as version-ID ownership checks and delete-marker metadata synthesis.
-
-**S3-compatible API** (`src/s3/`) — the **data-plane tool contract**: all `s3_*` object, presigned URL, multipart, bucket reachability/location/lifecycle, upload-part-copy, and report-bucket reads use the permanent AWS S3 SDK peer client configured through `@backblaze-labs/b2-sdk/s3`. B2 rejects **master** keys on the S3 endpoint, but ordinary application keys are accepted — which is why a non-master application key (`B2_APPLICATION_KEY_ID` / `B2_APPLICATION_KEY`) is the primary credential and signs S3 requests. (The former `B2_APP_KEY_ID` / `B2_APP_KEY` separate-S3-key override has been removed.)
-
-**Credential routing** (`createServer` in `server.ts`): the application key drives the B2 native API, S3, and key management. Only the Partner API tools use the master key — `createServer` builds a second `B2Client` from `B2_MASTER_KEY_*` and wires it into `registerPartnerTools`, falling back to the application-key client when no distinct master key is set.
-
-### Auth token lifecycle (`src/auth.ts`)
-
-`B2AuthManager` caches the token for 23 hours (B2 tokens are valid 24h). Concurrent `getAuth()` calls share a single in-flight authorize request (deduped via `inflightAuth` promise). On 401, `B2Client` calls `auth.invalidate()` before retrying so the next `getAuth()` re-authorizes.
-
-### Object upload / data plane
-
-Object data movement runs through the **`s3_*` data-plane tools**. Inline object operations in `src/s3/objects.ts`, presigning in `src/s3/presigned.ts`, and multipart in `src/s3/multipart.ts` all call the repository-owned AWS S3 peer adapter configured for B2's S3-compatible endpoint.
-
-**Control-plane-first data path.** The preferred way to move real object data is a **presigned URL** (`s3_get_presigned_url`, PutObject or GetObject): the bytes flow directly between the client/worker and B2 and never pass through the server. The inline `s3_put_object` / `s3_get_object` paths are bounded to **≤ 1 MiB** (`MAX_INLINE_OBJECT_BYTES` in `src/s3/objects.ts`) — a control-plane convenience for manifests, sidecars, and tiny configs; anything larger is refused with a pointer to `s3_get_presigned_url` or the multipart flow. **Multipart is presigned-per-part too**: `s3_create_multipart_upload` → `s3_get_presigned_upload_part_url` (mints a presigned PUT URL per part) → the client PUTs each part directly to B2 → `s3_complete_multipart_upload` with the returned ETags. No multipart tool streams part bytes through the server. On the trusted stdio transport, `saveToPath` still streams any size straight to disk without buffering. Because the HTTP transport also disables local-file access by default, the internet-facing server is **control-plane-only by construction**: no bulk object data can flow through it.
-
-> The former native data tools and their files (`src/b2/files.ts`, `src/b2/large-files.ts`, `src/b2/download-urls.ts` — including `b2_upload_file`'s auto-multipart path and the native download-URL builders) were **removed** from the public tool surface. The inherited `s3_*` object names remain compatibility aliases, and their implementation now uses the AWS S3 SDK against B2's S3-compatible endpoint.
-
-### Tool naming conventions
-
-- **Prefix:** `b2_*` — B2-native names. Most are Native B2 SDK control-plane tools; the four analytics names are the custom MCP category. `s3_*` — compatibility data-plane names; object aliases, presigned URLs, multipart, reachability, and lifecycle paths use the AWS SDK peer client through the SDK `/s3` boundary.
-- **Shape:** `<prefix>_<verb>_<noun>`, snake_case, lowercase, **verb-first**. Use a standard verb (`list`, `get`, `create`, `update`, `delete`, `put`, `rank`, `report`, …), matching the upstream B2/S3 operation where one exists. No noun-only names (e.g. `b2_largest_files` was renamed to `b2_list_largest_files`). Presign tools use the `s3_get_presigned_*_url` form (verb = `get`), never a bare `s3_presign_*` form. `b2_unfinished_uploads` is a known grandfathered noun-only exception (see the contract doc); don't copy it.
-- The authoritative rule, the verb list, and the required lockstep-update checklist live in [`docs/design-docs/tool-contract.md`](docs/design-docs/tool-contract.md#tool-naming-conventions) — consult it before adding or renaming a tool.
-
-### Retry logic (`src/utils/retry.ts`)
-
-The official SDK retry transport handles B2 retries and token refresh. `B2Client.withNativeCircuit()` wraps native/SDK B2 operations in the shared circuit breaker; local S3 presigning is intentionally outside that breaker unless it must perform a fresh native lookup such as version-ID ownership validation.
-
-### Test patterns
-
-Unit tests (`tests/unit/`) mock dependencies with `vi.spyOn(...)` — no network
-calls, no credentials needed. `tests/contract/tools-schema.contract.test.ts`
-builds the full server with dummy credentials and validates all 40 tool schemas
-structurally.
-
-Live integration tests (`tests/live/b2.integration.live.test.ts` and
-`tests/live/request-shape.contract.live.test.ts`) run against real B2 and gate
-on credentials, with no opt-in escape hatches:
-
-- `liveIt` runs a case only when `B2_APPLICATION_KEY_ID` / `B2_APPLICATION_KEY`
-  are present, and skips otherwise. Every live case uses this guard.
-- The Partner read paths (`b2_list_groups`, `b2_list_group_members`) require the
-  account master key (`B2_MASTER_KEY_ID` / `B2_MASTER_KEY`) on a Partner-entitled
-  account; they assert real results and fail (never skip) when it is missing.
-  There is no `B2_PARTNER_LIVE` flag.
-- The event-notification write-shape contract requires
-  `B2_LIVE_NOTIFICATION_BUCKET` to name a pre-provisioned, notifications-enabled
-  bucket, with the key holding `writeBucketNotifications`. It sets then clears
-  rules and never deletes the bucket.
-
-There is no `create_group_member`/`eject` mutating test in the live suite;
-`b2_create_group_member` would create a real, non-deletable account and must
-never run in CI.
-
-## HTTP transport: per-request credentials & hardening
-
-The HTTP server (`src/http-server.ts`) implements a single `/mcp` endpoint with MCP `2026-07-28` as the preferred era and stateless 2025-era compatibility during migration. Credentials are resolved per request. Unset `B2_HTTP_CREDENTIAL_MODE` defaults to `headers` for one-release compatibility; hosted operators should set `server` or `principal` explicitly when clients must not send B2 keys.
-
-Because this transport is internet-facing, it is hardened by default:
-
-- **Local filesystem access is OFF.** `filePath` / `saveToPath` are rejected unless an operator sets `B2_ALLOW_LOCAL_FILES=true` **and** `B2_FILE_ROOT=/sandbox/dir` — and even then every path is confined (symlinks resolved) to that root via `src/utils/fs-guard.ts`. Remote callers can pass small (≤ 1 MiB) base64 `content` inline; for real object data they should use a presigned PutObject URL (`s3_get_presigned_url`) so bytes go client→B2 directly. On the stdio transport disk access is on by default (trusted local user); set `B2_FILE_ROOT` to sandbox it or `B2_ALLOW_LOCAL_FILES=false` to disable.
-- **In-flight caps:** `B2_MAX_SESSIONS` (default 1000) total and `B2_MAX_SESSIONS_PER_KEY` (default 20) per credential, returning 503 / 429 over the cap. The env names are retained for deploy-manifest compatibility.
-- **Rate limiting** keys on a SHA-256 hash of the full key id (not a prefix), so distinct tenants can't collide.
-- **DNS-rebinding protection:** set `B2_ALLOWED_HOSTS` / `B2_ALLOWED_ORIGINS` (comma-separated) to enable Host/Origin validation on the `/mcp` endpoint.
-- **Body cap:** POST bodies to `/mcp` are capped at 1 MB (413 over the cap).
-- **`b2_create_key` lockdown** (`src/b2/keys.ts`, applies on all transports): a minted key is a durable credential the model sees once, so by default the server **rejects** minting keys that grant key-management capabilities (`listKeys`/`writeKeys`/`deleteKeys` — a self-perpetuating backdoor) and **rejects** unscoped keys holding write/delete capabilities (forces a `bucketId`/`bucketIds` scope). Optional `B2_MAX_KEY_DURATION_SECONDS` enforces a maximum validity and forbids non-expiring keys. Overrides: `B2_ALLOW_KEY_MGMT_GRANTS=true`, `B2_ALLOW_UNSCOPED_KEYS=true`. B2 still independently enforces that a key cannot exceed the creating key's own capabilities.
-- **Destructive-operation gate** (`src/utils/destructive-gate.ts`, all transports). Irreversible/high-impact tools are gated by `B2_DESTRUCTIVE_POLICY`. **Coverage (15 tools):** explicit deletes (`s3_delete_object`, `s3_delete_objects`, `s3_abort_multipart_upload`, `b2_delete_bucket`, `b2_delete_key`); durable key creation (`b2_create_key`); PutObject presigning (`s3_get_presigned_url` with `operation: "PutObject"`); `b2_eject_group_member`; irreversible/billable account creation (`b2_create_group_member`, `b2_reserve_trial_create_account`); persistent webhook replacement (`b2_set_bucket_notification_rules`); the protection-removal steps that precede a delete (`b2_update_file_retention` when clearing retention or using `bypassGovernance`, `b2_update_file_legal_hold` when set to `off`, `b2_update_bucket` when it makes a bucket public, disables/clears Object Lock, schedules deletion via `lifecycleRules`, or sets replication rules); and `s3_put_bucket_lifecycle` when a rule schedules deletion/expiration. **Policies:** `confirm` requires MCP form elicitation approval on compatible 2026 clients, or `confirm: true` when elicitation is unavailable/disabled; `elicit` requires human MCP form elicitation approval and refuses (`destructive_confirmation_refused`/409) when the client cannot prompt a human or elicitation is disabled — a model-supplied `confirm: true` does not satisfy it ("require a human, and refuse if you can't reach one"); `block` refuses outright before elicitation; `allow` disables the gate and skips elicitation. **Per-transport default: stdio = `confirm` (trusted local user); the internet-facing HTTP transport = `block` (safe-by-default).** An operator opts down with `B2_DESTRUCTIVE_POLICY`. Server-side, so it holds even for MCP clients without the skills layer; each gated tool exposes an optional `confirm` boolean. `confirm` and client-relayed elicitation are defense-in-depth (a hijacked or malicious client could fabricate approval) — `block` (the HTTP default) or host consent is the wall for untrusted contexts.
-
-Client config notes:
-
-- **Claude Desktop** (`claude_desktop_config.json`) only accepts stdio entries. To connect to a hosted Streamable HTTP server, use the `mcp-remote` bridge as a local stdio shim (`command: "npx"`, `args: ["-y", "mcp-remote", "<url>/mcp", "--header", "X-B2-MCP-Key-Id:…", "--header", "X-B2-MCP-Key:…"]`). The URL + headers shape is rejected by Claude Desktop with "not a valid MCP server configuration."
-- **Claude.ai web / Pro / Max Custom Connectors** accept the URL + headers shape directly: `{ url, headers: { "X-B2-MCP-Key-Id": "…", "X-B2-MCP-Key": "…" } }`.
-
-`X-B2-MCP-Key-Id` / `X-B2-MCP-Key` are required — the application key, used for B2 native, S3, and key management. `X-B2-MCP-Master-Key-Id` / `X-B2-MCP-Master-Key` are optional and used **only** by the Partner API tools (they fall back to the application key when absent). Use a non-master application key: B2 rejects master keys on the S3 endpoint, and the short `X-B2-*` aliases plus the `X-B2-App-Key-*` S3 override have been removed.
-
-## Deployment target
-
-t4g.medium (2 vCPU, 4 GB RAM) on AWS, us-west-2. Fly.io or Railway are simpler alternatives (automatic SSL, no nginx needed). EC2 requires nginx for SSL termination (Let's Encrypt + Certbot) and a systemd service to keep the process running.
+Run them before reporting any task complete, and paste the output. If a test
+fails, fix the code, not the test. For a bug fix, commit a failing test first.
+Before opening a PR, run `/code-review` and `/security-review` (or the
+`verifier` subagent) in a fresh context and fix Important findings. The person
+who directed the agent owns the PR; the agent never approves or merges it.
+Review follows `REVIEW.md`.

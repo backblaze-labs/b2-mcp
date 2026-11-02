@@ -1,0 +1,3 @@
+# Isolated single-package workspace for the pinned Claude Code CLI (#528). Its
+# own workspace file keeps the root `pnpm install` from descending into it.
+packages: []

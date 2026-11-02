@@ -1,72 +1,51 @@
 #!/usr/bin/env node
-import { promises as fs } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, promises as fs, readdirSync } from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { releaseRoot } from "./lib/release-utils.mjs";
 
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
+// Batches the changie fragments in .changes/unreleased/ into .changes/v<version>.md
+// and rebuilds CHANGELOG.md. Runs from the `pnpm version` lifecycle, so the
+// version comes from the already-bumped package.json.
 
-function normalizeRepositoryUrl(value) {
-  return String(value ?? "")
-    .replace(/^git\+/, "")
-    .replace(/\.git$/, "")
-    .replace(/\/$/, "");
+const require = createRequire(import.meta.url);
+
+function changie(root, args) {
+  const result = spawnSync(process.execPath, [require.resolve("changie/npm/changie.js"), ...args], {
+    cwd: root,
+    encoding: "utf8",
+  });
+  if (result.status !== 0) {
+    throw new Error(`changie ${args.join(" ")} failed: ${(result.stderr || result.stdout).trim()}`);
+  }
 }
 
 async function main() {
   const root = releaseRoot();
-  const changelogPath = path.join(root, "CHANGELOG.md");
   const pkg = JSON.parse(await fs.readFile(path.join(root, "package.json"), "utf8"));
   const version = String(pkg.version ?? "");
-  const repoUrl = normalizeRepositoryUrl(pkg.repository?.url);
-
   if (!version) throw new Error("package.json version is missing");
-  if (!repoUrl) throw new Error("package.json repository.url is missing");
-
-  let text = await fs.readFile(changelogPath, "utf8");
-  if (new RegExp(`^## \\[${escapeRegExp(version)}\\]`, "m").test(text)) {
-    throw new Error(`CHANGELOG.md already has a "## [${version}]" section`);
+  if (!existsSync(path.join(root, ".changie.yaml"))) throw new Error(".changie.yaml is missing");
+  if (existsSync(path.join(root, ".changes", `v${version}.md`))) {
+    throw new Error(`.changes/v${version}.md already exists`);
   }
 
-  const unreleasedMatch = /^## \[Unreleased\]\s*$/m.exec(text);
-  if (!unreleasedMatch) throw new Error('CHANGELOG.md is missing "## [Unreleased]"');
-
-  const sectionStart = unreleasedMatch.index + unreleasedMatch[0].length;
-  const rest = text.slice(sectionStart);
-  const nextHeadingOffset = rest.search(/^## \[/m);
-  const sectionEnd = nextHeadingOffset === -1 ? text.length : sectionStart + nextHeadingOffset;
-  const unreleasedBody = text.slice(sectionStart, sectionEnd).trim();
-  const previousVersion = /^## \[(\d+\.\d+\.\d+(?:-[^\]]+)?)\]/m.exec(rest)?.[1] ?? "";
-
-  if (!unreleasedBody) {
+  const unreleasedDir = path.join(root, ".changes", "unreleased");
+  const fragments = existsSync(unreleasedDir)
+    ? readdirSync(unreleasedDir).filter((name) => name.endsWith(".yaml"))
+    : [];
+  const batchArgs = ["batch", `v${version}`];
+  if (fragments.length === 0) {
     console.warn(
-      `cut-changelog: WARNING - [Unreleased] is empty; releasing v${version} with no notes.`,
+      `cut-changelog: WARNING - no unreleased entries; releasing v${version} with no notes.`,
     );
+    batchArgs.push("--allow-no-changes");
   }
 
-  // Use UTC so release dates are stable across local workstations and CI reruns.
-  const date = new Date().toISOString().slice(0, 10);
-  const before = text.slice(0, unreleasedMatch.index);
-  const promoted = unreleasedBody ? `${unreleasedBody}\n\n` : "";
-  const after = text.slice(sectionEnd);
-  text = `${before}## [Unreleased]\n\n## [${version}] - ${date}\n\n${promoted}${after}`;
-
-  const unreleasedLink = `[Unreleased]: ${repoUrl}/compare/v${version}...HEAD`;
-  const versionLink = previousVersion
-    ? `[${version}]: ${repoUrl}/compare/v${previousVersion}...v${version}`
-    : `[${version}]: ${repoUrl}/releases/tag/v${version}`;
-
-  if (/^\[Unreleased\]:.*$/m.test(text)) {
-    text = text.replace(/^\[Unreleased\]:.*$/m, `${unreleasedLink}\n${versionLink}`);
-  } else {
-    // The inherited changelog has reference-less historical headings. Seed link
-    // references from this release forward without inventing links for old tags.
-    text = `${text.replace(/\s*$/, "")}\n\n${unreleasedLink}\n${versionLink}\n`;
-  }
-
-  await fs.writeFile(changelogPath, text);
-  console.log(`cut-changelog: promoted [Unreleased] to [${version}] - ${date}`);
+  changie(root, batchArgs);
+  changie(root, ["merge"]);
+  console.log(`cut-changelog: batched ${fragments.length} change(s) into [${version}]`);
 }
 
 try {

@@ -13,11 +13,14 @@ removes it.
 
 ## Changelog Discipline
 
-- Every user-visible change must update `CHANGELOG.md` under `[Unreleased]`.
+- Every user-visible change adds a changie fragment under `.changes/unreleased/`
+  (`pnpm run changelog:new`); `CHANGELOG.md` is generated from `.changes/` and is
+  not edited by hand. The `changelog` PR check enforces this; the
+  `skip-changelog` label opts out.
 - Use Keep a Changelog headings: `Added`, `Changed`, `Deprecated`, `Removed`,
   `Fixed`, and `Security`.
-- Move `[Unreleased]` entries into the released version section only when the
-  release tag is created.
+- Fragments are batched into `.changes/vX.Y.Z.md` only when the release version
+  is cut.
 - Do not publish a GitHub release without a matching changelog section, tag, and
   package version.
 
@@ -153,8 +156,8 @@ exists. For the first public package only:
 ## Normal Release
 
 1. Start from a clean, up-to-date `main` and confirm the intended release content
-   is under `[Unreleased]` in `CHANGELOG.md`. That section must be non-empty; the
-   publish workflow rejects a release whose changelog section is empty. Run the
+   is in `.changes/unreleased/`. It must be non-empty; the publish workflow
+   rejects a release whose changelog section is empty. Run the
    deterministic local gate listed above.
 2. Bump the version and promote the changelog. `.npmrc` sets `ignore-scripts=true`
    (a supply-chain control that blocks dependency and project lifecycle scripts),
@@ -168,9 +171,10 @@ exists. For the first public package only:
    ```
 
    `npm version ... --no-git-tag-version` updates only `package.json` (no commit,
-   no tag). `scripts/cut-changelog.mjs` reads that bumped version, rewrites
-   `## [Unreleased]` into a dated `## [x.y.z] - YYYY-MM-DD` section, leaves a fresh
-   empty `[Unreleased]`, and updates the changelog compare links.
+   no tag). `scripts/cut-changelog.mjs` reads that bumped version, runs
+   `changie batch vX.Y.Z` to collect the fragments into `.changes/vX.Y.Z.md`
+   (a dated `## [x.y.z] - YYYY-MM-DD` section with its compare link), and runs
+   `changie merge` to rebuild `CHANGELOG.md`. Commit `.changes/` with it.
    `scripts/update-server-json-version.mjs` then syncs the bumped
    `package.json` version into every checked-in distribution manifest: the MCP
    Registry manifest (`server.json` top-level `version` and the npm package

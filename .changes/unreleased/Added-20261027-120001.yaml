@@ -1,0 +1,3 @@
+kind: Added
+body: "Test-only `B2_TEST_REALM` endpoint override and a local HTTPS fake endpoint, so the built server can be driven in the protocol layer with no real credentials. The override is inert unless `NODE_ENV=test`, trusts exactly one `https:` origin, and is covered by a basic-path stdio test (bucket and object round trip, multipart, `saveToPath`). (#469)"
+time: 2026-10-27T12:00:01.000000+00:00
