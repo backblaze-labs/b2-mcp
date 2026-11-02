@@ -996,6 +996,56 @@ describe("s3_head_object and s3_copy_object", () => {
     expect(B2Client.prototype.getCurrentS3FileVersion).not.toHaveBeenCalled();
   });
 
+  it("applies the put content-type guard to replacement copy metadata", async () => {
+    const rejected = await callTool(server, "s3_copy_object", {
+      sourceBucket: "copy-source",
+      sourceKey: "source.html",
+      destinationBucket: "copy-destination",
+      destinationKey: "copied.html",
+      metadataDirective: "REPLACE",
+      contentType: "text/html",
+    });
+
+    expect(rejected.isError).toBe(true);
+    expectBadRequestToolError(rejected, /s3_copy_object rejects browser-executable content type/i);
+    expect(sendSpy).not.toHaveBeenCalled();
+
+    const copied = await callTool(server, "s3_copy_object", {
+      sourceBucket: "copy-source",
+      sourceKey: "source.txt",
+      destinationBucket: "copy-destination",
+      destinationKey: "copied.txt",
+      metadataDirective: "REPLACE",
+      contentType: "text/plain",
+    });
+
+    expect(copied.isError).toBeFalsy();
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(sendSpy.mock.calls[0][0].input).toMatchObject({
+      MetadataDirective: "REPLACE",
+      ContentType: "text/plain",
+    });
+  });
+
+  it("allows replacement copy metadata without a content type", async () => {
+    const copied = await callTool(server, "s3_copy_object", {
+      sourceBucket: "copy-source",
+      sourceKey: "source.txt",
+      destinationBucket: "copy-destination",
+      destinationKey: "copied.txt",
+      metadataDirective: "REPLACE",
+      metadata: { owner: "fixture" },
+    });
+
+    expect(copied.isError).toBeFalsy();
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(sendSpy.mock.calls[0][0].input).toMatchObject({
+      MetadataDirective: "REPLACE",
+      Metadata: { owner: "fixture" },
+    });
+    expect(sendSpy.mock.calls[0][0].input.ContentType).toBeUndefined();
+  });
+
   it("sends CopyObjectCommand through the AWS SDK", async () => {
     const result = await callTool(server, "s3_copy_object", {
       sourceBucket: "copy-source",

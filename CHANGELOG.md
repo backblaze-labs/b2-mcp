@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   round trip, multipart, `saveToPath`). (#469)
 
 ### Fixed
+- `s3_copy_object` rejects browser-executable `contentType` values when
+  replacing metadata, matching `s3_put_object`.
 - `s3_put_object` accepts an empty `content` string and stores a zero-byte
   object instead of answering "Either filePath or content must be provided."
   (#505)

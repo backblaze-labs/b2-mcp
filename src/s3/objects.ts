@@ -1213,6 +1213,10 @@ export function registerS3ObjectTools(
     },
     async (args) => {
       try {
+        if (args.metadataDirective === "REPLACE" && args.contentType !== undefined) {
+          assertSafeObjectContentType(args.contentType, "s3_copy_object");
+        }
+
         await verifyVersionBinding(
           versions,
           {
