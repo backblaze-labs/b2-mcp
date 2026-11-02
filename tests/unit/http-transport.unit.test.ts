@@ -1431,6 +1431,15 @@ describe("HTTP transport handler", () => {
     });
     await vi.waitFor(() => expect(controllers).toHaveLength(2));
 
+    // Each principal holds its own slot (cap 1): a second concurrent request from
+    // alice is refused while bob's stream does not consume alice's budget.
+    const aliceOverCap = await request(port, "POST", "/mcp", {
+      headers: { ...modernHeaders("tools/list"), "x-test-principal": "alice" },
+      body: LIST_TOOLS,
+    });
+    expect(aliceOverCap.status).toBe(429);
+    expect(controllers).toHaveLength(2);
+
     for (const controller of controllers) controller.close();
     await expect(first).resolves.toMatchObject({ status: 200 });
     await expect(second).resolves.toMatchObject({ status: 200 });

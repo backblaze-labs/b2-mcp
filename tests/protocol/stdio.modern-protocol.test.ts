@@ -7,6 +7,7 @@ import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { getRegisteredTools } from "../../src/mcp";
 import { invalidateCapabilityCache } from "../../src/server";
 import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
 import {
@@ -20,6 +21,20 @@ vi.mock("@modelcontextprotocol/server/stdio", () => ({
 }));
 
 import { startStdio } from "../../src/index";
+
+/** Build the server from the factory that startStdio handed to serveStdio. */
+function servedTools() {
+  const factory = vi.mocked(serveStdio).mock.calls[0]?.[0] as unknown as () => Parameters<
+    typeof getRegisteredTools
+  >[0];
+  expect(factory).toBeTypeOf("function");
+  return getRegisteredTools(factory()) ?? {};
+}
+
+async function listBucketsResult() {
+  const result = await servedTools().b2_list_buckets.execute({}, {} as never);
+  return JSON.stringify(result);
+}
 
 function setTempSecretSinkFile(): void {
   process.env.B2_SECRET_SINK_FILE = join(
@@ -46,6 +61,11 @@ describe("startStdio", () => {
 
     await expect(startStdio()).resolves.toBeUndefined();
     expect(serveStdio).toHaveBeenCalledTimes(1);
+    const tools = servedTools();
+    expect(Object.keys(tools)).toEqual(
+      expect.arrayContaining(["b2_list_buckets", "s3_put_object", "b2_delete_bucket"]),
+    );
+    expect(tools.b2_list_buckets.availability).toBe("available");
   });
 
   it("starts stdio with full surface when capability discovery is transiently unavailable", async () => {
@@ -66,6 +86,12 @@ describe("startStdio", () => {
 
     await expect(startStdio()).resolves.toBeUndefined();
     expect(serveStdio).toHaveBeenCalledTimes(1);
+    // Unknown capabilities (null) keep the full, working surface.
+    const tools = servedTools();
+    expect(Object.keys(tools)).toEqual(
+      expect.arrayContaining(["b2_list_buckets", "s3_put_object", "b2_delete_bucket"]),
+    );
+    expect(await listBucketsResult()).not.toContain("missing_credentials");
   });
 
   it("starts discovery mode when stdio capability discovery rejects the credential", async () => {
@@ -86,6 +112,9 @@ describe("startStdio", () => {
 
     await expect(startStdio()).resolves.toBeUndefined();
     expect(serveStdio).toHaveBeenCalledTimes(1);
+    // The surface stays listable, but every call is refused as missing credentials.
+    expect(Object.keys(servedTools())).toContain("b2_list_buckets");
+    expect(await listBucketsResult()).toContain("missing_credentials");
   });
 
   it("starts in credential-less discovery mode instead of exiting when credentials are missing", async () => {
@@ -100,6 +129,10 @@ describe("startStdio", () => {
     await expect(startStdio()).resolves.toBeUndefined();
     expect(exit).not.toHaveBeenCalled();
     expect(serveStdio).toHaveBeenCalledTimes(1);
+    expect(Object.keys(servedTools())).toEqual(
+      expect.arrayContaining(["b2_list_buckets", "s3_put_object"]),
+    );
+    expect(await listBucketsResult()).toContain("missing_credentials");
     exit.mockRestore();
   });
 });

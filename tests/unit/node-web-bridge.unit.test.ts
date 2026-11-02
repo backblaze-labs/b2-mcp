@@ -153,6 +153,30 @@ describe("Node Web bridge", () => {
     );
   });
 
+  it("ignores spoofable forwarded client headers outside Vercel unless the proxy is trusted", () => {
+    const headers = {
+      "x-vercel-forwarded-for": "198.51.100.9",
+      "x-forwarded-for": "203.0.113.77",
+      "x-real-ip": "198.51.100.2",
+    };
+    const env = { ...savedEnv };
+    delete env.VERCEL;
+    delete env.VERCEL_ENV;
+    delete env.B2_TRUST_PROXY_HEADERS;
+
+    process.env = env;
+    expect(vercelClientAddress(headers)).toBeUndefined();
+
+    process.env = { ...env, B2_TRUST_PROXY_HEADERS: "false" };
+    expect(vercelClientAddress(headers)).toBeUndefined();
+
+    process.env = { ...env, B2_TRUST_PROXY_HEADERS: "true" };
+    expect(vercelClientAddress(headers)).toBe("198.51.100.9");
+
+    process.env = { ...env, VERCEL_ENV: "preview" };
+    expect(vercelClientAddress(headers)).toBe("198.51.100.9");
+  });
+
   it("prefers x-vercel-forwarded-for over generic forwarded headers", () => {
     process.env = { ...savedEnv, VERCEL: "1" };
     expect(

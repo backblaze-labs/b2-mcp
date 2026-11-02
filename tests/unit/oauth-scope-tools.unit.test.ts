@@ -127,6 +127,27 @@ describe("OAuth scope-aware tool registration", () => {
     expect(tools.has("b2_update_file_legal_hold")).toBe(true);
   });
 
+  it("keeps b2:admin bounded by a read-only B2 key: write and delete tools stay hidden", () => {
+    const tools = toolNames(["b2:admin"], ["listBuckets", "readFiles", "listFiles"]);
+
+    expect(tools.has("b2_list_buckets")).toBe(true);
+    expect(tools.has("s3_get_object")).toBe(true);
+    for (const hidden of [
+      "s3_put_object",
+      "s3_delete_object",
+      "b2_create_bucket",
+      "b2_delete_bucket",
+      "b2_update_bucket",
+      "b2_list_keys",
+      "b2_delete_key",
+      "s3_put_bucket_lifecycle",
+      "b2_set_bucket_notification_rules",
+      "b2_update_file_legal_hold",
+    ]) {
+      expect(tools.has(hidden), hidden).toBe(false);
+    }
+  });
+
   it("fails closed when verified scopes lack the b2 prefix", () => {
     const tools = toolNames(["openid", "profile"]);
 

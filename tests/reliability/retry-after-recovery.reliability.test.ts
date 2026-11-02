@@ -192,7 +192,7 @@ describe("production retry settings recover from transient dependency failures",
     let calls = 0;
     const handle = vi.fn(async () => {
       calls += 1;
-      if (calls === 1) return s3XmlResponse(503, "SlowDown", { "retry-after": "1" });
+      if (calls === 1) return s3XmlResponse(503, "SlowDown", { "retry-after": "5" });
       return { response: { statusCode: 200, headers: {}, body: Readable.from([]) } };
     });
     const s3 = s3ClientWithHandler(handle);
@@ -204,7 +204,11 @@ describe("production retry settings recover from transient dependency failures",
       await waitForHandlerCalls(handle, 1);
       expect(handle).toHaveBeenCalledTimes(1);
 
-      await vi.advanceTimersByTimeAsync(10_000);
+      // Retry-After 5 s is far above any default backoff step, so a client that
+      // ignored the header would already have retried by now.
+      await vi.advanceTimersByTimeAsync(4_900);
+      expect(handle).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(100);
       await waitForHandlerCalls(handle, 2);
 
       expect(parseResult(await pending)).toBe("Bucket 'retry-bucket' exists and is accessible.");

@@ -154,6 +154,13 @@ describe("B2 S3 client configuration", () => {
   it("creates object clients with the configured S3 credential override", async () => {
     const s3 = createS3ObjectClient(config, "s3-object-tools");
 
+    const input = capturedS3ConfigInputs.at(-1);
+    expect(input).toMatchObject({
+      applicationKeyId: "legacy-s3-key-id",
+      applicationKey: "legacy-s3-secret",
+      region: "us-west-004",
+    });
+    expect(input?.accountInfo.getS3ApiUrl()).toBe(expectedB2S3Endpoint("us-west-004"));
     expect(typeof s3.destroy).toBe("function");
     expect((s3 as unknown as { config?: unknown }).config).toBeUndefined();
     expect((s3 as unknown as { send?: unknown }).send).toBeUndefined();
@@ -189,6 +196,12 @@ describe("B2 S3 client configuration", () => {
       capabilities: [],
     });
 
+    const input = capturedS3ConfigInputs.at(-1);
+    expect(input).toMatchObject({
+      applicationKeyId: "principal-key-id",
+      applicationKey: "principal-secret",
+    });
+    expect(input?.accountInfo.getS3ApiUrl()).toBe("https://s3.us-west-004.backblazeb2.com");
     expect(typeof s3.destroy).toBe("function");
     expect((s3 as unknown as { config?: unknown }).config).toBeUndefined();
     expect((s3 as unknown as { send?: unknown }).send).toBeUndefined();

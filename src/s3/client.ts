@@ -344,6 +344,9 @@ export function createAuthorizedS3Client(
 ): B2S3ClientFacade {
   let client: B2S3PeerClient | null = null;
   let inflight: Promise<B2S3PeerClient> | null = null;
+  // Configured-region fallback, kept for the facade's lifetime: destroying it per
+  // call would tear down the socket behind streaming bodies (getObject) still unread.
+  let fallback: B2S3PeerClient | null = null;
   let closed = false;
   const buildClient = (config: B2Config, authorizedS3ApiUrl?: string): B2S3PeerClient =>
     createS3Client(config, {
@@ -392,8 +395,8 @@ export function createAuthorizedS3Client(
         },
         "s3.authorize.fallback",
       );
-      const fallbackClient = buildClient(config);
-      return { client: fallbackClient, cached: false };
+      fallback ??= buildClient(config);
+      return { client: fallback, cached: true };
     }
   };
 
@@ -417,6 +420,8 @@ export function createAuthorizedS3Client(
       const current = client;
       client = null;
       current?.destroy();
+      fallback?.destroy();
+      fallback = null;
       // If destroy races an authorization, buildAuthorizedClient either closes
       // the newly-created peer itself or returns it here for teardown. Rejections
       // are logged so shutdown diagnostics keep the original failure visible.

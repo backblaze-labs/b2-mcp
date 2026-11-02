@@ -23,15 +23,22 @@ function waitForConcurrentBuild() {
   process.exit(1);
 }
 
+class BuildFailure extends Error {
+  constructor(status) {
+    super(`exit ${status}`);
+    this.status = status;
+  }
+}
+
 function run(command, args) {
   const result = spawnSync(command, args, { cwd: root, stdio: "inherit" });
   if (result.error) {
     console.error(
       `::error::vercel-project-build: failed to start ${command}: ${result.error.message}`,
     );
-    process.exit(1);
+    throw new BuildFailure(1);
   }
-  if ((result.status ?? 1) !== 0) process.exit(result.status ?? 1);
+  if ((result.status ?? 1) !== 0) throw new BuildFailure(result.status ?? 1);
 }
 
 if (existsSync(markerPath)) {
@@ -56,6 +63,9 @@ try {
   rmSync(path.join(root, VERCEL_RUNTIME_BUILD_DIR), { recursive: true, force: true });
   run("pnpm", ["exec", "tsc", "-p", "tsconfig.vercel-runtime.json"]);
   writeFileSync(markerPath, "ok\n");
+} catch (error) {
+  if (!(error instanceof BuildFailure)) throw error;
+  process.exitCode = error.status;
 } finally {
   rmSync(lockDir, { recursive: true, force: true });
 }

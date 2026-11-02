@@ -1020,6 +1020,8 @@ describe("b2_delete_bucket", () => {
     );
 
     expect(result.bucketId).toBe(bucket.id);
+    const remaining = parseResult(await callTool(server, "b2_list_buckets", {}));
+    expect(remaining.buckets.map((b: any) => b.bucketId)).not.toContain(bucket.id);
   });
 
   it("is blocked without confirm under the default policy", async () => {
@@ -1363,6 +1365,10 @@ describe("b2_list_keys and b2_delete_key", () => {
       }),
     );
     expect(deleted.applicationKeyId).toBe(created.applicationKeyId);
+    const after = parseResult(await callTool(server, "b2_list_keys", {}));
+    expect(after.keys.map((key: any) => key.applicationKeyId)).not.toContain(
+      created.applicationKeyId,
+    );
   });
 
   it("omits key secrets from every paginated b2_list_keys page", async () => {

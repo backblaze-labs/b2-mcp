@@ -158,6 +158,7 @@ describe("HTTP transport guards (MCP 2026-07-28)", () => {
   it("observes client cancellation on the handler abort signal without a late response", async () => {
     let sawAbort = false;
     const entered = deferred<void>();
+    const handlerReturned = deferred<void>();
     await startHandle({
       mcpHandler: {
         fetch: async (req: Request) => {
@@ -174,10 +175,27 @@ describe("HTTP transport guards (MCP 2026-07-28)", () => {
             });
           });
           // Client is gone; do not emit a late response frame.
+          queueMicrotask(() => handlerReturned.resolve());
           return Response.json({ jsonrpc: "2.0", id: 1, result: { tools: [] } });
         },
         close: () => undefined,
       },
+    });
+    // Count body writes and end() calls on the server-side response, so a late
+    // frame written after the client left is observable.
+    let bodyWrites = 0;
+    let ends = 0;
+    handle.server.on("request", (_req, res) => {
+      const write = res.write.bind(res);
+      const end = res.end.bind(res);
+      res.write = ((...args: Parameters<typeof res.write>) => {
+        bodyWrites += 1;
+        return write(...args);
+      }) as typeof res.write;
+      res.end = ((...args: Parameters<typeof res.end>) => {
+        ends += 1;
+        return end(...args);
+      }) as typeof res.end;
     });
 
     const controller = new AbortController();
@@ -193,8 +211,16 @@ describe("HTTP transport guards (MCP 2026-07-28)", () => {
 
     const settled = await inflight;
     expect(settled).toBeInstanceOf(Error);
+    expect((settled as Error).name).toBe("AbortError");
     await waitFor(() => sawAbort);
     expect(sawAbort).toBe(true);
+
+    // Let the handler return its response and the server finish its write path,
+    // then prove nothing was emitted to the departed client.
+    await handlerReturned.promise;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(bodyWrites).toBe(0);
+    expect(ends).toBe(0);
   });
 
   it("returns 429 when the per-credential in-flight cap is exhausted", async () => {

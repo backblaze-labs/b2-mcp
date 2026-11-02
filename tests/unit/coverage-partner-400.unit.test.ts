@@ -6,6 +6,7 @@ import type { B2Client } from "../../src/b2/client";
 import type { B2AuthManager } from "../../src/auth";
 import type { B2Config } from "../../src/utils/types";
 import { setSinkWriteForTests } from "../../src/utils/secret-sink";
+import { logger } from "../../src/utils/logger";
 import { ToolHarness, parseResult, testConfig } from "../support/deterministic-fakes";
 
 function tempSecretFile(): string {
@@ -393,6 +394,7 @@ describe("registerPartnerTools coverage (issue 400)", () => {
       makeConfig({ secretSink: { mode: "file", filePath: tempSecretFile() } }),
     );
 
+    const fatalSpy = vi.spyOn(logger, "fatal").mockImplementation(() => undefined as never);
     const restore = failSecretLedgerWriteContaining("SecretApplicationKeyValue");
     try {
       const raw = await harness.call("b2_create_group_member", {
@@ -407,5 +409,12 @@ describe("registerPartnerTools coverage (issue 400)", () => {
     }
 
     expect(ejectGroupMember).toHaveBeenCalledTimes(1);
+    // The eject failure must be reported for the operator, and the secret must
+    // not travel with it.
+    const logged = JSON.stringify(fatalSpy.mock.calls);
+    expect(logged).toContain("eject denied");
+    expect(logged).toContain("acc-1");
+    expect(logged).not.toContain("SecretApplicationKeyValue");
+    fatalSpy.mockRestore();
   });
 });

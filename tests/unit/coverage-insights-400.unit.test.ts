@@ -39,7 +39,7 @@ import type {
   ReportObjectPage,
   ReportObjectText,
 } from "../../src/b2/report-client";
-import { runWithMcpRequestSignal } from "../../src/request-context";
+import { currentMcpRequestSignal, runWithMcpRequestSignal } from "../../src/request-context";
 import { abortError } from "../../src/utils/named-error";
 import { parseResult, ToolHarness } from "../support/deterministic-fakes";
 
@@ -650,9 +650,35 @@ describe("insights #400 — native scan deadlines", () => {
       ),
     );
 
-    // The abort propagates to the inner controller; the fake native client does not
-    // observe the signal, so the page still returns and the largest file is ranked.
+    // This fake native client ignores the signal, so the page still returns. It
+    // only proves the scan does not itself bail out before listing; the next test
+    // uses a client that observes the signal to prove the abort really propagates.
     expect(result).toMatchObject({ bucket: "photos", returned: 1 });
+  });
+
+  it("largest-files hands the listing an aborted signal and surfaces the abort, not a time-budget truncation", async () => {
+    const controller = new AbortController();
+    controller.abort(abortError());
+    const nativeClient = createNativeClient({
+      filePages: [{ files: [file("raw/a.bin", GB)], nextFileName: null }],
+    });
+    let signalSeenByListing: AbortSignal | undefined;
+    nativeClient.listFileNames.mockImplementation(async () => {
+      signalSeenByListing = currentMcpRequestSignal();
+      // A real transport rejects with the signal's reason once it is aborted.
+      signalSeenByListing?.throwIfAborted();
+      return { files: [file("raw/a.bin", GB)], nextFileName: null };
+    });
+    const tools = registerTools(reportFake({}).client, nativeClient);
+
+    const result = await runWithMcpRequestSignal(controller.signal, () =>
+      tools.call("b2_list_largest_files", { bucket: "photos", limit: 5, max_scan: 1000 }),
+    );
+
+    expect(signalSeenByListing?.aborted).toBe(true);
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/abort/i);
+    expect(result.content[0].text).not.toContain("time budget");
   });
 
   it("largest-files registers an abort listener for a live (non-aborted) parent signal", async () => {

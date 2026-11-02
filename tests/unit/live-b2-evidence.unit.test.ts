@@ -538,6 +538,16 @@ describe("live B2 evidence", () => {
     }
   });
 
+  it("finalizes a fully valid run as passed", () => {
+    const finalEvidence = finalizeFixture({});
+
+    expect(finalEvidence.status).toBe("passed");
+    expect(finalEvidence.resources.createdCount).toBe(1);
+    expect(finalEvidence.resources.invalidEntries).toBe(0);
+    expect(finalEvidence.resources.parseErrors).toBe(0);
+    expect(finalEvidence.cleanup.stats).toMatchObject({ errors: 0, leakedBuckets: 0 });
+  });
+
   it("does not trust status-only validation summaries during finalization", () => {
     expect(
       finalizeFixture({
