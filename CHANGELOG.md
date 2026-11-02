@@ -17,6 +17,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   round trip, multipart, `saveToPath`). (#469)
 
 ### Fixed
+- `b2_report_usage_growth` returns an inconclusive result with the scan
+  metadata, instead of reporting growing accounts as shrinking to 0, when the
+  time budget stopped the scan or either day was truncated.
+- The S3 authorize-fallback client is kept for the facade lifetime and destroyed
+  in `destroy()`, so the streaming body of `s3_get_object` is no longer aborted
+  when the call resolves.
+- `scripts/probe-b2-500s.mjs` confirms its cleanup `s3_abort_multipart_upload`
+  call, so a run no longer leaves an unfinished multipart upload behind.
+- `scripts/run-vercel-project-build.mjs` releases `.vercel/project-build.lock`
+  when the typecheck or build fails.
+- Raised the Cloudflare Worker source graph byte budget from 949,000 to 950,000
+  for the usage growth fix.
 - `s3_put_object` accepts an empty `content` string and stores a zero-byte
   object instead of answering "Either filePath or content must be provided."
   (#505)
@@ -67,6 +79,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   retired the `node-forge` and stale `braces` audit exceptions. The dev-only
   `zod` 3.x exception remains until a patched 3.x or the upstream tooling
   moves. (#524)
+
+### Tests
+- Added and strengthened tests found by a review of the main branch: delete
+  bucket and key effects, S3 client credentials and endpoint, forwarded client
+  address trust, in-flight request cap per principal, OAuth scope tool hiding,
+  retry budget keys, Retry-After honoring, container image publish script
+  (revision and digest mismatch refusals), usage growth partial results, S3
+  fallback client lifetime, Vercel project build lock, probe script cleanup, and
+  several vacuous or weak protocol, observability, eval and reliability tests.
 
 ## [0.2.2] - 2026-09-29
 

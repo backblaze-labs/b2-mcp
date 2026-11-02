@@ -397,9 +397,16 @@ describe("B2Client coverage branches", () => {
         }),
       ).resolves.toMatchObject({ groups: [] });
 
-      expect(
-        transport.requests.filter((request) => b2EndpointName(request) === "b2_list_groups"),
-      ).toHaveLength(1);
+      const listRequests = transport.requests.filter(
+        (request) => b2EndpointName(request) === "b2_list_groups",
+      );
+      expect(listRequests).toHaveLength(1);
+      expect(Object.fromEntries(new URL(listRequests[0].url).searchParams)).toEqual({
+        adminAccountId: "test-account-123",
+        groupName: "team",
+        startGroupId: "5",
+        maxGroupCount: "10",
+      });
     });
 
     it("passes optional list-group-members filters and wraps a singleton response", async () => {
@@ -428,9 +435,16 @@ describe("B2Client coverage branches", () => {
 
       expect(Array.isArray(result)).toBe(true);
       expect(result).toHaveLength(1);
-      expect(
-        transport.requests.filter((request) => b2EndpointName(request) === "b2_list_group_members"),
-      ).toHaveLength(1);
+      const memberRequests = transport.requests.filter(
+        (request) => b2EndpointName(request) === "b2_list_group_members",
+      );
+      expect(memberRequests).toHaveLength(1);
+      expect(Object.fromEntries(new URL(memberRequests[0].url).searchParams)).toEqual({
+        adminAccountId: "test-account-123",
+        groupId: "123",
+        startEmail: "cursor@example.com",
+        maxMemberCount: "25",
+      });
     });
 
     it("omits an absent region from the create-group-member request", async () => {

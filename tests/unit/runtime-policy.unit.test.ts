@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { dirname, join } from "path";
 import { spawnSync } from "child_process";
@@ -206,6 +206,27 @@ describe("runtime policy", () => {
       expect(result.stderr).toContain("unsupported Node 23 is present");
       expect(result.stderr).toContain("unsupported Node 25.9.0 is present");
       expect(result.stderr).toContain("^22.22.2 || ^24 || ^26");
+    });
+  });
+
+  it("accepts a compliant fixture once the unsupported Node jobs are removed", () => {
+    withRuntimePolicyFixture((fixtureRoot) => {
+      const workflowPath = join(fixtureRoot, ".github/workflows/test.yml");
+      const compliant = readFileSync(workflowPath, "utf8").replace(
+        / {2}unsupported-node-23:[\s\S]*$/,
+        "",
+      );
+      expect(compliant).not.toContain("unsupported-node");
+      writeFileSync(workflowPath, compliant);
+
+      const result = spawnSync(process.execPath, ["scripts/check-runtime-policy.mjs"], {
+        cwd: root,
+        env: { ...process.env, B2_MCP_RUNTIME_POLICY_ROOT: fixtureRoot },
+        encoding: "utf8",
+      });
+
+      expect(result.stderr).toBe("");
+      expect(result.status).toBe(0);
     });
   });
 

@@ -324,7 +324,7 @@ describe("OpenAI eval driver", () => {
     expect((caught as Error).message).not.toContain(largeBody);
   });
 
-  it.each([408, 409, 429] as const)(
+  it.each([408, 409, 429, 500, 502, 503, 504, 529] as const)(
     "retries retryable OpenAI status %i before returning a successful turn",
     async (status) => {
       const fetchImpl = vi
@@ -395,6 +395,29 @@ describe("OpenAI eval driver", () => {
       await expect(driver.complete(driverInput({}))).rejects.toThrow(
         new RegExp(`stopped with ${finishReason}`),
       );
+    },
+  );
+
+  it.each([500, 502, 503, 504, 529] as const)(
+    "stops after maxAttempts when OpenAI keeps returning %i",
+    async (status) => {
+      const fetchImpl = vi.fn<OpenAIFetch>().mockImplementation(
+        async () =>
+          new Response(JSON.stringify({ error: { message: "still failing" } }), {
+            status,
+            headers: { "retry-after": "0" },
+          }),
+      );
+      const driver = createOpenAIDriver({
+        apiKey: "test-openai-key",
+        fetch: fetchImpl,
+        retry: { maxAttempts: 3, baseDelayMs: 0, maxDelayMs: 0 },
+      });
+
+      await expect(driver.complete(driverInput({}))).rejects.toThrow(
+        new RegExp(`OpenAI Chat Completions API request failed \\(${status}\\): still failing`),
+      );
+      expect(fetchImpl).toHaveBeenCalledTimes(3);
     },
   );
 

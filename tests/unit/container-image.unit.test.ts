@@ -19,12 +19,17 @@ type FakeCall = {
 type FakeState = {
   built?: boolean;
   existing?: boolean;
+  // Revision annotation reported for pre-existing tags (defaults to the checkout SHA).
+  existingRevision?: string;
+  // Digest reported for the `v`-prefixed release tag only (defaults to the shared image digest).
+  releaseTagDigest?: string;
   failAnonymousSignature?: boolean;
   legacyOnly?: boolean;
   migrated?: boolean;
   signed?: boolean;
   transientAnonymousSignatureFailures?: number;
   transientSiblingVerifyFailures?: number;
+  createdTags?: string[][];
   cosignCalls?: FakeCall[];
   dockerCalls?: FakeCall[];
 };
@@ -91,12 +96,14 @@ function saveState(state) {
 function pickedEnv() {
   return Object.fromEntries(envKeys.filter((key) => process.env[key]).map((key) => [key, process.env[key]]));
 }
-function imageInfo() {
+function imageInfo(ref) {
+  const state = readState();
+  const isReleaseRef = typeof ref === "string" && ref.endsWith(":v0.1.3");
   return {
     manifest: {
-      digest: imageDigest,
+      digest: (isReleaseRef && state.releaseTagDigest) || imageDigest,
       annotations: {
-        "org.opencontainers.image.revision": checkoutSha,
+        "org.opencontainers.image.revision": state.existingRevision || checkoutSha,
       },
       manifests: [
         { digest: platformAmd64, platform: { os: "linux", architecture: "amd64" } },
@@ -146,7 +153,7 @@ if (args[0] === "buildx" && args[1] === "imagetools" && args[2] === "inspect") {
     console.error("manifest unknown");
     process.exit(1);
   }
-  console.log(JSON.stringify(imageInfo()));
+  console.log(JSON.stringify(imageInfo(ref)));
   process.exit(0);
 }
 if (args[0] === "buildx" && args[1] === "imagetools" && args[2] === "create") {
@@ -401,7 +408,9 @@ describe("container image policy", () => {
     expect(isIgnored("registry.key")).toBe(true);
   });
 
-  it("publishes signed multi-platform images without overwriting version tags", () => {
+  it("keeps the publish script's source-level hardening markers", () => {
+    // Source-level guard only: the behavior behind these markers is exercised by the
+    // runPublishWithFakes tests below (revision mismatch, digest mismatch, signing).
     expect(publishScript).toContain('["linux/amd64", "linux/arm64"]');
     expect(publishScript).toContain("docker");
     expect(publishScript).toContain("buildx");
@@ -428,6 +437,33 @@ describe("container image policy", () => {
     expect(publishScript).toContain("refs/heads/main");
     expect(publishScript).not.toContain("refs/tags/v.*|refs/heads/main");
     expect(publishScript).not.toContain(":latest");
+  });
+
+  it("refuses to overwrite an existing version tag built from a different commit", () => {
+    const { result, state } = runPublishWithFakes({
+      existing: true,
+      existingRevision: "f".repeat(40),
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("already exists with revision");
+    expect(result.stderr).toContain("f".repeat(40));
+    expect(state.built).toBeFalsy();
+    expect(state.createdTags ?? []).toHaveLength(0);
+    expect(state.signed).toBeFalsy();
+  });
+
+  it("refuses to publish when the version and release tags resolve to different digests", () => {
+    const { result, state } = runPublishWithFakes({
+      existing: true,
+      releaseTagDigest: `sha256:${"9".repeat(64)}`,
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("already exists with a different digest");
+    expect(state.built).toBeFalsy();
+    expect(state.createdTags ?? []).toHaveLength(0);
+    expect(state.signed).toBeFalsy();
   });
 
   it("rejects a cosign repository outside the required sibling package", () => {

@@ -293,6 +293,7 @@ async function main() {
             bucket: s3Bucket,
             key: "mcp-probe-mpu.bin",
             uploadId,
+            confirm: true,
           });
         }
       },

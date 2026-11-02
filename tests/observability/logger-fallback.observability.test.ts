@@ -466,6 +466,24 @@ describe("observability logger fallback paths", () => {
     expect(process.listenerCount("SIGHUP")).toBe(0);
   });
 
+  it("opens the managed file destination only once when initLogging is called again", async () => {
+    // loadFileLogger already called initLogging() once with B2_LOG_FILE set.
+    const loaded = await loadFileLogger([() => makeDest(), () => makeDest()]);
+    const sighupBefore = process.listenerCount("SIGHUP");
+    expect(loaded.state.made).toHaveLength(1);
+
+    loaded.mod.initLogging();
+    loaded.mod.initLogging();
+
+    // A repeated init must neither open a second destination nor stack another
+    // SIGHUP handler.
+    expect(loaded.state.made).toHaveLength(1);
+    expect(process.listenerCount("SIGHUP")).toBe(sighupBefore);
+
+    loaded.mod.logger.info("goes to the single managed destination");
+    expect(loaded.state.made[0].lines.join("")).toContain("goes to the single managed destination");
+  });
+
   it("is idempotent when SIGHUP arrives mid-reopen and honors the flush timeout", async () => {
     vi.spyOn(process.stderr, "write").mockReturnValue(true);
     vi.useFakeTimers();

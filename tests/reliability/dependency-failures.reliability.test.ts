@@ -700,6 +700,22 @@ describe("deterministic dependency failure and recovery suite", () => {
     );
     installSdkTransport(transport);
     const handle = buildHttpServer();
+    // Server-side write log: the client's own buffer is empty by construction
+    // once its socket is destroyed, so observe what the server tried to send.
+    let serverBodyWrites = 0;
+    let serverEnds = 0;
+    handle.server.on("request", (_req, res) => {
+      const write = res.write.bind(res);
+      const end = res.end.bind(res);
+      res.write = ((...args: Parameters<typeof res.write>) => {
+        serverBodyWrites += 1;
+        return write(...args);
+      }) as typeof res.write;
+      res.end = ((...args: Parameters<typeof res.end>) => {
+        serverEnds += 1;
+        return end(...args);
+      }) as typeof res.end;
+    });
     const port = await listenOnLocalhost(handle);
     const client = startDisconnectableMcpRequest(port, "b2_list_buckets", {});
 
@@ -716,7 +732,10 @@ describe("deterministic dependency failure and recovery suite", () => {
 
       releaseProviderSuccess();
       await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setTimeout(resolve, 50));
       expect(client.bodyChunks.join("")).toBe("");
+      expect(serverBodyWrites).toBe(0);
+      expect(serverEnds).toBe(0);
       expect(transport.requestsFor("b2_list_buckets")).toHaveLength(1);
     } finally {
       await closeHttpServer(handle);

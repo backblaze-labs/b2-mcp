@@ -1205,6 +1205,18 @@ export function registerInsightTools(
         const thenRows = await loadDayRowsBounded(reportClient, bucket, then.date, reportBudget);
         const nowRows = await loadDayRowsBounded(reportClient, bucket, latest.date, reportBudget);
 
+        if (reportBudget.stats.stop_reason || thenRows.truncated || nowRows.truncated)
+          return toolJson({
+            reports_enabled: true,
+            note:
+              "Usage growth is inconclusive: the report scan hit its limits before both " +
+              `snapshots (${then.date} and ${latest.date}) were fully loaded, so accounts cannot be ` +
+              "ranked reliably. Retry with a narrower scope.",
+            from_date: then.date,
+            to_date: latest.date,
+            ...reportScanMetadataFromStats(reportBudget.stats),
+          });
+
         let accounts = computeSnapshotGrowth(thenRows.rows, nowRows.rows);
         if (args.order === "least_grown") accounts = [...accounts].reverse();
         else if (args.order === "shrinking") accounts = accounts.filter((a) => a.growthBytes < 0);

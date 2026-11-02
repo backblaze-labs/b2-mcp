@@ -380,7 +380,8 @@ describe("provider pass-rate comparison", () => {
   });
 
   it("prints a fixed CLI failure instead of raw failed-case payloads", () => {
-    expect(() =>
+    let caught: unknown;
+    try {
       assertProviderPassRateComparisonForCli({
         summary: "summary",
         passRates: [{ provider: "OpenAI", passed: 0, total: 1, passRate: 0 }],
@@ -402,8 +403,17 @@ describe("provider pass-rate comparison", () => {
               "toolResults=[secret] text=raw model text",
           },
         ],
-      }),
-    ).toThrow(PROVIDER_COMPARISON_ASSERTION_FAILURE_MESSAGE);
+      });
+    } catch (err) {
+      caught = err;
+    }
+
+    // Exact match: a substring match would still pass if the raw payload were
+    // appended after the fixed message.
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toBe(PROVIDER_COMPARISON_ASSERTION_FAILURE_MESSAGE);
+    expect((caught as Error).message).not.toContain("eval-application-key-secret");
+    expect((caught as Error).message).not.toContain("secret tool result");
   });
 
   it.each([Number.NaN, -0.1, 1.1, Number.POSITIVE_INFINITY] as const)(

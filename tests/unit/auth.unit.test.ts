@@ -1,5 +1,5 @@
 import { B2AuthManager, createMcpHttpTransport } from "../../src/auth";
-import type { HttpResponse } from "@backblaze-labs/b2-sdk";
+import type { HttpRequest, HttpResponse } from "@backblaze-labs/b2-sdk";
 import { B2Client } from "../../src/b2/client";
 import { runWithMcpRequestSignal } from "../../src/request-context";
 import { parseB2Error } from "../../src/utils/errors";
@@ -329,8 +329,9 @@ describe("B2AuthManager", () => {
     const hookedFactory = vi.fn(() => {
       throw new Error(`global hook saw ${mockConfig.applicationKey}`);
     });
-    (globalThis as Record<PropertyKey, unknown>)[removedHook] = hookedFactory;
+    // installAuthorizeTransport() clears this symbol, so plant it afterwards.
     const transport = installAuthorizeTransport();
+    (globalThis as Record<PropertyKey, unknown>)[removedHook] = hookedFactory;
     const manager = new B2AuthManager(mockConfig);
 
     const auth = await manager.getAuth();
@@ -338,6 +339,7 @@ describe("B2AuthManager", () => {
     expect(auth.accountId).toBe("test-account-123");
     expect(hookedFactory).not.toHaveBeenCalled();
     expect(transport.requests).toHaveLength(1);
+    delete (globalThis as Record<PropertyKey, unknown>)[removedHook];
   });
 
   it("does not activate a simulator-backed SDK from environment variables alone", async () => {
@@ -1055,32 +1057,76 @@ describe("B2AuthManager", () => {
   });
 
   it("shares retry budget keys across supported request body types", async () => {
+    const bodyFactories: Array<[string, () => HttpRequest["body"]]> = [
+      ["string", () => "{}"],
+      ["URLSearchParams", () => new URLSearchParams([["name", "value"]])],
+      ["ArrayBuffer", () => new ArrayBuffer(4)],
+      ["Uint8Array", () => new Uint8Array([1, 2, 3])],
+      ["FormData", () => new FormData()],
+    ];
+
+    for (const [label, makeBody] of bodyFactories) {
+      _resetRetryBudget();
+      // Drain the budget: only a request recognized as a repeat attempt of an
+      // earlier one is charged a token, so only a repeat can be refused.
+      for (let i = 0; i < 100; i++) _consumeRetryToken();
+      const inner = new RecordingTransport(
+        () => new StaticHttpResponse(503, { status: 503, code: "service_unavailable" }),
+      );
+      const transport = createMcpHttpTransport(inner, {
+        maxRetries: 0,
+        initialRetryDelayMs: 1,
+        maxRetryDelayMs: 1,
+        requestTimeoutMs: 30_000,
+      });
+      const signal = new AbortController().signal;
+      const send = (body: HttpRequest["body"]) =>
+        runWithMcpRequestSignal(signal, () =>
+          transport.send({
+            url: "https://api005.backblazeb2.com/b2api/v3/b2_list_buckets",
+            method: "POST",
+            body,
+          }),
+        );
+
+      // First attempt is free even with an empty budget.
+      await expect(send(makeBody()), label).rejects.toMatchObject({ code: "service_unavailable" });
+      // An equal, separately constructed body maps to the same budget key, so
+      // this is attempt 2 and the empty budget refuses it before the wire.
+      await expect(send(makeBody()), label).rejects.toMatchObject({
+        code: "retry_budget_exhausted",
+      });
+      expect(inner.requests, label).toHaveLength(1);
+    }
+  });
+
+  it("keeps retry budget keys distinct across different body types and sizes", async () => {
     _resetRetryBudget();
-    const inner = new RecordingTransport(() => new StaticHttpResponse(200, {}));
+    for (let i = 0; i < 100; i++) _consumeRetryToken();
+    const inner = new RecordingTransport(
+      () => new StaticHttpResponse(503, { status: 503, code: "service_unavailable" }),
+    );
     const transport = createMcpHttpTransport(inner, {
       maxRetries: 0,
       initialRetryDelayMs: 1,
       maxRetryDelayMs: 1,
       requestTimeoutMs: 30_000,
     });
-    const bodies = [
-      new URLSearchParams([["name", "value"]]),
-      new ArrayBuffer(4),
-      new Uint8Array([1, 2, 3]),
-      new FormData(),
-    ];
+    const signal = new AbortController().signal;
 
-    for (const body of bodies) {
-      const before = inner.requests.length;
+    // Different shapes are different first attempts, so none is charged.
+    for (const body of [new ArrayBuffer(4), new ArrayBuffer(5), new Uint8Array(4), "x"]) {
       await expect(
-        transport.send({
-          url: "https://api005.backblazeb2.com/b2api/v3/b2_list_buckets",
-          method: "POST",
-          body,
-        }),
-      ).resolves.toMatchObject({ status: 200 });
-      expect(inner.requests).toHaveLength(before + 1);
+        runWithMcpRequestSignal(signal, () =>
+          transport.send({
+            url: "https://api005.backblazeb2.com/b2api/v3/b2_list_buckets",
+            method: "POST",
+            body,
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "service_unavailable" });
     }
+    expect(inner.requests).toHaveLength(4);
   });
 
   it.each([

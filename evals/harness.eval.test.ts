@@ -345,6 +345,49 @@ describe("LLM eval harness", () => {
     expect(signalListenerCounts()).toEqual(before);
   });
 
+  it("stops a driver that never finishes at maxSteps", async () => {
+    const calls: DriverInput["step"][] = [];
+    const endlessDriver: Driver = {
+      name: "endless",
+      async complete(input) {
+        calls.push(input.step);
+        return {
+          text: `step ${input.step}`,
+          toolCalls: [{ name: "b2_delete_bucket", args: { bucketId: "bucket-id", confirm: true } }],
+        };
+      },
+    };
+
+    const run = await runEval({
+      prompt: "Never stop calling tools.",
+      toolNames: ["b2_delete_bucket"],
+      driver: endlessDriver,
+      maxSteps: 2,
+    });
+
+    expect(calls).toEqual([0, 1]);
+    expect(run.toolCalls).toHaveLength(2);
+    expect(run.toolResults).toHaveLength(2);
+    expect(run.text).toBe("step 0\nstep 1");
+  });
+
+  it("times out a stalled tool call and removes process signal handlers", async () => {
+    const before = signalListenerCounts();
+
+    await expect(
+      runEval({
+        prompt: "Call a tool with an impossibly small budget.",
+        toolNames: ["b2_delete_bucket"],
+        driver: oneStepDriver("slow-tool", [
+          { name: "b2_delete_bucket", args: { bucketId: "bucket-id", confirm: true } },
+        ]),
+        maxSteps: 1,
+        timeouts: { toolCallMs: 1 },
+      }),
+    ).rejects.toThrow(/tool call b2_delete_bucket|timed out/i);
+    expect(signalListenerCounts()).toEqual(before);
+  });
+
   it("keeps provider key requirements outside the shared gate default", () => {
     expect(llmEvalGate({ RUN_LLM_EVALS: "1" }).enabled).toBe(true);
     expect(

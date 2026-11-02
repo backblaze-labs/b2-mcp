@@ -101,8 +101,16 @@ function readZipEntries(buffer: Buffer): ZipEntry[] {
   return entries;
 }
 
+/** Digest the build script itself prints for the release `SHA256SUMS`. */
+let printedDigest: string | undefined;
+
 function buildBundle(): Buffer {
-  execFileSync("node", ["scripts/build-mcpb.mjs"], { cwd: root, stdio: "pipe" });
+  const output = execFileSync("node", ["scripts/build-mcpb.mjs"], {
+    cwd: root,
+    stdio: "pipe",
+    encoding: "utf8",
+  });
+  printedDigest = /build-mcpb: sha256 ([0-9a-f]{64}) {2}b2-mcp\.mcpb/.exec(output)?.[1];
   return readFileSync(mcpbPath);
 }
 
@@ -190,9 +198,14 @@ describe("MCPB desktop-extension bundle", () => {
   }, 60_000);
 
   it("yields a checksum that detects a tampered bundle", () => {
-    const tampered = Uint8Array.from(bundle);
-    tampered[tampered.length - 1] ^= 0xff;
-    expect(sha256(tampered)).not.toBe(digest);
+    // The checksum the build script publishes must describe the bytes on disk;
+    // a digest computed over anything else could never detect tampering.
+    expect(printedDigest).toBe(digest);
+    for (const offset of [0, Math.floor(bundle.length / 2), bundle.length - 1]) {
+      const tampered = Uint8Array.from(bundle);
+      tampered[offset] ^= 0xff;
+      expect(sha256(tampered)).not.toBe(printedDigest);
+    }
   });
 
   it("is built, checksummed, and attached by the release workflow", () => {

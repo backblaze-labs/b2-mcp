@@ -1732,6 +1732,7 @@ describe("S3 object tools with deterministic handler fake", () => {
       objects: [{ key: "a.txt" }],
     });
     expect(blocked.isError).toBe(true);
+    expect(parseResult(blocked)).toContain("destructive_confirmation_required");
     expect(s3.requestsFor("deleteObjects")).toHaveLength(0);
 
     const blockedBypass = parseResult(
