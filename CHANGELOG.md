@@ -47,9 +47,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Patched transitive dev-toolchain advisories via pinned pnpm overrides:
   `brace-expansion`, `proxy-addr`, `smol-toml`, `source-map-js`, and `sharp`
   (the librsvg advisory fixed in 0.35.5), in both the root and
-  `deploy/customer-hosted` lockfiles. `braces` and `node-forge` have no patched
-  release on npm yet, so they carry time-boxed `audit-policy.json` exceptions
-  (dev-only, expiring 2026-11-05). (#481)
+  `deploy/customer-hosted` lockfiles. `node-forge` is now resolved at patched
+  1.4.2. `braces` remains at 3.0.3 with no upstream fix, so its dev-only
+  `audit-policy.json` exception is renewed to 2026-12-05. (#481)
 
 ## [0.2.2] - 2026-09-29
 

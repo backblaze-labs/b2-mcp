@@ -57,28 +57,8 @@
         "version": "4.0.8",
         "dependencyRange": "3.0.3"
       },
-      "expires": "2026-11-05",
-      "reason": "GHSA-vfj7-8cjw-p6xm: no patched braces release is published (needs >=3.0.4 per advisory). Reached only through the dev-only vercel/@vercel/node build tooling (ts-morph > fast-glob > micromatch); not in the published package or any runtime dependency. Time-boxed: re-check for a fixed release or newer vercel before expiry."
-    },
-    {
-      "name": "node-forge",
-      "source": 1240912,
-      "maxSeverity": "high",
-      "isDirect": false,
-      "nodes": [".>@anthropic-ai/mcpb>node-forge"],
-      "effects": [],
-      "package": {
-        "version": "1.4.0",
-        "integrity": "sha512-LarFH0+6VfriEhqMMcLX2F7SwSXeWwnEAJEsYm5QKWchiVYVvJyV9v7UDvUv+w5HO23ZpQTXDv/GxdDdMyOuoQ=="
-      },
-      "via": {
-        "path": "node_modules/@anthropic-ai/mcpb",
-        "name": "@anthropic-ai/mcpb",
-        "version": "2.1.2",
-        "dependencyRange": "1.4.0"
-      },
-      "expires": "2026-11-05",
-      "reason": "GHSA-86w9-cpqp-85rv: no patched node-forge release is reachable (needs >=1.4.1); @anthropic-ai/mcpb 2.1.2, its latest, pins 1.4.0. Dev-only MCPB packaging tooling; not in the published package or any runtime dependency. Time-boxed: re-check for a fixed mcpb release before expiry."
+      "expires": "2026-12-05",
+      "reason": "GHSA-vfj7-8cjw-p6xm: re-checked 2026-11-02; braces remains 3.0.3 with no upstream fix (needs >=3.0.4 per advisory). Reached only through dev-only vercel/@vercel/node build tooling (ts-morph > fast-glob > micromatch); not in the published package or runtime. Time-boxed: re-check for a fixed release or newer vercel before expiry."
     }
   ]
 }
