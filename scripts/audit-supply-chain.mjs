@@ -328,6 +328,46 @@ function exceptionFailures(key, exception, vulnerability, via) {
     );
   }
 
+  // Bind every resolution of the package, not only the hoisted one: each
+  // additional resolution pins its own path, version, integrity and parent, and
+  // the declared set must equal every copy in the lockfile, so a drifted or new
+  // vulnerable copy fails closed even when the advisory paths stay the same.
+  for (const resolution of exception.additionalResolutions ?? []) {
+    const entry = lock.packages?.[resolution.path];
+    const parent = lock.packages?.[resolution.via?.path];
+    if (entry?.version !== resolution.version) {
+      details.push(
+        `resolution ${resolution.path} version expected ${resolution.version}, got ${entry?.version}`,
+      );
+    }
+    if (entry?.integrity !== resolution.integrity) {
+      details.push(`resolution ${resolution.path} integrity drifted for ${exception.name}`);
+    }
+    if (parent?.version !== resolution.via?.version) {
+      details.push(
+        `resolution ${resolution.path} via version expected ${resolution.via?.version}, got ${parent?.version}`,
+      );
+    }
+    if (parent?.dependencies?.[exception.name] !== resolution.via?.dependencyRange) {
+      details.push(
+        `resolution ${resolution.path} via dependency range expected ${resolution.via?.dependencyRange}, got ${parent?.dependencies?.[exception.name]}`,
+      );
+    }
+  }
+  const resolvedPaths = Object.keys(lock.packages ?? {}).filter(
+    (packagePath) =>
+      packagePath === `node_modules/${exception.name}` ||
+      packagePath.endsWith(`/node_modules/${exception.name}`),
+  );
+  const declaredPaths = [
+    `node_modules/${exception.name}`,
+    ...(exception.additionalResolutions ?? []).map((resolution) => resolution.path),
+  ];
+  if (sortedJson(resolvedPaths) !== sortedJson(declaredPaths)) {
+    details.push(
+      `resolutions expected ${sortedJson(declaredPaths)}, got ${sortedJson(resolvedPaths)}`,
+    );
+  }
   return details;
 }
 

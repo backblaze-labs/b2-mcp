@@ -527,9 +527,12 @@ detailed branch, artifact, and tarball workflow is in
 [`design-docs/supply-chain-security.md`](design-docs/supply-chain-security.md).
 
 Known exceptions must live in `audit-policy.json` with an expiry, maximum
-severity, dependency path, lockfile version/integrity, and rationale. The
-current policy has no exceptions; adding one requires explicit security-owner
-review.
+severity, the exact advisory paths, the hoisted lockfile version/integrity and
+parent, and rationale. When the lockfile holds more than one copy of the
+package, each other copy is listed in `additionalResolutions` with its own path,
+version, integrity and parent; the declared copies must equal every copy in the
+lockfile, so a drifted or newly added copy fails the audit. Adding or widening
+an exception requires explicit security-owner review.
 
 `scripts/audit-supply-chain.mjs` always runs a real `pnpm audit` outside
 `NODE_ENV=test`, refuses environment-injected audit fixtures in CI, sets bounded

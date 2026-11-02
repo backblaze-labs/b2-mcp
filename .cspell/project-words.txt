@@ -102,3 +102,4 @@ linkify
 librsvg
 vccf
 mchw
+rmxm
