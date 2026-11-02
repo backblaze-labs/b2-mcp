@@ -48,8 +48,19 @@ await runScenario(
 
     s.step("list the admin account's groups");
     const adminAccountId = (await raw("b2_authorize_account", {})).accountId;
+    // No maxGroupCount here on purpose: the call asks for the server's default (100, as documented), so
+    // a changed default shows. The explicit 100 below is the reference for what a default call must
+    // return (compared by group id: a group's stats carry a timestamp). The simulator has 3 groups, so
+    // a default of 3 or more cannot be told from 100 here.
     const groups = await raw("b2_list_groups", { adminAccountId });
     eq("accountId of the group list", adminAccountId, groups.accountId);
+    const all = await raw("b2_list_groups", { adminAccountId, maxGroupCount: 100 });
+    eq(
+      "the default (no maxGroupCount) lists the same groups as maxGroupCount 100",
+      all.groups.map((g) => g.groupId),
+      groups.groups.map((g) => g.groupId),
+    );
+    eq("the default page ends where maxGroupCount 100 does", all.nextGroupId, groups.nextGroupId);
     check(Array.isArray(groups.groups) && groups.groups.length > 0, "the account has no groups");
     for (const group of groups.groups) {
       check(
