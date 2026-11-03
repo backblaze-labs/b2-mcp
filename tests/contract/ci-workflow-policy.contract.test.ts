@@ -248,7 +248,7 @@ describe("CI workflow policy", () => {
     expect(runtimeFloorJob).toContain("needs: package-install-smoke");
     expect(runtimeFloorJob).toContain("node-version: 22.22.2");
     expect(runtimeFloorJob).toContain(
-      "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+      "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333",
     );
     expect(runtimeFloorJob).toContain("find reports/package-install-smoke -name '*.tgz'");
     expect(runtimeFloorJob).toContain(
@@ -363,10 +363,10 @@ describe("CI workflow policy", () => {
     expect(workflowSecurity).toContain("actions: read");
     expect(workflowSecurity).toContain("security-events: write");
     expect(workflowSecurity).toContain(
-      "github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2",
+      "github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d",
     );
     expect(workflowSecurity).toContain(
-      "github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2",
+      "github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d",
     );
     expect(workflowSecurity).toContain("upload: never");
     expect(workflowSecurity).toContain("persist-credentials: false");
@@ -410,7 +410,7 @@ describe("CI workflow policy", () => {
     expect(uploadIdx).toBeGreaterThan(-1);
     expect(countGateIdx).toBeLessThan(uploadIdx);
     expect(workflowSecurity).toContain(
-      "github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2",
+      "github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d",
     );
     expect(workflowSecurity).toContain("category: zizmor-offline");
 

@@ -4,13 +4,15 @@ const { dirname, extname, resolve } = require("path");
 const WORKER_SOURCE_GRAPH_FILES_BUDGET = 75;
 // Headroom for the documented Worker source graph and dry-run output; emitted
 // budgets still guard the deployed artifact size explicitly. Remeasured at
-// 946,261 bytes after the atomic saveToPath write path (#449).
-const WORKER_SOURCE_GRAPH_BYTES_BUDGET = 949_000;
+// 949,056 bytes after the s3 copy/multipart content-type guard (#542).
+const WORKER_SOURCE_GRAPH_BYTES_BUDGET = 952_000;
 const WORKER_EMITTED_FILES_BUDGET = 8;
 // Remeasured for the @aws-sdk/client-s3 3.1144.0 bump: the Cloudflare dry run
 // now emits 10,447,871 bytes. Budget set to 10,700,000 for modest headroom.
 const WORKER_EMITTED_TOTAL_BYTES_BUDGET = 10_700_000;
-const WORKER_UPLOAD_SCRIPT_BYTES_BUDGET = 3_000_000;
+// Remeasured at 3,015,634 bytes after the @modelcontextprotocol/server 2.4.0
+// and zod 4.6.7 security upgrade (#524). Budget set to 3,100,000 for headroom.
+const WORKER_UPLOAD_SCRIPT_BYTES_BUDGET = 3_100_000;
 const WORKER_UPLOAD_SCRIPT_GZIP_BYTES_BUDGET = 600_000;
 const IMPORT_PATTERN =
   /(?:import|export)\s+(?:type\s+)?(?:[^'";]+?\s+from\s+)?["']([^"']+)["']|import\(["']([^"']+)["']\)/g;

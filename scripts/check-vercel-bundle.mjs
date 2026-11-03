@@ -25,8 +25,9 @@ const VERCEL_SOURCE_BUDGET_BYTES = 1_500_000;
 // description expansions (issue #376). The whole function estimate lands near
 // 35.15 MB on Linux — of which the dependency install itself is ~33.82 MB
 // (reports/package-budget/metrics.json), not b2-sdk alone — so the budget
-// carries modest headroom above the full estimate.
-const VERCEL_FUNCTION_BUNDLE_BUDGET_BYTES = 35_300_000;
+// carries modest headroom above the full estimate. The @modelcontextprotocol/server
+// 2.4.0 and zod 4.6.7 security upgrade (#524) grows the estimate to ~36.13 MB.
+const VERCEL_FUNCTION_BUNDLE_BUDGET_BYTES = 36_400_000;
 
 function readJson(relativePath) {
   return JSON.parse(readFileSync(path.join(root, relativePath), "utf8"));

@@ -9,8 +9,8 @@
   },
   "sdk": {
     "@backblaze-labs/b2-sdk": "0.4.0",
-    "@modelcontextprotocol/client": "2.2.0",
-    "@modelcontextprotocol/server": "2.2.0"
+    "@modelcontextprotocol/client": "2.4.0",
+    "@modelcontextprotocol/server": "2.4.0"
   },
   "backingCategories": {
     "nativeB2Sdk": {
@@ -204,7 +204,7 @@
         "s3_get_presigned_url",
         "s3_put_bucket_lifecycle"
       ],
-      "hash": "e3ab2d677e058bfa255fa01fbc535e9299846ae321ad2eed7890d0033cd2ff59",
+      "hash": "779a79988133348914b9c77514fcb6980617b876a74846a77d49cb0d17391a31",
       "fixtures": {
         "modern": "tests/fixtures/tool-contract/full.modern.json",
         "legacy": "tests/fixtures/tool-contract/full.legacy.json"
@@ -358,7 +358,7 @@
         "s3_get_presigned_url",
         "s3_put_bucket_lifecycle"
       ],
-      "hash": "1cada7c9b235bd41eb2e32417a7ef684ddf10eed17c3548ede0b37b76726591e",
+      "hash": "4921f72f998a1c25080d88eedfd7f183fa9e738d8cbd7735a6cd963c8552fe67",
       "fixtures": {
         "modern": "tests/fixtures/tool-contract/live-b2-contract.modern.json",
         "legacy": "tests/fixtures/tool-contract/live-b2-contract.legacy.json"

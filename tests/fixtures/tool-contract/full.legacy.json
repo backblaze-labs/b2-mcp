@@ -8,8 +8,8 @@
   "mcpRevision": "2026-07-28",
   "sdk": {
     "@backblaze-labs/b2-sdk": "0.4.0",
-    "@modelcontextprotocol/client": "2.2.0",
-    "@modelcontextprotocol/server": "2.2.0"
+    "@modelcontextprotocol/client": "2.4.0",
+    "@modelcontextprotocol/server": "2.4.0"
   },
   "capabilities": null,
   "counts": {
@@ -393,7 +393,7 @@
           "email": {
             "description": "New email for the ejected account. If omitted, the existing email is kept. Must not already be a Backblaze account.",
             "format": "email",
-            "pattern": "^(?!\\.)(?!.*\\.\\.)([A-Za-z0-9_'+\\-\\.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$",
+            "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$",
             "type": "string"
           },
           "groupId": {
@@ -2060,5 +2060,5 @@
     "toolsListCacheHint": null,
     "discover": null
   },
-  "hash": "e3ab2d677e058bfa255fa01fbc535e9299846ae321ad2eed7890d0033cd2ff59"
+  "hash": "779a79988133348914b9c77514fcb6980617b876a74846a77d49cb0d17391a31"
 }
