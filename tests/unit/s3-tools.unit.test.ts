@@ -1027,22 +1027,60 @@ describe("s3_head_object and s3_copy_object", () => {
     });
   });
 
-  it("allows replacement copy metadata without a content type", async () => {
-    const copied = await callTool(server, "s3_copy_object", {
+  it.each(["image/svg+xml", "application/xhtml+xml", "Text/HTML; charset=utf-8"])(
+    "rejects replacement copy browser-executable type %s",
+    async (contentType) => {
+      const result = await callTool(server, "s3_copy_object", {
+        sourceBucket: "copy-source",
+        sourceKey: "source",
+        destinationBucket: "copy-destination",
+        destinationKey: "copied",
+        metadataDirective: "REPLACE",
+        contentType,
+      });
+
+      expect(result.isError).toBe(true);
+      expectBadRequestToolError(result, /s3_copy_object rejects browser-executable content type/i);
+      expect(sendSpy).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([undefined, ""])(
+    "allows replacement copy metadata with content type %s",
+    async (contentType) => {
+      const copied = await callTool(server, "s3_copy_object", {
+        sourceBucket: "copy-source",
+        sourceKey: "source.txt",
+        destinationBucket: "copy-destination",
+        destinationKey: "copied.txt",
+        metadataDirective: "REPLACE",
+        contentType,
+        metadata: { owner: "fixture" },
+      });
+
+      expect(copied.isError).toBeFalsy();
+      expect(sendSpy).toHaveBeenCalledTimes(1);
+      expect(sendSpy.mock.calls[0][0].input).toMatchObject({
+        MetadataDirective: "REPLACE",
+        Metadata: { owner: "fixture" },
+      });
+      expect(sendSpy.mock.calls[0][0].input.ContentType).toBe(contentType);
+    },
+  );
+
+  it("ignores a browser-executable content type when copying source metadata", async () => {
+    const result = await callTool(server, "s3_copy_object", {
       sourceBucket: "copy-source",
-      sourceKey: "source.txt",
+      sourceKey: "source",
       destinationBucket: "copy-destination",
-      destinationKey: "copied.txt",
-      metadataDirective: "REPLACE",
-      metadata: { owner: "fixture" },
+      destinationKey: "copied",
+      metadataDirective: "COPY",
+      contentType: "text/html",
     });
 
-    expect(copied.isError).toBeFalsy();
+    expect(result.isError).toBeFalsy();
     expect(sendSpy).toHaveBeenCalledTimes(1);
-    expect(sendSpy.mock.calls[0][0].input).toMatchObject({
-      MetadataDirective: "REPLACE",
-      Metadata: { owner: "fixture" },
-    });
+    expect(sendSpy.mock.calls[0][0].input.MetadataDirective).toBe("COPY");
     expect(sendSpy.mock.calls[0][0].input.ContentType).toBeUndefined();
   });
 
@@ -1072,6 +1110,41 @@ describe("s3_head_object and s3_copy_object", () => {
     });
     expect(command.input.ACL).toBeUndefined();
   });
+});
+
+describe("s3_create_multipart_upload content types", () => {
+  it("rejects a browser-executable content type before creating a multipart upload", async () => {
+    const result = await callTool(server, "s3_create_multipart_upload", {
+      bucket: "b",
+      key: "page.html",
+      contentType: "text/html",
+    });
+
+    expect(result.isError).toBe(true);
+    expectBadRequestToolError(
+      result,
+      /s3_create_multipart_upload rejects browser-executable content type/i,
+    );
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, "", "text/plain"])(
+    "allows multipart creation with content type %s",
+    async (contentType) => {
+      sendSpy.mockResolvedValueOnce({ UploadId: "upload-1", Bucket: "b", Key: "k" });
+      const result = await callTool(server, "s3_create_multipart_upload", {
+        bucket: "b",
+        key: "k",
+        contentType,
+      });
+
+      expect(result.isError).toBeFalsy();
+      expect(parseResult(result)).toMatchObject({ uploadId: "upload-1" });
+      expect(sendSpy).toHaveBeenCalledTimes(1);
+      expect(sendSpy.mock.calls[0][0].constructor.name).toBe("CreateMultipartUploadCommand");
+      expect(sendSpy.mock.calls[0][0].input.ContentType).toBe(contentType);
+    },
+  );
 });
 
 describe("s3_put_bucket_lifecycle", () => {

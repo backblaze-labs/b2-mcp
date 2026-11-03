@@ -1496,7 +1496,7 @@
             "enum": ["COPY", "REPLACE"]
           },
           "contentType": {
-            "description": "New content type (only used with REPLACE).",
+            "description": "New content type (only used with REPLACE). Browser-executable types are rejected; omitted or empty uses S3's default type.",
             "type": "string"
           },
           "metadata": {

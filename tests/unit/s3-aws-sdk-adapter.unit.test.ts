@@ -22,8 +22,116 @@ function clientWithHandler(handle: ReturnType<typeof vi.fn>) {
 
 describe("B2S3PeerClient object data-plane behavior", () => {
   afterEach(() => {
+    vi.restoreAllMocks();
     circuitBreaker.close();
     s3CircuitBreaker.close();
+  });
+
+  it.each(["text/html", "image/svg+xml", "application/xhtml+xml", "Text/HTML; charset=utf-8"])(
+    "rejects direct copyObject replacement content type %s before sending",
+    async (contentType) => {
+      const s3 = clientWithHandler(vi.fn());
+      const send = vi.spyOn(s3 as any, "sendUnsafeMutationWithCircuit").mockResolvedValue({});
+      try {
+        await expect(
+          s3.copyObject({
+            sourceBucket: "b",
+            sourceKey: "source",
+            destinationBucket: "b",
+            destinationKey: "copy",
+            metadataDirective: "REPLACE",
+            contentType,
+          }),
+        ).rejects.toMatchObject({
+          code: "bad_request",
+          status: 400,
+          message: expect.stringContaining(
+            "s3_copy_object rejects browser-executable content type",
+          ),
+        });
+        expect(send).not.toHaveBeenCalled();
+      } finally {
+        s3.destroy();
+      }
+    },
+  );
+
+  it.each(["text/html", "image/svg+xml", "application/xhtml+xml", "Text/HTML; charset=utf-8"])(
+    "rejects direct createMultipartUpload content type %s before sending",
+    async (contentType) => {
+      const s3 = clientWithHandler(vi.fn());
+      const send = vi.spyOn(s3 as any, "sendUnsafeMutationWithCircuit").mockResolvedValue({});
+      try {
+        await expect(
+          s3.createMultipartUpload({ bucket: "b", key: "k", contentType }),
+        ).rejects.toMatchObject({
+          code: "bad_request",
+          status: 400,
+          message: expect.stringContaining(
+            "s3_create_multipart_upload rejects browser-executable content type",
+          ),
+        });
+        expect(send).not.toHaveBeenCalled();
+      } finally {
+        s3.destroy();
+      }
+    },
+  );
+
+  it.each([undefined, "", "text/plain"])(
+    "allows direct copyObject replacement content type %s",
+    async (contentType) => {
+      const s3 = clientWithHandler(vi.fn());
+      const send = vi.spyOn(s3 as any, "sendUnsafeMutationWithCircuit").mockResolvedValue({});
+      try {
+        await expect(
+          s3.copyObject({
+            sourceBucket: "b",
+            sourceKey: "source",
+            destinationBucket: "b",
+            destinationKey: "copy",
+            metadataDirective: "REPLACE",
+            contentType,
+          }),
+        ).resolves.toBeUndefined();
+        expect(send).toHaveBeenCalledTimes(1);
+        const command = send.mock.calls[0][0] as { input: Record<string, unknown> };
+        expect(command.input.ContentType).toBe(contentType);
+      } finally {
+        s3.destroy();
+      }
+    },
+  );
+
+  it("ignores direct copyObject content types with the COPY directive", async () => {
+    const s3 = clientWithHandler(vi.fn());
+    const send = vi.spyOn(s3 as any, "sendUnsafeMutationWithCircuit").mockResolvedValue({});
+    try {
+      await s3.copyObject({
+        sourceBucket: "b",
+        sourceKey: "source",
+        destinationBucket: "b",
+        destinationKey: "copy",
+        metadataDirective: "COPY",
+        contentType: "text/html",
+      });
+      expect(send).toHaveBeenCalledTimes(1);
+      const command = send.mock.calls[0][0] as { input: Record<string, unknown> };
+      expect(command.input.ContentType).toBeUndefined();
+    } finally {
+      s3.destroy();
+    }
+  });
+
+  it("uses operation-neutral wording for a missing required content type", async () => {
+    const s3 = clientWithHandler(vi.fn());
+    try {
+      await expect(
+        s3.presignObjectUrl({ bucket: "b", key: "k", operation: "PutObject", expiresIn: 60 }),
+      ).rejects.toThrow("Presigned PutObject URLs requires a contentType.");
+    } finally {
+      s3.destroy();
+    }
   });
 
   it("does not gate S3 data-plane calls on the native circuit breaker", async () => {

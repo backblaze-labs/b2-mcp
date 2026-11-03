@@ -17,8 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   round trip, multipart, `saveToPath`). (#469)
 
 ### Fixed
-- `s3_copy_object` rejects browser-executable `contentType` values when
-  replacing metadata, matching `s3_put_object`.
+- `s3_copy_object` with `REPLACE` and `s3_create_multipart_upload` reject
+  browser-executable content types in the shared S3 adapter. Unlike
+  `s3_put_object`, copy still permits an omitted or empty `contentType`, which
+  lets S3 reset it to the default type instead of retaining the source type.
+  `COPY` continues to ignore a supplied content type. (#542)
 - `s3_put_object` accepts an empty `content` string and stores a zero-byte
   object instead of answering "Either filePath or content must be provided."
   (#505)
