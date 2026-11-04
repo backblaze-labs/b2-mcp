@@ -8,16 +8,16 @@ Approved modern cache hint: `ttlMs=30000`, `cacheScope=private`
 
 | Profile | Total | `b2_*` | `s3_*` | `bz_*` | Hash prefix |
 | --- | ---: | ---: | ---: | ---: | --- |
-| `full` | 40 | 21 | 19 | 0 | `a5a31da3eb5c` |
-| `live-b2-contract` | 39 | 20 | 19 | 0 | `93b7c0f737f0` |
-| `phase1-default` | 37 | 18 | 19 | 0 | `49121cb2ee03` |
+| `full` | 40 | 21 | 19 | 0 | `779a79988133` |
+| `live-b2-contract` | 39 | 20 | 19 | 0 | `4921f72f998a` |
+| `phase1-default` | 37 | 18 | 19 | 0 | `6d79ad71a845` |
 | `read-only` | 20 | 11 | 9 | 0 | `735537dedc14` |
 
 ## `full`
 
 Complete tool superset for contract review and regression detection across all backing categories; durable-secret producers are sink-backed when a secret sink is active and otherwise remain availability-annotated stubs.
 
-Profile hash: `a5a31da3eb5cf0998cfd1cfc61b09e3e9d4eacc7107f191d4bf1e58e9204ac0e`
+Profile hash: `779a79988133348914b9c77514fcb6980617b876a74846a77d49cb0d17391a31`
 
 ### Capability Input
 
@@ -79,7 +79,7 @@ Profile hash: `a5a31da3eb5cf0998cfd1cfc61b09e3e9d4eacc7107f191d4bf1e58e9204ac0e`
 
 Protected live B2 contract profile: non-master application key with release-evidence capabilities, no key-management grants, and a distinct master key only for Partner/Groups API surface discovery.
 
-Profile hash: `93b7c0f737f0b79a9314fba40f2fba48d5f40dbf5bf31539681d5ca2fef21539`
+Profile hash: `4921f72f998a1c25080d88eedfd7f183fa9e738d8cbd7735a6cd963c8552fe67`
 
 ### Capability Input
 
@@ -158,7 +158,7 @@ Profile hash: `93b7c0f737f0b79a9314fba40f2fba48d5f40dbf5bf31539681d5ca2fef21539`
 
 Default customer-hosted Phase 1 profile: standard B2 application key, no distinct Partner/master credential, and durable-secret producers exposed as sink-backed tools on local stdio or unavailable stubs when the sink is off.
 
-Profile hash: `49121cb2ee0387d7a9623e50920b2bfa91916e7f323f0a0351bb98ab217a67ba`
+Profile hash: `6d79ad71a8456b6c7f9c27b69eb7c0f1c684084f560891b713817adde7d06b5f`
 
 ### Capability Input
 

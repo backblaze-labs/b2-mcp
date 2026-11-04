@@ -1198,7 +1198,12 @@ export function registerS3ObjectTools(
           .optional()
           .default("COPY")
           .describe("COPY copies metadata from source; REPLACE uses the provided metadata."),
-        contentType: z.string().optional().describe("New content type (only used with REPLACE)."),
+        contentType: z
+          .string()
+          .optional()
+          .describe(
+            "New content type (only used with REPLACE). Browser-executable types are rejected; omitted or empty uses S3's default type.",
+          ),
         metadata: z
           .record(z.string(), z.string())
           .optional()

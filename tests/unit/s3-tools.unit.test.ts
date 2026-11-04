@@ -996,6 +996,94 @@ describe("s3_head_object and s3_copy_object", () => {
     expect(B2Client.prototype.getCurrentS3FileVersion).not.toHaveBeenCalled();
   });
 
+  it("applies the put content-type guard to replacement copy metadata", async () => {
+    const rejected = await callTool(server, "s3_copy_object", {
+      sourceBucket: "copy-source",
+      sourceKey: "source.html",
+      destinationBucket: "copy-destination",
+      destinationKey: "copied.html",
+      metadataDirective: "REPLACE",
+      contentType: "text/html",
+    });
+
+    expect(rejected.isError).toBe(true);
+    expectBadRequestToolError(rejected, /s3_copy_object rejects browser-executable content type/i);
+    expect(sendSpy).not.toHaveBeenCalled();
+
+    const copied = await callTool(server, "s3_copy_object", {
+      sourceBucket: "copy-source",
+      sourceKey: "source.txt",
+      destinationBucket: "copy-destination",
+      destinationKey: "copied.txt",
+      metadataDirective: "REPLACE",
+      contentType: "text/plain",
+    });
+
+    expect(copied.isError).toBeFalsy();
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(sendSpy.mock.calls[0][0].input).toMatchObject({
+      MetadataDirective: "REPLACE",
+      ContentType: "text/plain",
+    });
+  });
+
+  it.each(["image/svg+xml", "application/xhtml+xml", "Text/HTML; charset=utf-8"])(
+    "rejects replacement copy browser-executable type %s",
+    async (contentType) => {
+      const result = await callTool(server, "s3_copy_object", {
+        sourceBucket: "copy-source",
+        sourceKey: "source",
+        destinationBucket: "copy-destination",
+        destinationKey: "copied",
+        metadataDirective: "REPLACE",
+        contentType,
+      });
+
+      expect(result.isError).toBe(true);
+      expectBadRequestToolError(result, /s3_copy_object rejects browser-executable content type/i);
+      expect(sendSpy).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([undefined, ""])(
+    "allows replacement copy metadata with content type %s",
+    async (contentType) => {
+      const copied = await callTool(server, "s3_copy_object", {
+        sourceBucket: "copy-source",
+        sourceKey: "source.txt",
+        destinationBucket: "copy-destination",
+        destinationKey: "copied.txt",
+        metadataDirective: "REPLACE",
+        contentType,
+        metadata: { owner: "fixture" },
+      });
+
+      expect(copied.isError).toBeFalsy();
+      expect(sendSpy).toHaveBeenCalledTimes(1);
+      expect(sendSpy.mock.calls[0][0].input).toMatchObject({
+        MetadataDirective: "REPLACE",
+        Metadata: { owner: "fixture" },
+      });
+      expect(sendSpy.mock.calls[0][0].input.ContentType).toBe(contentType);
+    },
+  );
+
+  it("ignores a browser-executable content type when copying source metadata", async () => {
+    const result = await callTool(server, "s3_copy_object", {
+      sourceBucket: "copy-source",
+      sourceKey: "source",
+      destinationBucket: "copy-destination",
+      destinationKey: "copied",
+      metadataDirective: "COPY",
+      contentType: "text/html",
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(sendSpy.mock.calls[0][0].input.MetadataDirective).toBe("COPY");
+    expect(sendSpy.mock.calls[0][0].input.ContentType).toBeUndefined();
+  });
+
   it("sends CopyObjectCommand through the AWS SDK", async () => {
     const result = await callTool(server, "s3_copy_object", {
       sourceBucket: "copy-source",
@@ -1022,6 +1110,41 @@ describe("s3_head_object and s3_copy_object", () => {
     });
     expect(command.input.ACL).toBeUndefined();
   });
+});
+
+describe("s3_create_multipart_upload content types", () => {
+  it("rejects a browser-executable content type before creating a multipart upload", async () => {
+    const result = await callTool(server, "s3_create_multipart_upload", {
+      bucket: "b",
+      key: "page.html",
+      contentType: "text/html",
+    });
+
+    expect(result.isError).toBe(true);
+    expectBadRequestToolError(
+      result,
+      /s3_create_multipart_upload rejects browser-executable content type/i,
+    );
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, "", "text/plain"])(
+    "allows multipart creation with content type %s",
+    async (contentType) => {
+      sendSpy.mockResolvedValueOnce({ UploadId: "upload-1", Bucket: "b", Key: "k" });
+      const result = await callTool(server, "s3_create_multipart_upload", {
+        bucket: "b",
+        key: "k",
+        contentType,
+      });
+
+      expect(result.isError).toBeFalsy();
+      expect(parseResult(result)).toMatchObject({ uploadId: "upload-1" });
+      expect(sendSpy).toHaveBeenCalledTimes(1);
+      expect(sendSpy.mock.calls[0][0].constructor.name).toBe("CreateMultipartUploadCommand");
+      expect(sendSpy.mock.calls[0][0].input.ContentType).toBe(contentType);
+    },
+  );
 });
 
 describe("s3_put_bucket_lifecycle", () => {

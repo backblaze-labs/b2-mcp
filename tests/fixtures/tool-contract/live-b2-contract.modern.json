@@ -1288,7 +1288,7 @@
             "type": "string"
           },
           "contentType": {
-            "description": "New content type (only used with REPLACE).",
+            "description": "New content type (only used with REPLACE). Browser-executable types are rejected; omitted or empty uses S3's default type.",
             "type": "string"
           },
           "destinationBucket": {
@@ -2071,5 +2071,5 @@
       "resultType": "complete"
     }
   },
-  "hash": "93b7c0f737f0b79a9314fba40f2fba48d5f40dbf5bf31539681d5ca2fef21539"
+  "hash": "4921f72f998a1c25080d88eedfd7f183fa9e738d8cbd7735a6cd963c8552fe67"
 }
