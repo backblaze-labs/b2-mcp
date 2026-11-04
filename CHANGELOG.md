@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- Renewed the dev-only `zod` advisory exception (#524) in `audit-policy.json` to 2026-12-05 — re-checked 2026-11-02, still no patched zod 3.x (latest 3.25.76); reached only through dev-only `@anthropic-ai/mcpb` / vercel tooling, not the published package or any runtime path.
+
 ### Added
 - `docs/TEST-COVERAGE-MAP.md`: snapshot map of the existing tests to a shared
   list of 38 B2 capabilities, with known gaps. (#469)
