@@ -26,8 +26,153 @@
         "version": "2.1.2",
         "dependencyRange": "3.25.76"
       },
-      "expires": "2026-11-05",
-      "reason": "GHSA-mrhx-c7xc-m3w5 (#524): no patched 3.x release; dev-only via @anthropic-ai/mcpb / vercel; forcing zod 4 would cross a major in third-party tooling. Covers only Zod 3.25.76 and 3.22.4 at the exact listed paths. Production and all Zod 4 paths use patched 4.6.7. Re-check upstream before expiry."
+      "expires": "2026-12-05",
+      "reason": "GHSA-mrhx-c7xc-m3w5 (#524): re-checked 2026-11-02, still no patched zod 3.x (latest 3.25.76); dev-only via @anthropic-ai/mcpb / vercel; forcing zod 4 would cross a major in third-party tooling. Covers only Zod 3.25.76 and 3.22.4 at the exact listed paths. Production and all Zod 4 paths use patched 4.6.7. Re-check upstream before expiry."
+    },
+    {
+      "name": "@hono/node-server",
+      "source": 1243661,
+      "maxSeverity": "moderate",
+      "isDirect": false,
+      "nodes": [
+        ".>@modelcontextprotocol/inspector>@hono/node-server",
+        ".>@modelcontextprotocol/node>@hono/node-server"
+      ],
+      "effects": [],
+      "package": {
+        "version": "2.0.10",
+        "integrity": "sha512-ZcnNVhKTmyDJeg0UlnZjvM73JBsTAuhrH/J4fjwGOw59PwOW51r4J+p6CsKZWXdKSme4MFqU62CZMOsdDrU4CA=="
+      },
+      "via": {
+        "path": "node_modules/@modelcontextprotocol/node",
+        "name": "@modelcontextprotocol/node",
+        "version": "2.1.2",
+        "dependencyRange": "2.0.10(hono@4.13.14)"
+      },
+      "expires": "2026-11-25",
+      "reason": "GHSA-rmxm-3fg6-px4f: dev-only MCP development/build-toolchain paths, not production. Current parents pin 2.0.10 below the 2.1.3 fix. Re-check upstream before expiry."
+    },
+    {
+      "name": "glob",
+      "source": 1244013,
+      "maxSeverity": "moderate",
+      "isDirect": false,
+      "nodes": [
+        ".>@vercel/node>@vercel/nft>glob",
+        ".>vercel>@vercel/backends>@vercel/nft>glob",
+        ".>vercel>@vercel/elysia>@vercel/node>@vercel/nft>glob",
+        ".>vercel>@vercel/express>@vercel/cervel>@vercel/backends>@vercel/nft>glob",
+        ".>vercel>@vercel/express>@vercel/nft>glob",
+        ".>vercel>@vercel/express>@vercel/node>@vercel/nft>glob",
+        ".>vercel>@vercel/fastify>@vercel/node>@vercel/nft>glob",
+        ".>vercel>@vercel/h3>@vercel/node>@vercel/nft>glob",
+        ".>vercel>@vercel/hono>@vercel/nft>glob",
+        ".>vercel>@vercel/hono>@vercel/node>@vercel/nft>glob",
+        ".>vercel>@vercel/koa>@vercel/node>@vercel/nft>glob",
+        ".>vercel>@vercel/nestjs>@vercel/node>@vercel/nft>glob",
+        ".>vercel>@vercel/next>@vercel/nft>glob",
+        ".>vercel>@vercel/node>@vercel/nft>glob",
+        ".>vercel>@vercel/redwood>@vercel/nft>glob",
+        ".>vercel>@vercel/remix-builder>@vercel/nft>glob"
+      ],
+      "effects": [],
+      "package": {
+        "version": "13.0.6",
+        "integrity": "sha512-Wjlyrolmm8uDpm/ogGyXZXb1Z+Ca2B8NbJwqBVg0axK9GbBeoS7yGV6vjXnYdGm6X53iehEuxxbyiKp8QmN4Vw=="
+      },
+      "via": {
+        "path": "node_modules/@vercel/nft",
+        "name": "@vercel/nft",
+        "version": "1.10.0",
+        "dependencyRange": "13.0.6"
+      },
+      "expires": "2026-11-25",
+      "reason": "GHSA-3g3m-2fjr-6pw4: dev-only Vercel build-toolchain paths, not production. @vercel/nft pins 13.0.6 below the 14.0.2 fix. Re-check upstream before expiry."
+    },
+    {
+      "name": "minimatch",
+      "source": 1244623,
+      "maxSeverity": "moderate",
+      "isDirect": false,
+      "nodes": [
+        ".>@vercel/node>@vercel/nft>glob>minimatch",
+        ".>eslint>@eslint/config-array>minimatch",
+        ".>eslint>minimatch",
+        ".>eslint-plugin-jsdoc>@typescript-eslint/utils>@eslint-community/eslint-utils>eslint>@eslint/config-array>minimatch",
+        ".>eslint-plugin-jsdoc>@typescript-eslint/utils>@eslint-community/eslint-utils>eslint>minimatch",
+        ".>eslint-plugin-jsdoc>@typescript-eslint/utils>@typescript-eslint/typescript-estree>minimatch",
+        ".>eslint-plugin-jsdoc>@typescript-eslint/utils>eslint>@eslint/config-array>minimatch",
+        ".>eslint-plugin-jsdoc>@typescript-eslint/utils>eslint>minimatch",
+        ".>eslint-plugin-jsdoc>eslint>@eslint/config-array>minimatch",
+        ".>eslint-plugin-jsdoc>eslint>minimatch",
+        ".>eslint-plugin-tsdoc>@typescript-eslint/utils>@eslint-community/eslint-utils>eslint>@eslint/config-array>minimatch",
+        ".>eslint-plugin-tsdoc>@typescript-eslint/utils>@eslint-community/eslint-utils>eslint>minimatch",
+        ".>eslint-plugin-tsdoc>@typescript-eslint/utils>@typescript-eslint/typescript-estree>minimatch",
+        ".>eslint-plugin-tsdoc>@typescript-eslint/utils>eslint>@eslint/config-array>minimatch",
+        ".>eslint-plugin-tsdoc>@typescript-eslint/utils>eslint>minimatch",
+        ".>eslint-plugin-tsdoc>eslint>@eslint/config-array>minimatch",
+        ".>eslint-plugin-tsdoc>eslint>minimatch",
+        ".>typedoc>minimatch",
+        ".>typescript-eslint>@typescript-eslint/eslint-plugin>@typescript-eslint/parser>@typescript-eslint/typescript-estree>minimatch",
+        ".>typescript-eslint>@typescript-eslint/eslint-plugin>@typescript-eslint/parser>eslint>@eslint/config-array>minimatch",
+        ".>typescript-eslint>@typescript-eslint/eslint-plugin>@typescript-eslint/parser>eslint>minimatch",
+        ".>typescript-eslint>@typescript-eslint/eslint-plugin>@typescript-eslint/type-utils>@typescript-eslint/typescript-estree>minimatch",
+        ".>typescript-eslint>@typescript-eslint/eslint-plugin>@typescript-eslint/type-utils>@typescript-eslint/utils>@eslint-community/eslint-utils>eslint>@eslint/config-array>minimatch",
+        ".>typescript-eslint>@typescript-eslint/eslint-plugin>@typescript-eslint/type-utils>@typescript-eslint/utils>@eslint-community/eslint-utils>eslint>minimatch",
+        ".>typescript-eslint>@typescript-eslint/eslint-plugin>@typescript-eslint/type-utils>@typescript-eslint/utils>@typescript-eslint/typescript-estree>minimatch",
+        ".>typescript-eslint>@typescript-eslint/eslint-plugin>@typescript-eslint/type-utils>@typescript-eslint/utils>eslint>@eslint/config-array>minimatch",
+        ".>typescript-eslint>@typescript-eslint/eslint-plugin>@typescript-eslint/type-utils>@typescript-eslint/utils>eslint>minimatch",
+        ".>typescript-eslint>@typescript-eslint/eslint-plugin>@typescript-eslint/type-utils>eslint>@eslint/config-array>minimatch",
+        ".>typescript-eslint>@typescript-eslint/eslint-plugin>@typescript-eslint/type-utils>eslint>minimatch",
+        ".>typescript-eslint>@typescript-eslint/eslint-plugin>@typescript-eslint/utils>@eslint-community/eslint-utils>eslint>@eslint/config-array>minimatch",
+        ".>typescript-eslint>@typescript-eslint/eslint-plugin>@typescript-eslint/utils>@eslint-community/eslint-utils>eslint>minimatch",
+        ".>typescript-eslint>@typescript-eslint/eslint-plugin>@typescript-eslint/utils>@typescript-eslint/typescript-estree>minimatch",
+        ".>typescript-eslint>@typescript-eslint/eslint-plugin>@typescript-eslint/utils>eslint>@eslint/config-array>minimatch",
+        ".>typescript-eslint>@typescript-eslint/eslint-plugin>@typescript-eslint/utils>eslint>minimatch",
+        ".>typescript-eslint>@typescript-eslint/eslint-plugin>eslint>@eslint/config-array>minimatch",
+        ".>typescript-eslint>@typescript-eslint/eslint-plugin>eslint>minimatch",
+        ".>typescript-eslint>@typescript-eslint/parser>@typescript-eslint/typescript-estree>minimatch",
+        ".>typescript-eslint>@typescript-eslint/parser>eslint>@eslint/config-array>minimatch",
+        ".>typescript-eslint>@typescript-eslint/parser>eslint>minimatch",
+        ".>typescript-eslint>@typescript-eslint/typescript-estree>minimatch",
+        ".>typescript-eslint>@typescript-eslint/utils>@eslint-community/eslint-utils>eslint>@eslint/config-array>minimatch",
+        ".>typescript-eslint>@typescript-eslint/utils>@eslint-community/eslint-utils>eslint>minimatch",
+        ".>typescript-eslint>@typescript-eslint/utils>@typescript-eslint/typescript-estree>minimatch",
+        ".>typescript-eslint>@typescript-eslint/utils>eslint>@eslint/config-array>minimatch",
+        ".>typescript-eslint>@typescript-eslint/utils>eslint>minimatch",
+        ".>typescript-eslint>eslint>@eslint/config-array>minimatch",
+        ".>typescript-eslint>eslint>minimatch",
+        ".>vercel>@vercel/backends>@vercel/nft>glob>minimatch",
+        ".>vercel>@vercel/elysia>@vercel/node>@vercel/nft>glob>minimatch",
+        ".>vercel>@vercel/express>@vercel/cervel>@vercel/backends>@vercel/nft>glob>minimatch",
+        ".>vercel>@vercel/express>@vercel/nft>glob>minimatch",
+        ".>vercel>@vercel/express>@vercel/node>@vercel/nft>glob>minimatch",
+        ".>vercel>@vercel/fastify>@vercel/node>@vercel/nft>glob>minimatch",
+        ".>vercel>@vercel/h3>@vercel/node>@vercel/nft>glob>minimatch",
+        ".>vercel>@vercel/hono>@vercel/nft>glob>minimatch",
+        ".>vercel>@vercel/hono>@vercel/node>@vercel/nft>glob>minimatch",
+        ".>vercel>@vercel/koa>@vercel/node>@vercel/nft>glob>minimatch",
+        ".>vercel>@vercel/nestjs>@vercel/node>@vercel/nft>glob>minimatch",
+        ".>vercel>@vercel/next>@vercel/nft>glob>minimatch",
+        ".>vercel>@vercel/node>@vercel/nft>glob>minimatch",
+        ".>vercel>@vercel/redwood>@vercel/nft>glob>minimatch",
+        ".>vercel>@vercel/remix-builder>@vercel/nft>glob>minimatch",
+        ".>vercel>@vercel/python>@vercel/python-analysis>minimatch",
+        ".>vercel>@vercel/python-analysis>minimatch"
+      ],
+      "effects": [],
+      "package": {
+        "version": "3.1.5",
+        "integrity": "sha512-VgjWUsnnT6n+NUk6eZq77zeFdpW2LWDzP6zFGrCbHXiYNul5Dzqk2HHQ5uFH2DNW5Xbp8+jVzaeNt94ssEEl4w=="
+      },
+      "via": {
+        "path": "node_modules/glob",
+        "name": "glob",
+        "version": "13.0.6",
+        "dependencyRange": "10.2.6"
+      },
+      "expires": "2026-11-25",
+      "reason": "GHSA-g3hv-75wg-m249: dev-only Vercel and lint/build-toolchain paths, not production. Current parents pin 10.2.6 or 10.2.3 below the 11.0.1 fix. Re-check upstream before expiry."
     }
   ]
 }
