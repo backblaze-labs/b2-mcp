@@ -5,7 +5,7 @@
 assertions in `tests/`; the harness builds this checkout, starts a fresh local B2 simulator,
 and retains and reports the evidence.
 
-Scenarios so far: `health/golden-path`, twenty-six `conformance` scenarios and five `resilience` scenarios (below). `tests/run-health` runs
+Scenarios so far: `health/golden-path`, twenty-six `conformance` scenarios and thirteen `resilience` scenarios (below). `tests/run-health` runs
 `tests/health/golden-path.mjs`, which starts the built stdio server (`dist/index.js`), drives
 it over MCP as a client would, and authorizes, uploads a small object (`s3_put_object`),
 downloads it and compares the bytes (`s3_get_object`), lists it (`s3_list_objects_v2`),
@@ -86,7 +86,23 @@ on the whole call only (the journal has no timestamps), never an upper one.
 | `auth.expired_401` | one 401 `bad_auth_token` on the listing (the answer real B2 gives a rejected token, measured 2026-10-12): the journal shows `b2_authorize_account` after it, then a 200. A one-off `expired_auth_token` on a live token never happens on real B2; the realistic persistent expiry is `auth.clock_expiry`. A token that stays expired is retried three times first (about 7 s), tracked as a low-priority improvement in b2-mcp#511 |
 | `auth.clock_expiry` | the clock moves 24 h and 1 ms past the token's life: a real 401 (no injected fault), then `b2_authorize_account`, then a 200. (The 401 lands on `b2_list_buckets`, which the listing calls first; the SDK retries it four times, about 7 s, before it authorizes again) |
 
-The other eleven resilience scenarios the card claims (nine `upload.*`, `part.retry_503`, `download.retry_503`) are not
+The eight `s3.*` scenarios fault the S3 requests the server itself sends (the native-API scenarios above never reach a server with no native upload or download),
+through the simulator's S3 fault injection (`s3:<Operation>` names; `tests/lib/s3-resilience.mjs`, `tests/lib/fault.mjs` `armWire`). B2's pages give no S3-specific
+retry or write rule (the Integration Checklist covers the native API only, and the S3 API page gives no retry guidance), so the read scenarios apply the native
+rules by analogy and the write scenarios hold the server to the harness's own safety bar, not to B2's text and not to what the server does. Each write scenario
+also asserts that its armed fault was faced (the journal shows one faulted `s3:PutObject`), so a write that never met the fault cannot pass:
+
+| Scenario | What it asserts |
+|---|---|
+| `s3.get_retry_503` | one 503 `service_unavailable` on `s3:GetObject`: the one `s3_get_object` call succeeds with the stored bytes, and the journal shows a later 200 |
+| `s3.get_retry_after_503` | the same with `Retry-After: 2`: the call took at least 2 s |
+| `s3.put_503`, `s3.put_500`, `s3.put_request_timeout` | one 503, 500 or 400 `RequestTimeout` on `s3:PutObject`. The server's writes do not retry (`maxAttempts: 1`), so the scenario does not require one; it requires that an OK means the object is stored intact, a failure names the fault and leaves nothing, the stored versions are exactly the PutObjects the simulator answered 200, and the same write then lands |
+| `s3.put_reset_mid_request`, `s3.put_reset_before_response` | a connection reset while sending, or after the write was applied: the same contract (after a reset before the response the one applied copy may remain) |
+| `s3.put_stall` | `s3:PutObject` held 200 s: the call ends before the stall does (the server's 150 s deadline abandons it), reports a failure, stores nothing, and the same write then lands |
+
+Not asked: a presigned URL (the server only signs it; the PUT or GET is the caller's), and `upload.get_url_503`, `upload.expired_token_401`, `upload.cap_exceeded_403`, `part.retry_503` (no S3 counterpart can be faulted or reach the server; the harness says why in `bin/resilience/not-applicable.tsv`).
+
+The other eleven native-API resilience scenarios the card claims (nine `upload.*`, `part.retry_503`, `download.retry_503`) are not
 checks of this repository: the server has no native upload or download, so those faults never reach it. The harness lists
 them as `n/a` with that reason (`bin/resilience/not-applicable.tsv` there).
 

@@ -12,7 +12,7 @@ fail() { result FAIL "$1"; exit 1; }
 
 [ "${SDKHARNESS_TEST_LEVEL:-}" = "$LEVEL" ] || fail 'configuration: unexpected contract identity'
 case "$SCENARIO" in
-  api.backoff_503|api.retry_after_503|api.retry_after_429|auth.expired_401|auth.clock_expiry) ;;
+  api.backoff_503|api.retry_after_503|api.retry_after_429|auth.expired_401|auth.clock_expiry|s3.get_retry_503|s3.get_retry_after_503|s3.put_503|s3.put_500|s3.put_request_timeout|s3.put_reset_mid_request|s3.put_reset_before_response|s3.put_stall) ;;
   *) fail 'configuration: unknown resilience scenario' ;;
 esac
 [[ "${SDKHARNESS_SIMULATOR_HTTPS_URL:-}" =~ ^https://127\.0\.0\.1:([0-9]{1,5})/?$ ]] \

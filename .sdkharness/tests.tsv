@@ -31,3 +31,11 @@ resilience	api.retry_after_503	simulator	./.sdkharness/tests/run-resilience
 resilience	api.retry_after_429	simulator	./.sdkharness/tests/run-resilience
 resilience	auth.expired_401	simulator	./.sdkharness/tests/run-resilience
 resilience	auth.clock_expiry	simulator	./.sdkharness/tests/run-resilience
+resilience	s3.get_retry_503	simulator	./.sdkharness/tests/run-resilience
+resilience	s3.get_retry_after_503	simulator	./.sdkharness/tests/run-resilience
+resilience	s3.put_503	simulator	./.sdkharness/tests/run-resilience
+resilience	s3.put_500	simulator	./.sdkharness/tests/run-resilience
+resilience	s3.put_request_timeout	simulator	./.sdkharness/tests/run-resilience
+resilience	s3.put_reset_mid_request	simulator	./.sdkharness/tests/run-resilience
+resilience	s3.put_reset_before_response	simulator	./.sdkharness/tests/run-resilience
+resilience	s3.put_stall	simulator	./.sdkharness/tests/run-resilience
