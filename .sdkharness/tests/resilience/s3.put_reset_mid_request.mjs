@@ -8,4 +8,5 @@ import { armWire, writeScenario } from "../lib/s3-resilience.mjs";
 
 await writeScenario("s3.put_reset_mid_request", {
   arm: () => armWire({ on: "s3:PutObject", kind: "reset-mid-request" }),
+  fired: { fault: "reset-mid-request" },
 });

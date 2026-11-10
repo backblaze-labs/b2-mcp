@@ -66,17 +66,21 @@ export function readScenario(id, { arm, status, verify }) {
 }
 
 /**
- * A write under one fault. B2's pages ask a client to retry a failed write, and a tool whose caller retries may instead hand the failure
+ * A write under one fault. B2's pages give no rule for a failed S3 write (the native API's retry rule is the nearest), and a tool whose caller retries may instead hand the failure
  * to it, so the scenario asks what holds either way, from the caller's side and from the journal:
  *   - an OK is true: the object is stored and every stored version carries the bytes sent (never a partial or corrupt object);
  *   - a failure is loud: the error names the fault (`named`, a pattern over the error text; none for a dropped connection);
  *   - the stored versions are exactly the writes the simulator answered 200 (nothing is stored that the journal does not show, and a
  *     success the server reported has a 200 behind it);
  *   - after a failure that stored nothing (`mayHaveStored` false) there is no object at all;
+ *   - the armed fault was faced: the journal holds exactly one `s3:PutObject` carrying it (`fired.fault`: `injected` for a status fault, the
+ *     wire kind for a wire fault; `fired.status` when it answers one). Without this a write that never reached the fault (refused earlier,
+ *     or sent unfaulted) would leave the fault armed for the second write and fail there, with the wrong message, or pass without the
+ *     first write ever meeting the fault;
  *   - the same write then succeeds and the newest version carries the bytes (a stuck circuit breaker or a poisoned client fails here).
  * `verify({ outcome, elapsed, entries })` may add what the scenario names (the stall ends before the stall does).
  */
-export function writeScenario(id, { arm, named, mayHaveStored = false, verify }) {
+export function writeScenario(id, { arm, fired, named, mayHaveStored = false, verify }) {
   return runScenario(
     id,
     async (s) => {
@@ -125,6 +129,10 @@ export function writeScenario(id, { arm, named, mayHaveStored = false, verify })
           );
         }
       };
+      const faced = puts(afterFault).filter((e) => e.fault === fired.fault);
+      eq(`${fired.fault} faults journaled on s3:PutObject`, 1, faced.length);
+      if (fired.status !== undefined)
+        eq("status of the armed fault on s3:PutObject", fired.status, faced[0].status);
       const first = await stored();
       const answered200 = puts(afterFault).filter((e) => e.status === 200).length;
       if (outcome.ok) {

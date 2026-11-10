@@ -8,5 +8,6 @@ import { armWire, writeScenario } from "../lib/s3-resilience.mjs";
 
 await writeScenario("s3.put_reset_before_response", {
   arm: () => armWire({ on: "s3:PutObject", kind: "reset-before-response" }),
+  fired: { fault: "reset-before-response" },
   mayHaveStored: true,
 });

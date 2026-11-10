@@ -7,5 +7,6 @@ import { armFault, writeScenario } from "../lib/s3-resilience.mjs";
 
 await writeScenario("s3.put_500", {
   arm: () => armFault({ on: "s3:PutObject", status: 500, code: "internal_error" }),
+  fired: { fault: "injected", status: 500 },
   named: /\b500\b/,
 });

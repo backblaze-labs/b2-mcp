@@ -9,5 +9,6 @@ import { armFault, writeScenario } from "../lib/s3-resilience.mjs";
 
 await writeScenario("s3.put_request_timeout", {
   arm: () => armFault({ on: "s3:PutObject", status: 400, code: "RequestTimeout" }),
+  fired: { fault: "injected", status: 400 },
   named: /RequestTimeout/,
 });

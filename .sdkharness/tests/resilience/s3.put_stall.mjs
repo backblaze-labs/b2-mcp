@@ -11,6 +11,7 @@ const STALL_MS = 200_000;
 
 await writeScenario("s3.put_stall", {
   arm: () => armWire({ on: "s3:PutObject", kind: "stall", ms: STALL_MS }),
+  fired: { fault: "stall" },
   verify: ({ outcome, elapsed }) => {
     check(
       elapsed < STALL_MS - 10_000,

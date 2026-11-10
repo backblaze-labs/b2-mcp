@@ -87,8 +87,10 @@ on the whole call only (the journal has no timestamps), never an upper one.
 | `auth.clock_expiry` | the clock moves 24 h and 1 ms past the token's life: a real 401 (no injected fault), then `b2_authorize_account`, then a 200. (The 401 lands on `b2_list_buckets`, which the listing calls first; the SDK retries it four times, about 7 s, before it authorizes again) |
 
 The eight `s3.*` scenarios fault the S3 requests the server itself sends (the native-API scenarios above never reach a server with no native upload or download),
-through the simulator's S3 fault injection (`s3:<Operation>` names; `tests/lib/s3-resilience.mjs`, `tests/lib/fault.mjs` `armWire`). The expected behaviour is
-B2's Integration Checklist and the S3 API page, not what the server does:
+through the simulator's S3 fault injection (`s3:<Operation>` names; `tests/lib/s3-resilience.mjs`, `tests/lib/fault.mjs` `armWire`). B2's pages give no S3-specific
+retry or write rule (the Integration Checklist covers the native API only, and the S3 API page gives no retry guidance), so the read scenarios apply the native
+rules by analogy and the write scenarios hold the server to the harness's own safety bar, not to B2's text and not to what the server does. Each write scenario
+also asserts that its armed fault was faced (the journal shows one faulted `s3:PutObject`), so a write that never met the fault cannot pass:
 
 | Scenario | What it asserts |
 |---|---|
