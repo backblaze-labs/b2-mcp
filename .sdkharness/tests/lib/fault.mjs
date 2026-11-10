@@ -43,7 +43,12 @@ export function armFault({ on, status, code, retryAfter }) {
  * an S3 operation name such as `s3:PutObject` (the pinned simulator journals and faults S3 requests under those names).
  */
 export function armWire({ on, kind, ms }) {
-  return control("POST", "/wire-faults", { on, kind, ...(ms === undefined ? {} : { ms }), count: 1 });
+  return control("POST", "/wire-faults", {
+    on,
+    kind,
+    ...(ms === undefined ? {} : { ms }),
+    count: 1,
+  });
 }
 
 /** Advance the simulator's clock; it never rewinds. Tokens issued before it age by that much. */

@@ -30,7 +30,10 @@ export function readScenario(id, { arm, status, verify }) {
       await put(s, bucket, KEY, data, { contentType: "application/octet-stream" });
 
       s.step("the read works before any fault");
-      check((await readBytes(s, bucket, KEY)).bytes.equals(data), "the read before the fault returned other bytes");
+      check(
+        (await readBytes(s, bucket, KEY)).bytes.equals(data),
+        "the read before the fault returned other bytes",
+      );
       const mark = (await journal()).length;
 
       s.step("arm the fault");
@@ -79,12 +82,19 @@ export function writeScenario(id, { arm, named, mayHaveStored = false, verify })
     async (s) => {
       s.step("setup: a bucket and a first write that works");
       const bucket = await s.bucket();
-      await put(s, bucket, "sdkharness/resilience/first.txt", payload(64, 7), { contentType: "text/plain" });
+      await put(s, bucket, "sdkharness/resilience/first.txt", payload(64, 7), {
+        contentType: "text/plain",
+      });
       const data = payload(2048, 91);
       const write = () =>
         s.call(
           "s3_put_object",
-          { bucket: bucket.name, key: KEY, content: b64(data), contentType: "application/octet-stream" },
+          {
+            bucket: bucket.name,
+            key: KEY,
+            content: b64(data),
+            contentType: "application/octet-stream",
+          },
           { timeout: CALL_TIMEOUT_MS },
         );
       const mark = (await journal()).length;
@@ -104,11 +114,15 @@ export function writeScenario(id, { arm, named, mayHaveStored = false, verify })
 
       s.step("what the caller was told, and what is stored");
       const afterFault = (await journal()).slice(mark);
-      const stored = async () => (await versionsOf(s, bucket, KEY)).versions.filter((v) => v.Key === KEY);
+      const stored = async () =>
+        (await versionsOf(s, bucket, KEY)).versions.filter((v) => v.Key === KEY);
       const intact = async (versions) => {
         for (const v of versions) {
           const got = await readBytes(s, bucket, KEY, { versionId: v.VersionId });
-          check(got.bytes.equals(data), `version ${v.VersionId} of the object does not carry the bytes sent`);
+          check(
+            got.bytes.equals(data),
+            `version ${v.VersionId} of the object does not carry the bytes sent`,
+          );
         }
       };
       const first = await stored();
@@ -116,10 +130,18 @@ export function writeScenario(id, { arm, named, mayHaveStored = false, verify })
       if (outcome.ok) {
         check(first.length >= 1, "the write was reported done, but no object is stored");
       } else {
-        if (named) check(named.test(outcome.error), `the failure does not name the fault (${named}): ${outcome.error.slice(0, 160)}`);
+        if (named)
+          check(
+            named.test(outcome.error),
+            `the failure does not name the fault (${named}): ${outcome.error.slice(0, 160)}`,
+          );
         if (!mayHaveStored) eq("versions stored after a failed write", 0, first.length);
       }
-      eq("versions stored, against the s3:PutObject the simulator answered 200", answered200, first.length);
+      eq(
+        "versions stored, against the s3:PutObject the simulator answered 200",
+        answered200,
+        first.length,
+      );
       await intact(first);
       verify?.({ outcome, elapsed, entries: afterFault });
 
@@ -132,7 +154,10 @@ export function writeScenario(id, { arm, named, mayHaveStored = false, verify })
       const all = await stored();
       check(all.length >= first.length + 1, "the repeated write stored no new version");
       const newest = await readBytes(s, bucket, KEY);
-      check(newest.bytes.equals(data), "the newest version after the repeated write does not carry the bytes sent");
+      check(
+        newest.bytes.equals(data),
+        "the newest version after the repeated write does not carry the bytes sent",
+      );
       await intact(all);
     },
     { level: "resilience" },

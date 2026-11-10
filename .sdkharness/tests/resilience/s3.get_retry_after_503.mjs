@@ -9,6 +9,7 @@ import { armFault, atLeast, readScenario } from "../lib/s3-resilience.mjs";
 
 await readScenario("s3.get_retry_after_503", {
   status: 503,
-  arm: () => armFault({ on: "s3:GetObject", status: 503, code: "service_unavailable", retryAfter: 2 }),
+  arm: () =>
+    armFault({ on: "s3:GetObject", status: 503, code: "service_unavailable", retryAfter: 2 }),
   verify: (_entries, elapsed) => atLeast("Retry-After: 2 on a 503", 2000, elapsed),
 });
