@@ -44,8 +44,8 @@ export async function startServer(clientName, extraEnv = {}) {
 }
 
 /** Call a tool; a tool error throws with the server's text, a JSON body is parsed. */
-export async function call(client, name, args) {
-  const out = await client.callTool({ name, arguments: args });
+export async function call(client, name, args, options) {
+  const out = await client.callTool({ name, arguments: args }, options);
   const text = out.content.map((part) => part.text ?? "").join("");
   if (out.isError) throw new Error(`${name}: ${text}`);
   try {
@@ -83,7 +83,7 @@ export async function runScenario(id, scenario, options = {}) {
     s.step = (name) => {
       s.current = name;
     };
-    s.call = (name, args) => call(client, name, args);
+    s.call = (name, args, options) => call(client, name, args, options);
     s.refused = (name, args) => callRefused(client, name, args);
     s.cleanup = (fn) => {
       s.cleanups.push(fn);
