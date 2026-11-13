@@ -26,8 +26,8 @@ describe("MCP SDK and protocol contract", () => {
     expect(lock.packages["node_modules/@modelcontextprotocol/client"]?.version).toBe(clientVersion);
     expect(pkg).not.toHaveProperty("overrides");
     const workspace = readFileSync(join(root, "pnpm-workspace.yaml"), "utf8");
-    expect(workspace).toContain("'@hono/node-server': 2.1.3");
-    expect(lock.packages["node_modules/@hono/node-server"]?.version).toBe("2.1.3");
+    expect(workspace).toContain("'@hono/node-server': 2.1.7");
+    expect(lock.packages["node_modules/@hono/node-server"]?.version).toBe("2.1.7");
     expect(lock.packages["node_modules/@hono/node-server"]?.dev).toBe(true);
     expect(pkg.dependencies).not.toHaveProperty("@modelcontextprotocol/sdk");
     expect(pkg.devDependencies).not.toHaveProperty("@modelcontextprotocol/sdk");

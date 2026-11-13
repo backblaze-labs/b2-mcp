@@ -77,12 +77,12 @@ describe("security dependency policy", () => {
     expect(lock.packages["node_modules/@modelcontextprotocol/node"]?.dev).toBe(true);
     expect(pkg).not.toHaveProperty("overrides");
     expect(readFileSync(join(root, "pnpm-workspace.yaml"), "utf8")).toContain(
-      "'@hono/node-server': 2.1.3",
+      "'@hono/node-server': 2.1.7",
     );
     expect(readFileSync(join(root, "pnpm-workspace.yaml"), "utf8")).toContain(
       "'@typescript-eslint/visitor-keys>eslint-visitor-keys': 4.2.1",
     );
-    expect(lock.packages["node_modules/@hono/node-server"]?.version).toBe("2.1.3");
+    expect(lock.packages["node_modules/@hono/node-server"]?.version).toBe("2.1.7");
     expect(lock.packages["node_modules/@hono/node-server"]?.dev).toBe(true);
     const auditPolicy = JSON.parse(readFileSync(join(root, "audit-policy.json"), "utf8")) as {
       allowedAdvisories: Array<{ name: string; source: number }>;
