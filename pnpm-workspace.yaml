@@ -34,7 +34,7 @@ overrides:
   'external-editor>tmp': ^0.2.7
   '@istanbuljs/load-nyc-config>js-yaml': 3.15.1
   '@typescript-eslint/visitor-keys>eslint-visitor-keys': 4.2.1
-  '@hono/node-server': 2.1.3
+  '@hono/node-server': 2.1.7
   '@types/node': 22.20.4
   '@vercel/backends>path-to-regexp': 8.4.0
   # Dev-only transitive dep via @vercel/blob; force the patched build off the
@@ -69,7 +69,7 @@ overrides:
   qs: '>=6.16.1'
   # Dev-only mcpb dependency; force the patched build off the RSA PKCS#1 v1.5
   # signature verification advisory (GHSA-86w9-cpqp-85rv, fixed 1.4.1).
-  node-forge: '>=1.4.1 <2'
+  node-forge: '>=1.4.3 <2'
   # Dev-only transitive dep; force the patched build off GHSA-2vr4-cq9g-pvrc
   # (ip-address ReDoS/parse advisory affecting >=10.2.0 <=10.5.0, fixed 10.5.1).
   ip-address: '>=10.5.1 <11'
@@ -102,7 +102,7 @@ overrides:
   proxy-addr: '>=2.0.8 <3'
   source-map-js: '>=1.2.2 <2'
   vite: '>=8.2.4 <9'
-  hono: '>=4.13.11 <5'
+  hono: '>=4.13.16 <5'
   '@modelcontextprotocol/server': 2.4.0
   '@modelcontextprotocol/client': 2.4.0
   '@modelcontextprotocol/core': 2.4.0

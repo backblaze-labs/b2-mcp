@@ -126,6 +126,20 @@ function parseYaml(text) {
       throw new Error(`Unsupported YAML complex key or merge at line ${index + 1}: ${trimmed}`);
     }
     const rawValue = trimmed.slice(separator + 1).trim();
+    // pnpm writes long `deprecated` notices as block scalars. The notice is
+    // informational only, so read it as text; block scalars stay unsupported
+    // for every other key.
+    if (key === "deprecated" && /^\|[-+]?$/.test(rawValue)) {
+      const text = [];
+      while (index + 1 < lines.length) {
+        const next = lines[index + 1];
+        if (next.trim() && next.match(/^ */)[0].length <= indent) break;
+        text.push(next.trim());
+        index += 1;
+      }
+      parent[key] = text.join("\n").trim();
+      continue;
+    }
     if (!rawValue) {
       const child = nextContainer(lines, index, indent);
       parent[key] = child;

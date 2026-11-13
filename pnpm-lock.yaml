@@ -8,7 +8,7 @@ overrides:
   external-editor>tmp: ^0.2.7
   '@istanbuljs/load-nyc-config>js-yaml': 3.15.1
   '@typescript-eslint/visitor-keys>eslint-visitor-keys': 4.2.1
-  '@hono/node-server': 2.1.3
+  '@hono/node-server': 2.1.7
   '@types/node': 22.20.4
   '@vercel/backends>path-to-regexp': 8.4.0
   '@vercel/blob>undici': '>=6.29.1 <7'
@@ -34,7 +34,7 @@ overrides:
   nanoid: 3.3.18
   fast-uri: '>=3.1.9 <4'
   qs: '>=6.16.1'
-  node-forge: '>=1.4.1 <2'
+  node-forge: '>=1.4.3 <2'
   ip-address: '>=10.5.1 <11'
   miniflare>sharp: '>=0.35.5'
   undici@7: '>=7.30.1 <8'
@@ -45,7 +45,7 @@ overrides:
   proxy-addr: '>=2.0.8 <3'
   source-map-js: '>=1.2.2 <2'
   vite: '>=8.2.4 <9'
-  hono: '>=4.13.11 <5'
+  hono: '>=4.13.16 <5'
   '@modelcontextprotocol/server': 2.4.0
   '@modelcontextprotocol/client': 2.4.0
   '@modelcontextprotocol/core': 2.4.0
@@ -851,11 +851,11 @@ packages:
   '@gerrit0/mini-shiki@3.23.0':
     resolution: {integrity: sha512-bEMORlG0cqdjVyCEuU0cDQbORWX+kYCeo0kV1lbxF5bt4r7SID2l9bqsxJEM0zndaxpOUT7riCyIVEuqq/Ynxg==}
 
-  '@hono/node-server@2.1.3':
-    resolution: {integrity: sha512-TA//nWMqPhbfdfneACk6t5a9eqbS9lABEPyKn0/xZTah3H3U2XaVg85rJFl0/Fyit0I552YDHgXGVSf3GwqbUw==}
+  '@hono/node-server@2.1.7':
+    resolution: {integrity: sha512-Wr0E6S+v2Bw9FkpGNP5BQ5QbJvclUa06UVehd65WFZe6XeJwbrKQQ5wPDevc0IC+QyzbO7v3Llh5uo45IZcSnA==}
     engines: {node: '>=20'}
     peerDependencies:
-      hono: '>=4.13.11 <5'
+      hono: '>=4.13.16 <5'
 
   '@humanfs/core@0.19.2':
     resolution: {integrity: sha512-UhXNm+CFMWcbChXywFwkmhqjs3PRCmcSa/hfBgLIb7oQ5HNb1wS0icWsGtSAUNgefHeI+eBrA8I1fxmbHsGdvA==}
@@ -1853,7 +1853,9 @@ packages:
   '@smithy/core@3.37.0':
     resolution: {integrity: sha512-97imTcCyiPd8k0e9+ts/Sp0W65Dn9Ti357J7M09Ov4tI8Q1JDJVFSoAJtjEVKqfHEr3Pdo2jfolqKCaaiszH0g==}
     engines: {node: '>=18.0.0'}
-    deprecated: Deprecated due to a bug in custom logger data redaction. See https://github.com/aws/aws-sdk-js-v3/issues/8393.
+    deprecated: |-
+      Deprecated due to a bug in custom logger data redaction. Upgrade to the latest version. If you used a custom logger with this
+        version, review your logs and rotate any credentials or other secrets. See https://github.com/aws/aws-sdk-js-v3/issues/8393.
 
   '@smithy/credential-provider-imds@4.5.2':
     resolution: {integrity: sha512-A9uSdn72ozbRUSit0eib0TW7nXuNPlaeM0zcGkJ+nE6tFcSDbnmtwoxbTCFBukVQcszDAyvsd7+rTduPTXpygg==}
@@ -2993,8 +2995,8 @@ packages:
     resolution: {integrity: sha512-T2UbfbBEF32wiepXIsMlTW9+dDYC6wMh/t/vYA4tuOMKqWz/n3vr1NFSxQiyP+zk2mXsoMA/i/7qV6LKut1t1A==}
     engines: {node: '>= 0.4'}
 
-  hono@4.13.14:
-    resolution: {integrity: sha512-yhRLQ21U6qa9Hsu2N7Qcbh8tE+WKEcoErjIo56LeSGiGXGp9sA7UpE86Ui9uexb61KakiGwuHMn2QdV7w6i6kQ==}
+  hono@4.13.18:
+    resolution: {integrity: sha512-H9q/E1XizaWstJxUW881dmLxEj+t/TrGGnyxINkm4+sK0qUwsMtFdo2BWI9Vs3cIS19MU6b6iCijoUoEf4f3DA==}
     engines: {node: '>=16.9.0'}
 
   html-entities@2.6.0:
@@ -3431,8 +3433,8 @@ packages:
       encoding:
         optional: true
 
-  node-forge@1.4.1:
-    resolution: {integrity: sha512-w5/MfWaeMrpR/5ba6fZyAUTLSuE6aYz7H/3cYrqwZEmf5eQS3IaaLgJt4MBv7HglGFWmV22K8h4U18RJQmw/ow==}
+  node-forge@1.4.3:
+    resolution: {integrity: sha512-P6wzfh6t70avmV8FrVEAd/36sOPJQ+hkaJVX1Laap9J/77m7M0eyozDvc8SwnDf4P7MP94gwbAAo0rg3YVXT+g==}
     engines: {node: '>= 6.13.0'}
 
   node-gyp-build@4.8.4:
@@ -4328,7 +4330,7 @@ snapshots:
       fflate: 0.8.3
       galactus: 1.0.0(supports-color@10.2.2)
       ignore: 7.0.6
-      node-forge: 1.4.1
+      node-forge: 1.4.3
       pretty-bytes: 5.6.0
       zod: 3.25.76
       zod-to-json-schema: 3.25.2(zod@3.25.76)
@@ -4968,9 +4970,9 @@ snapshots:
       '@shikijs/types': 3.23.0
       '@shikijs/vscode-textmate': 10.0.2
 
-  '@hono/node-server@2.1.3(hono@4.13.14)':
+  '@hono/node-server@2.1.7(hono@4.13.18)':
     dependencies:
-      hono: 4.13.14
+      hono: 4.13.18
 
   '@humanfs/core@0.19.2':
     dependencies:
@@ -5262,7 +5264,7 @@ snapshots:
 
   '@modelcontextprotocol/inspector@2.12.0(@types/node@22.20.4)(esbuild@0.28.1)(tsx@4.23.15)':
     dependencies:
-      '@hono/node-server': 2.1.3(hono@4.13.14)
+      '@hono/node-server': 2.1.7(hono@4.13.18)
       '@modelcontextprotocol/client': 2.4.0
       '@modelcontextprotocol/core': 2.4.0
       '@modelcontextprotocol/ext-apps': 2.0.3(@modelcontextprotocol/client@2.4.0)(@modelcontextprotocol/core@2.4.0)(@modelcontextprotocol/server@2.4.0)(react@19.2.8)(zod@4.6.7)
@@ -5274,7 +5276,7 @@ snapshots:
       atomically: 2.1.1
       chokidar: 4.0.3
       commander: 15.0.0
-      hono: 4.13.14
+      hono: 4.13.18
       ink: 6.8.0(react@19.2.8)
       open: 11.0.4
       pino: 9.14.0
@@ -5306,9 +5308,9 @@ snapshots:
 
   '@modelcontextprotocol/node@2.1.2(@modelcontextprotocol/server@2.4.0)':
     dependencies:
-      '@hono/node-server': 2.1.3(hono@4.13.14)
+      '@hono/node-server': 2.1.7(hono@4.13.18)
       '@modelcontextprotocol/server': 2.4.0
-      hono: 4.13.14
+      hono: 4.13.18
 
   '@modelcontextprotocol/server@2.4.0':
     dependencies:
@@ -7168,7 +7170,7 @@ snapshots:
     dependencies:
       function-bind: 1.1.2
 
-  hono@4.13.14: {}
+  hono@4.13.18: {}
 
   html-entities@2.6.0: {}
 
@@ -7535,7 +7537,7 @@ snapshots:
     dependencies:
       whatwg-url: 5.0.0
 
-  node-forge@1.4.1: {}
+  node-forge@1.4.3: {}
 
   node-gyp-build@4.8.4: {}
 
