@@ -97,32 +97,41 @@ describe("CI workflow policy", () => {
     expect(ci).toContain("cancel-in-progress: ${{ github.event_name == 'pull_request' }}");
   });
 
-  it("delegates isolated execution and reporting to an immutable QK workflow", () => {
+  it("keeps public QK assessment read-only and reporting in a separate trusted job", () => {
     const qualityKeeperJob = workflowJobBlock(qualityKeeper, "quality-keeper");
     expect(qualityKeeper).toContain("pull_request:");
     expect(qualityKeeperJob).toBeTruthy();
-    expect(qualityKeeperJob).toContain(
-      "uses: backblaze-labs/quality-keeper/.github/workflows/quality-keeper-private-reusable.yml@18428a5576c827e730aae4fa3ea63b7597978973",
-    );
-    // This caller executes no steps. QK owns a contents-read execute job and a
-    // separate report job; only the latter receives the explicitly named key.
-    expect(qualityKeeperJob).not.toContain("steps:");
-    expect(qualityKeeperJob).not.toContain("actions/checkout");
+    expect(qualityKeeperJob).toContain("--no-execute");
+    expect(qualityKeeperJob).toContain("fetch-depth: 0");
+    expect(qualityKeeperJob).toContain("persist-credentials: false");
     expect(qualityKeeperJob).toContain(
       "github.event.pull_request.head.repo.full_name == github.repository",
     );
     expect(qualityKeeperJob).toContain("github.event.pull_request.draft == false");
     expect(qualityKeeperJob).toContain("github.event.pull_request.user.login != 'dependabot[bot]'");
-    expect(qualityKeeperJob).toContain("QK_APP_PRIVATE_KEY: ${{ secrets.QK_APP_PRIVATE_KEY }}");
-    expect(qualityKeeper).not.toContain("QK_INSTALL_TOKEN");
+    expect(qualityKeeperJob).not.toContain("QK_APP_PRIVATE_KEY");
+    expect(qualityKeeperJob).toContain("QK_INSTALL_TOKEN");
     expect(qualityKeeper).not.toContain("secrets: inherit");
     expect(qualityKeeper).not.toMatch(/^\s*pull_request_target:/m);
-    expect(qualityKeeperJob).toContain("include_expensive: false");
+    expect(qualityKeeperJob).not.toContain("--include-expensive");
+    expect(qualityKeeper).not.toContain("quality-keeper-private-reusable.yml");
 
     const permissions = yamlMappingForKey(qualityKeeperJob ?? "", "permissions");
     expect(permissions).toMatchObject({ contents: "read" });
-    expect(permissions).toMatchObject({ "pull-requests": "write", actions: "read" });
+    expect(permissions).not.toHaveProperty("pull-requests");
+    expect(permissions).not.toHaveProperty("actions");
     expect(permissions).not.toHaveProperty("statuses");
+    const report = workflowJobBlock(qualityKeeper, "report") ?? "";
+    expect(report).toContain("needs: quality-keeper");
+    expect(report).toContain("needs.quality-keeper.outputs.assessed == 'true'");
+    expect(report).not.toContain("actions/checkout");
+    expect(report).toContain("QK_APP_PRIVATE_KEY");
+    expect(report).toContain('--expect-repo "$EXPECTED_REPO"');
+    expect(report).toContain('--expect-author "$EXPECTED_AUTHOR"');
+    expect(yamlMappingForKey(report, "permissions")).toMatchObject({
+      "pull-requests": "write",
+      actions: "read",
+    });
   });
 
   it("exposes stable required check names", () => {
