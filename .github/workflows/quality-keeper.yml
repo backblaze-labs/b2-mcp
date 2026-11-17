@@ -17,7 +17,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  QK_SOURCE_SHA: 7efaafad712b797b51a0d8732f65af252b014c08
+  QK_SOURCE_SHA: da3df2255df129a292616e65417d333946f4cd6f
   QK_APP_CLIENT_ID: Iv23li5rGH3xKaNknGmc
 
 jobs:
@@ -35,14 +35,13 @@ jobs:
       assessed: ${{ steps.assess.outcome == 'success' }}
     permissions:
       contents: read
-    env:
-      OUT_DIR: ${{ runner.temp }}/qk-public-run
     steps:
       - name: Check installation readiness
         id: preflight
         env:
           QK_INSTALL_TOKEN: ${{ secrets.QK_INSTALL_TOKEN }}
         run: |
+          OUT_DIR="$RUNNER_TEMP/qk-public-run"
           mkdir -p "$OUT_DIR"
           if [ -z "$QK_INSTALL_TOKEN" ]; then
             echo 'ready=false' >> "$GITHUB_OUTPUT"
@@ -54,6 +53,7 @@ jobs:
           fi
       - name: Set up Python
         if: steps.preflight.outputs.ready == 'true'
+        # actions/setup-python v7.1.0, reviewed 2026-11-17.
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
@@ -64,6 +64,7 @@ jobs:
         run: python -m pip install --quiet "git+https://x-access-token:${QK_INSTALL_TOKEN}@github.com/backblaze-labs/quality-keeper.git@${QK_SOURCE_SHA}"
       - name: Checkout assessed revision
         if: steps.preflight.outputs.ready == 'true'
+        # actions/checkout v7.0.1, reviewed 2026-11-17.
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha }}
@@ -77,12 +78,14 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
+          OUT_DIR="$RUNNER_TEMP/qk-public-run"
           quality-keeper local-run --repo "$GITHUB_WORKSPACE" \
             --full-name "$GITHUB_REPOSITORY" --base "$BASE_SHA" --head "$HEAD_SHA" \
             --pr-number "$PR_NUMBER" --out "$OUT_DIR" --no-execute
           cat "$OUT_DIR/operator-summary.md" >> "$GITHUB_STEP_SUMMARY"
       - name: Upload assessment or setup-blocked evidence
         if: always()
+        # actions/upload-artifact v7.0.2, reviewed 2026-11-17.
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: quality-run
@@ -99,6 +102,7 @@ jobs:
       actions: read
     steps:
       - name: Set up Python
+        # actions/setup-python v7.1.0, reviewed 2026-11-17.
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
@@ -107,12 +111,14 @@ jobs:
           QK_INSTALL_TOKEN: ${{ secrets.QK_INSTALL_TOKEN }}
         run: python -m pip install --quiet "git+https://x-access-token:${QK_INSTALL_TOKEN}@github.com/backblaze-labs/quality-keeper.git@${QK_SOURCE_SHA}"
       - name: Download inert proof artifacts
+        # actions/download-artifact v8.0.2, reviewed 2026-11-17.
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: quality-run
           path: artifacts
       - name: Mint QK reporting token
         id: app-token
+        # actions/create-github-app-token v3.3.0, reviewed 2026-11-17.
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           client-id: ${{ env.QK_APP_CLIENT_ID }}
