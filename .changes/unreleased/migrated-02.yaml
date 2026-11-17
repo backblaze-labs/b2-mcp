@@ -1,0 +1,5 @@
+kind: Added
+body: |-
+  `docs/TEST-COVERAGE-MAP.md`: snapshot map of the existing tests to a shared
+    list of 38 B2 capabilities, with known gaps. (#469)
+time: 2026-11-17T00:00:01Z

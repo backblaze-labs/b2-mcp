@@ -1,0 +1,4 @@
+# SSH signing key used by the verified v0.2.2 release tag (@goanpeca).
+goanpeca@gmail.com namespaces="git" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJQXyK0AY+M8b35OitIfDt6X+WMHvginld4hZiPKX4Cv
+# Historical signing key used by the verified v0.1.0 and v0.1.1 tags (@goanpeca).
+goanpeca@gmail.com namespaces="git" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBNLjV/RR1Hm4upwirHzwobYfSD7d/2xPeszPy9Yklwd

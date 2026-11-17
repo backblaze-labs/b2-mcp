@@ -79,6 +79,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: refs/heads/ci-green
+          fetch-depth: 0
           persist-credentials: false
       # pnpm/action-setup v6.1.0, reviewed 2026-09-13.
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
@@ -109,6 +110,18 @@ jobs:
             --remote "${PUBLISH_REMOTE}" \
             --wait-for-ci-green-timeout-ms 1200000 \
             --wait-for-ci-green-interval-ms 30000
+      - name: Verify release tag signature
+        env:
+          PUBLISH_TAG: ${{ steps.request.outputs.tag }}
+          EXPECTED_RELEASE_SHA: ${{ steps.ref.outputs.checkout_sha }}
+        run: |
+          set -euo pipefail
+          # Use the signer allowlist from the trusted ci-green checkout, before
+          # any candidate tag code executes. Existing release tags use SSH.
+          git -c gpg.format=ssh \
+            -c gpg.ssh.allowedSignersFile=.github/release-signers \
+            verify-tag "${PUBLISH_TAG}"
+          test "$(git rev-parse "refs/tags/${PUBLISH_TAG}^{commit}")" = "${EXPECTED_RELEASE_SHA}"
       # actions/checkout v7, reviewed 2026-08-25.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
