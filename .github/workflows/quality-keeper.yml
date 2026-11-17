@@ -4,12 +4,9 @@
 # workflows as the authoritative product gates; Quality Keeper is advisory and
 # must not block required CI.
 #
-# Trust boundary:
-# - This pull_request workflow is analysis-only and passes no repository secrets.
-# - It does not call the private reusable workflow because that workflow's report
-#   job requires PR write permission and an app private key.
-# - A future trusted workflow_run reporter must consume inert artifacts and never
-#   check out or run PR head code before minting any reporting credential.
+# QK #402: the pinned private workflow owns the two-job trust boundary.
+# Its execute job has contents:read and no App key. A separate report job
+# consumes inert artifacts and is the only job that receives the App key.
 
 name: Quality Keeper
 
@@ -20,26 +17,22 @@ on:
 # No pull_request_target: fork, draft, and unknown-head code is never trusted.
 permissions: {}
 
-# Advisory PR analysis: cancel superseded runs on the same PR.
-concurrency:
-  group: quality-keeper-${{ github.repository }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
-
 jobs:
   quality-keeper:
     if: >-
       ${{
         github.event.pull_request.user.login != 'dependabot[bot]' &&
+        github.actor != 'dependabot[bot]' &&
         github.event.pull_request.head.repo.full_name == github.repository &&
         github.event.pull_request.draft == false
       }}
-    name: Quality Keeper advisory guard
-    runs-on: ubuntu-latest
+    uses: backblaze-labs/quality-keeper/.github/workflows/quality-keeper-private-reusable.yml@18428a5576c827e730aae4fa3ea63b7597978973
+    with:
+      advisory: true
+      include_expensive: false
     permissions:
       contents: read
-    steps:
-      - name: Keep PR Quality Keeper unprivileged
-        shell: bash
-        run: |
-          echo "Quality Keeper reporting is disabled on pull_request."
-          echo "A trusted workflow_run reporter must consume inert artifacts only."
+      pull-requests: write
+      actions: read
+    secrets:
+      QK_APP_PRIVATE_KEY: ${{ secrets.QK_APP_PRIVATE_KEY }}

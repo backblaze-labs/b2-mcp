@@ -97,24 +97,31 @@ describe("CI workflow policy", () => {
     expect(ci).toContain("cancel-in-progress: ${{ github.event_name == 'pull_request' }}");
   });
 
-  it("keeps Quality Keeper pull_request execution unprivileged", () => {
+  it("delegates isolated execution and reporting to an immutable QK workflow", () => {
     const qualityKeeperJob = workflowJobBlock(qualityKeeper, "quality-keeper");
     expect(qualityKeeper).toContain("pull_request:");
-    expect(qualityKeeper).toContain(
-      "A future trusted workflow_run reporter must consume inert artifacts",
-    );
     expect(qualityKeeperJob).toBeTruthy();
-    expect(qualityKeeperJob).toContain("runs-on: ubuntu-latest");
-    expect(qualityKeeperJob).not.toContain("backblaze-labs/quality-keeper/");
+    expect(qualityKeeperJob).toContain(
+      "uses: backblaze-labs/quality-keeper/.github/workflows/quality-keeper-private-reusable.yml@18428a5576c827e730aae4fa3ea63b7597978973",
+    );
+    // This caller executes no steps. QK owns a contents-read execute job and a
+    // separate report job; only the latter receives the explicitly named key.
+    expect(qualityKeeperJob).not.toContain("steps:");
     expect(qualityKeeperJob).not.toContain("actions/checkout");
-    expect(qualityKeeperJob).not.toContain("github.event.pull_request.head.sha");
-    expect(qualityKeeperJob).not.toContain("QK_APP_PRIVATE_KEY");
-    expect(qualityKeeperJob).not.toContain("secrets:");
+    expect(qualityKeeperJob).toContain(
+      "github.event.pull_request.head.repo.full_name == github.repository",
+    );
+    expect(qualityKeeperJob).toContain("github.event.pull_request.draft == false");
+    expect(qualityKeeperJob).toContain("github.event.pull_request.user.login != 'dependabot[bot]'");
+    expect(qualityKeeperJob).toContain("QK_APP_PRIVATE_KEY: ${{ secrets.QK_APP_PRIVATE_KEY }}");
+    expect(qualityKeeper).not.toContain("QK_INSTALL_TOKEN");
+    expect(qualityKeeper).not.toContain("secrets: inherit");
+    expect(qualityKeeper).not.toMatch(/^\s*pull_request_target:/m);
+    expect(qualityKeeperJob).toContain("include_expensive: false");
 
     const permissions = yamlMappingForKey(qualityKeeperJob ?? "", "permissions");
     expect(permissions).toMatchObject({ contents: "read" });
-    expect(permissions).not.toHaveProperty("pull-requests");
-    expect(permissions).not.toHaveProperty("actions");
+    expect(permissions).toMatchObject({ "pull-requests": "write", actions: "read" });
     expect(permissions).not.toHaveProperty("statuses");
   });
 
