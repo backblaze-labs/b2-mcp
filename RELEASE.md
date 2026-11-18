@@ -232,7 +232,7 @@ exists. For the first public package only:
    and binds it to the resolved release commit before candidate code executes:
 
    ```bash
-   git add -A .changes CHANGELOG.md package.json server.json lhm.plugin.json mcpb/manifest.json
+   git add -A .changes CHANGELOG.md package.json server.json lhm.plugin.json mcpb/manifest.json docs/DEPLOY.md docs/references/deployment
    git commit -m "chore: release x.y.z"
    git -c gpg.format=ssh -c user.signingkey="${RELEASE_SIGNING_KEY:?set RELEASE_SIGNING_KEY}" tag -s vX.Y.Z -m vX.Y.Z
    git -c gpg.format=ssh -c gpg.ssh.allowedSignersFile=.github/release-signers verify-tag vX.Y.Z

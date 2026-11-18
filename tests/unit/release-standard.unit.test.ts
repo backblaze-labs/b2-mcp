@@ -23,6 +23,50 @@ function changeEntries(markdown: string): ChangeEntry[] {
 }
 
 describe("release preparation standard", () => {
+  it("stages the refreshed deployment baselines in the release commit", () => {
+    const release = readFileSync(join(root, "RELEASE.md"), "utf8");
+    const command = release.match(/^\s*git add -A .*$/m)?.[0] ?? "";
+    expect(command, "documented release staging command").not.toBe("");
+    const fixture = mkdtempSync(join(tmpdir(), "b2-mcp-release-stage-"));
+    try {
+      const init = spawnSync("git", ["init", "-q"], { cwd: fixture, encoding: "utf8" });
+      expect(init.status, init.stderr).toBe(0);
+      mkdirSync(join(fixture, ".changes"));
+      mkdirSync(join(fixture, "docs/references/deployment"), { recursive: true });
+      for (const file of [
+        ".changes/next.md",
+        "CHANGELOG.md",
+        "package.json",
+        "server.json",
+        "lhm.plugin.json",
+        "mcpb/manifest.json",
+        "docs/DEPLOY.md",
+      ]) {
+        if (file.startsWith("mcpb/")) mkdirSync(join(fixture, "mcpb"), { recursive: true });
+        writeFileSync(join(fixture, file), "release update\n");
+      }
+      const guides = readdirSync(join(root, "docs/references/deployment")).filter((name) =>
+        name.endsWith(".md"),
+      );
+      expect(guides.length).toBeGreaterThan(0);
+      for (const guide of guides) {
+        writeFileSync(join(fixture, "docs/references/deployment", guide), "new baseline\n");
+      }
+      const staged = spawnSync("bash", ["-c", command], { cwd: fixture, encoding: "utf8" });
+      expect(staged.status, staged.stderr).toBe(0);
+      const result = spawnSync("git", ["diff", "--cached", "--name-only"], {
+        cwd: fixture,
+        encoding: "utf8",
+      });
+      expect(result.status, result.stderr).toBe(0);
+      const names = result.stdout.trim().split("\n");
+      expect(names).toContain("docs/DEPLOY.md");
+      for (const guide of guides) expect(names).toContain(`docs/references/deployment/${guide}`);
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
+  });
+
   it("signs release tags with the reviewed SSH key", () => {
     const release = readFileSync(join(root, "RELEASE.md"), "utf8");
     const command = release.match(/^\s*git -c gpg\.format=ssh .* tag -s vX\.Y\.Z .*$/m)?.[0] ?? "";
