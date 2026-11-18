@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { spawnSync } from "child_process";
@@ -7,7 +7,40 @@ import { parse } from "yaml";
 const root = join(__dirname, "../..");
 const workflow = parse(readFileSync(join(root, ".github/workflows/publish.yml"), "utf8"));
 
+type ChangeEntry = { kind: string; body: string };
+
+function changeEntries(markdown: string): ChangeEntry[] {
+  const entries: ChangeEntry[] = [];
+  let kind = "";
+  for (const line of markdown.split("\n")) {
+    if (line.startsWith("### ")) kind = line.slice(4);
+    else if (line.startsWith("- ")) entries.push({ kind, body: line.slice(2) });
+    else if (line.startsWith("  ") && entries.length > 0) {
+      entries[entries.length - 1].body += `\n${line}`;
+    }
+  }
+  return entries;
+}
+
 describe("release preparation standard", () => {
+  it("previews the explicitly selected version before the npm bump", () => {
+    const release = readFileSync(join(root, "RELEASE.md"), "utf8");
+    const preview = release.match(/^\s*changie batch .*--dry-run.*$/m)?.[0] ?? "";
+    expect(preview, "documented standalone Changie preview command").not.toBe("");
+
+    const result = spawnSync("bash", ["-c", `changie() { printf '%s\\n' "$@"; }; ${preview}`], {
+      encoding: "utf8",
+      env: { ...process.env, NEXT_VERSION: "1.2.3" },
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout.trim().split("\n")).toEqual([
+      "batch",
+      "v1.2.3",
+      "--dry-run",
+      "--allow-no-changes=false",
+    ]);
+  });
+
   it("uses Changie fragments without changing npm version selection", () => {
     const config = parse(readFileSync(join(root, ".changie.yaml"), "utf8"));
     const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
@@ -27,6 +60,50 @@ describe("release preparation standard", () => {
     expect(config.replacements ?? []).toEqual([]);
     expect(pkg.scripts.version).not.toContain("cut-changelog");
     expect(pkg.scripts.version).toContain("scripts/update-server-json-version.mjs");
+  });
+
+  it("preserves each archived release and pending entry from the pre-Changie changelog", () => {
+    // Snapshot of CHANGELOG.md from the parent of the Changie migration, so the
+    // comparison works in shallow checkouts and does not depend on Git history.
+    const original = readFileSync(
+      join(root, "tests/fixtures/release-standard/changelog-before-changie.md"),
+      "utf8",
+    );
+    const headings = [...original.matchAll(/^## \[([\d.]+)\] - .+$/gm)];
+    expect(headings).toHaveLength(6);
+    const footers = original.search(/^\[Unreleased\]: /m);
+    expect(footers).toBeGreaterThan(0);
+
+    for (const [index, heading] of headings.entries()) {
+      const version = heading[1];
+      const end = headings[index + 1]?.index ?? footers;
+      const expected = original.slice(heading.index, end).trimEnd();
+      const archived = readFileSync(join(root, `.changes/v${version}.md`), "utf8")
+        .replace(/\n\[[\d.]+\]: [^\n]+\s*$/, "")
+        .trimEnd();
+      expect(archived, `archived release v${version}`).toBe(expected);
+    }
+
+    const pending = changeEntries(
+      original.slice(original.indexOf("## [Unreleased]"), headings[0].index),
+    );
+    expect(pending).toHaveLength(11);
+    const fragmentDir = join(root, ".changes/unreleased");
+    const fragments: ChangeEntry[] = readdirSync(fragmentDir)
+      .filter((name) => name.endsWith(".yaml"))
+      .map((name) => parse(readFileSync(join(fragmentDir, name), "utf8")) as ChangeEntry);
+    const historical = new Set(headings.map((heading) => `v${heading[1]}.md`));
+    const laterReleases = readdirSync(join(root, ".changes"))
+      .filter((name) => /^v[\d.]+\.md$/.test(name) && !historical.has(name))
+      .flatMap((name) => changeEntries(readFileSync(join(root, ".changes", name), "utf8")));
+    for (const entry of pending) {
+      expect(
+        [...fragments, ...laterReleases].filter(
+          (candidate) => candidate.kind === entry.kind && candidate.body === entry.body,
+        ),
+        `pending ${entry.kind} entry: ${entry.body.split("\n")[0]}`,
+      ).toHaveLength(1);
+    }
   });
 
   it("requires release milestones and preserves all fourteen gate items", () => {

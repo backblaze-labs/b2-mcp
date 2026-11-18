@@ -175,9 +175,15 @@ exists. For the first public package only:
 
 1. Start from a clean, up-to-date `main`, reconcile the release milestone, and
    review the intended release fragments in `.changes/unreleased/`. Run the
-   deterministic local gate listed above. Preview the notes with
-   `changie batch patch --dry-run --allow-no-changes=false` (use the intended
-   version or bump for the preview).
+   deterministic local gate listed above. Before the npm bump, read the current
+   package version with `node -p 'require("./package.json").version'` and choose
+   the next patch, minor, or major version for this release. Set `NEXT_VERSION` to
+   that version without the `v` prefix (for example, `NEXT_VERSION=0.2.3`), then
+   preview the notes:
+
+   ```bash
+   changie batch "v${NEXT_VERSION:?set NEXT_VERSION to the intended version}" --dry-run --allow-no-changes=false
+   ```
 2. Bump the version and generate the changelog. `.npmrc` sets `ignore-scripts=true`
    (a supply-chain control that blocks dependency and project lifecycle scripts),
    so the `version` lifecycle hook does not run on its own. Bump the version, then
