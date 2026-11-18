@@ -39,6 +39,7 @@
     "dev": "tsx src/index.ts",
     "test": "pnpm run typecheck && pnpm run test:unit",
     "test:unit": "node scripts/run-vitest-layer.mjs unit",
+    "test:changie": "node --test tests/release/changie.integration.test.mjs",
     "test:reliability": "node scripts/run-vitest-layer.mjs reliability",
     "test:contract": "node scripts/run-vitest-layer.mjs contract",
     "test:protocol:modern": "node scripts/run-vitest-layer.mjs protocol-modern",

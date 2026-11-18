@@ -101,6 +101,18 @@ jobs:
           node-version: 22.23.1
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # actions/setup-go v6, reviewed 2026-11-18.
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.26.0'
+          cache: false
+      - name: Install pinned Changie
+        env:
+          GOBIN: ${{ runner.temp }}/changie-bin
+        run: |
+          go install github.com/miniscruff/changie@v1.26.0
+          echo "$GOBIN" >> "$GITHUB_PATH"
+      - run: pnpm run test:changie
       - run: pnpm run docs
       - run: pnpm run lint:docs
       - run: pnpm run spell
