@@ -47,6 +47,16 @@ test("Changie reproduces the committed changelog and preserves migrated entries"
         .trimEnd();
       assert.ok(generated.includes(expected), `archived release v${heading[1]} was altered`);
     }
+    const historicalFooters = original.match(/^\[[\d.]+\]: .+$/gm) ?? [];
+    assert.equal(historicalFooters.length, 6);
+    const generatedLines = generated.split("\n");
+    for (const footer of historicalFooters) {
+      assert.equal(
+        generatedLines.filter((line) => line === footer).length,
+        1,
+        `historical release footer was omitted or altered: ${footer}`,
+      );
+    }
 
     const pending = entries(original.slice(original.indexOf("## [Unreleased]"), headings[0].index));
     assert.equal(pending.length, 11);

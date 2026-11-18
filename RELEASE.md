@@ -223,17 +223,18 @@ exists. For the first public package only:
      across `DEPLOY.md` and all guides — the deployment-docs contract test derives
      the expected date from `DEPLOY.md` and checks the guides agree, so a mismatch
      (not a specific value) is what fails.
-3. Commit the bump and create the signed tag (`git config --get tag.gpgSign`
-   should report `true`, or pass `-s` to `git tag`). Existing release tags use
-   SSH signatures. The signing key must be reviewed in `.github/release-signers`;
-   merge key additions or rotations through normal review and let them reach
+3. Commit the bump and create the signed tag. Existing release tags use SSH
+   signatures. Set `RELEASE_SIGNING_KEY` to the path of the SSH private key whose
+   public key is reviewed in `.github/release-signers` (for example,
+   `RELEASE_SIGNING_KEY="$HOME/.ssh/release_key"`). Merge key additions or
+   rotations through normal review and let them reach
    `ci-green` before tagging. CI verifies the tag against that trusted allowlist
    and binds it to the resolved release commit before candidate code executes:
 
    ```bash
    git add -A .changes CHANGELOG.md package.json server.json lhm.plugin.json mcpb/manifest.json
    git commit -m "chore: release x.y.z"
-   git tag -s vX.Y.Z -m vX.Y.Z
+   git -c gpg.format=ssh -c user.signingkey="${RELEASE_SIGNING_KEY:?set RELEASE_SIGNING_KEY}" tag -s vX.Y.Z -m vX.Y.Z
    git -c gpg.format=ssh -c gpg.ssh.allowedSignersFile=.github/release-signers verify-tag vX.Y.Z
    ```
 4. Push the commit to `main` and let main CI finish before pushing the tag. The

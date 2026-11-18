@@ -23,6 +23,28 @@ function changeEntries(markdown: string): ChangeEntry[] {
 }
 
 describe("release preparation standard", () => {
+  it("signs release tags with the reviewed SSH key", () => {
+    const release = readFileSync(join(root, "RELEASE.md"), "utf8");
+    const command = release.match(/^\s*git -c gpg\.format=ssh .* tag -s vX\.Y\.Z .*$/m)?.[0] ?? "";
+    expect(command, "documented SSH signing command").not.toBe("");
+    const result = spawnSync("bash", ["-c", `git() { printf '%s\\n' "$@"; }; ${command}`], {
+      encoding: "utf8",
+      env: { ...process.env, RELEASE_SIGNING_KEY: "/tmp/reviewed-release-key" },
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout.trim().split("\n")).toEqual([
+      "-c",
+      "gpg.format=ssh",
+      "-c",
+      "user.signingkey=/tmp/reviewed-release-key",
+      "tag",
+      "-s",
+      "vX.Y.Z",
+      "-m",
+      "vX.Y.Z",
+    ]);
+  });
+
   it("previews the explicitly selected version before the npm bump", () => {
     const release = readFileSync(join(root, "RELEASE.md"), "utf8");
     const preview = release.match(/^\s*changie batch .*--dry-run.*$/m)?.[0] ?? "";
@@ -114,10 +136,20 @@ describe("release preparation standard", () => {
 
     expect(gate.match(/^\d+\./gm)).toHaveLength(14);
     expect(release).toContain("## Release Milestones");
-    expect(release).toContain("open issues");
-    expect(release).toContain("close the milestone");
-    expect(contribution).toContain("milestone");
-    expect(template).toContain("milestone");
+    expect(release).toContain("release owner creates or selects an open `vX.Y.Z` milestone");
+    expect(release).toContain(
+      "Every release-bound issue and PR must carry that milestone before merge",
+    );
+    expect(release).toContain("Complete them or explicitly defer them to a later milestone");
+    expect(release).toMatch(
+      /After npm, GHCR, SBOM\/signature, GitHub Release, and directory verification\s+succeed, record the tag and evidence in the release issue, close the milestone/,
+    );
+    expect(contribution).toMatch(
+      /Assign the PR and its linked issue to the intended release milestone/,
+    );
+    expect(template).toContain(
+      "PR and linked issue are assigned to the intended release milestone",
+    );
   });
 });
 
@@ -129,6 +161,7 @@ describe("release tag signature gate", () => {
         name?: string;
         run?: string;
         uses?: string;
+        env?: Record<string, unknown>;
         with?: Record<string, unknown>;
       }>;
       const signatureIndex = steps.findIndex(
@@ -140,6 +173,10 @@ describe("release tag signature gate", () => {
       ).toBeGreaterThan(0);
       const signature = steps[signatureIndex];
       expect(signature.run).toContain("verify-tag");
+      expect(signature.env).toMatchObject({
+        PUBLISH_TAG: "${{ steps.request.outputs.tag }}",
+        EXPECTED_RELEASE_SHA: "${{ steps.ref.outputs.checkout_sha }}",
+      });
       const checkouts = steps.filter((step) => step.uses?.startsWith("actions/checkout@"));
       expect(checkouts[0].with?.ref).toBe("refs/heads/ci-green");
       expect(checkouts[0].with?.["fetch-depth"]).toBe(0);
