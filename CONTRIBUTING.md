@@ -95,7 +95,25 @@ touches the corresponding contract.
   smoke. Package-install evidence is a separate required gate.
 - Add or update unit tests for any behavior change. New tools need a schema entry
   in `tests/contract/tools-schema.contract.test.ts` and at least one handler test.
-- Update `CHANGELOG.md` under the appropriate heading.
+- Assign the PR and its linked issue to the intended release milestone before
+  merge; see [Release Milestones](RELEASE.md#release-milestones).
+- Add a Changie fragment for user-visible changes (see below).
+
+## Changelog entries
+
+Install the pinned [Changie](https://changie.dev) release tool with
+`go install github.com/miniscruff/changie@v1.26.0` and put Go's binary directory
+on `PATH`. Run `changie new` at the repository root and commit the generated
+`.changes/unreleased/*.yaml` file with your change. Choose `Added`, `Changed`,
+`Deprecated`, `Removed`, `Fixed`, or `Security`; describe the user impact and
+include the issue or PR number in the body. Mark breaking changes explicitly.
+Documentation-only or test-only work may omit a fragment with a reason in the
+PR description.
+
+`CHANGELOG.md` is generated. Release owners batch fragments only when preparing
+a release, following [RELEASE.md](RELEASE.md#normal-release). Do not edit its
+pending notes by hand or select package versions through Changie; npm remains
+the version authority.
 
 ## Safety requirements for new tools
 

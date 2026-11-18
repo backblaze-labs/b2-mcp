@@ -1,0 +1,30 @@
+changesDir: .changes
+unreleasedDir: unreleased
+headerPath: header.md
+changelogPath: CHANGELOG.md
+versionExt: md
+versionFormat: '## [{{.VersionNoPrefix}}] - {{.Time.Format "2006-01-02"}}'
+kindFormat: '### {{.Kind}}'
+changeFormat: '- {{.Body}}'
+footerFormat: |-
+  [{{.VersionNoPrefix}}]: https://github.com/backblaze-labs/b2-mcp/compare/{{.PreviousVersion}}...{{.Version}}
+kinds:
+  - label: Added
+    auto: minor
+  - label: Changed
+    auto: minor
+  - label: Deprecated
+    auto: minor
+  - label: Removed
+    auto: minor
+  - label: Fixed
+    auto: patch
+  - label: Security
+    auto: patch
+newlines:
+  afterChangelogHeader: 0
+  beforeChangelogVersion: 1
+  endOfVersion: 1
+  afterKind: 1
+  beforeKind: 1
+  beforeFooterTemplate: 1

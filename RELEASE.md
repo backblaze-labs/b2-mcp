@@ -13,13 +13,34 @@ removes it.
 
 ## Changelog Discipline
 
-- Every user-visible change must update `CHANGELOG.md` under `[Unreleased]`.
+- Every user-visible change must include a Changie fragment in
+  `.changes/unreleased/`, created with `changie new`.
 - Use Keep a Changelog headings: `Added`, `Changed`, `Deprecated`, `Removed`,
   `Fixed`, and `Security`.
-- Move `[Unreleased]` entries into the released version section only when the
-  release tag is created.
+- `CHANGELOG.md` is generated with Changie. Existing released notes are kept in
+  `.changes/v*.md`; the current pending notes were migrated without rewriting
+  release history. Do not edit a shared `[Unreleased]` section.
+- Install the pinned tool with `go install github.com/miniscruff/changie@v1.26.0`
+  and make the Go binary directory available on `PATH`. Changie is needed only
+  by contributors writing fragments and owners preparing releases.
 - Do not publish a GitHub release without a matching changelog section, tag, and
   package version.
+
+## Release Milestones
+
+- The release owner creates or selects an open `vX.Y.Z` milestone for the next
+  release, records its scope and owner, and assigns the release issue to it.
+- Every release-bound issue and PR must carry that milestone before merge.
+  Contributors propose the target; the release owner confirms it. Unscheduled
+  backlog can remain outside a milestone until selected for a release.
+- Before cutting a release, review all open issues and PRs in the milestone.
+  Complete them or explicitly defer them to a later milestone, recording the
+  reason in the release issue. Do not close unfinished issues to clear the gate.
+  Reconcile merged PRs, fragments, and release notes against milestone scope.
+- After npm, GHCR, SBOM/signature, GitHub Release, and directory verification
+  succeed, record the tag and evidence in the release issue, close the milestone,
+  and create or select the next one. Do not close the milestone on tag creation
+  or when publishing has failed.
 
 ## Release Gate
 
@@ -152,25 +173,34 @@ exists. For the first public package only:
 
 ## Normal Release
 
-1. Start from a clean, up-to-date `main` and confirm the intended release content
-   is under `[Unreleased]` in `CHANGELOG.md`. That section must be non-empty; the
-   publish workflow rejects a release whose changelog section is empty. Run the
-   deterministic local gate listed above.
-2. Bump the version and promote the changelog. `.npmrc` sets `ignore-scripts=true`
+1. Start from a clean, up-to-date `main`, reconcile the release milestone, and
+   review the intended release fragments in `.changes/unreleased/`. Run the
+   deterministic local gate listed above. Before the npm bump, read the current
+   package version with `node -p 'require("./package.json").version'` and choose
+   the next patch, minor, or major version for this release. Set `NEXT_VERSION` to
+   that version without the `v` prefix (for example, `NEXT_VERSION=0.2.3`), then
+   preview the notes:
+
+   ```bash
+   changie batch "v${NEXT_VERSION:?set NEXT_VERSION to the intended version}" --dry-run --allow-no-changes=false
+   ```
+2. Bump the version and generate the changelog. `.npmrc` sets `ignore-scripts=true`
    (a supply-chain control that blocks dependency and project lifecycle scripts),
    so the `version` lifecycle hook does not run on its own. Bump the version, then
-   promote the changelog explicitly with `scripts/cut-changelog.mjs`:
+   batch that exact npm-selected version explicitly with Changie:
 
    ```bash
    npm version patch --no-git-tag-version   # or: minor, major
-   node scripts/cut-changelog.mjs
+   changie batch "v$(node -p 'require("./package.json").version')" --allow-no-changes=false
+   changie merge
    node scripts/update-server-json-version.mjs
    ```
 
    `npm version ... --no-git-tag-version` updates only `package.json` (no commit,
-   no tag). `scripts/cut-changelog.mjs` reads that bumped version, rewrites
-   `## [Unreleased]` into a dated `## [x.y.z] - YYYY-MM-DD` section, leaves a fresh
-   empty `[Unreleased]`, and updates the changelog compare links.
+   no tag). Changie batches the fragments into `.changes/vX.Y.Z.md`, removes
+   the consumed fragments, and merges the version files into `CHANGELOG.md`.
+   The generated `## [x.y.z] - YYYY-MM-DD` headings remain compatible with the
+   existing release verifier and note extractor; empty notes still fail closed.
    `scripts/update-server-json-version.mjs` then syncs the bumped
    `package.json` version into every checked-in distribution manifest: the MCP
    Registry manifest (`server.json` top-level `version` and the npm package
@@ -178,7 +208,10 @@ exists. For the first public package only:
    (`mcpb/manifest.json` `version` plus the pinned `@backblaze-labs/b2-mcp@<version>`
    npx launcher) — required, or the `verify-mcp-registry-manifest` contract test,
    the manifest version contracts, and `Publish Package` fail on a version
-   mismatch. The `version` lifecycle command stages all of these together.
+   mismatch. The `version` lifecycle command still syncs and stages those
+   manifests when invoked explicitly; it no longer prepares the changelog.
+   Stage `.changes/` and `CHANGELOG.md` along with the bumped manifests and
+   package metadata, including fragment deletions, in the release commit.
 
    - [ ] **Refresh the deployment verification baselines (manual — not scripted).**
      Update the `Package version`, `Last verified`, and `Repository baseline commit`
@@ -190,12 +223,19 @@ exists. For the first public package only:
      across `DEPLOY.md` and all guides — the deployment-docs contract test derives
      the expected date from `DEPLOY.md` and checks the guides agree, so a mismatch
      (not a specific value) is what fails.
-3. Commit the bump and create the signed tag (`git config --get tag.gpgSign`
-   should report `true`, or pass `-s` to `git tag`):
+3. Commit the bump and create the signed tag. Existing release tags use SSH
+   signatures. Set `RELEASE_SIGNING_KEY` to the path of the SSH private key whose
+   public key is reviewed in `.github/release-signers` (for example,
+   `RELEASE_SIGNING_KEY="$HOME/.ssh/release_key"`). Merge key additions or
+   rotations through normal review and let them reach
+   `ci-green` before tagging. CI verifies the tag against that trusted allowlist
+   and binds it to the resolved release commit before candidate code executes:
 
    ```bash
-   git commit -am "chore: release x.y.z"
-   git tag -s vX.Y.Z -m vX.Y.Z
+   git add -A .changes CHANGELOG.md package.json server.json lhm.plugin.json mcpb/manifest.json docs/DEPLOY.md docs/references/deployment
+   git commit -m "chore: release x.y.z"
+   git -c gpg.format=ssh -c user.signingkey="${RELEASE_SIGNING_KEY:?set RELEASE_SIGNING_KEY}" tag -s vX.Y.Z -m vX.Y.Z
+   git -c gpg.format=ssh -c gpg.ssh.allowedSignersFile=.github/release-signers verify-tag vX.Y.Z
    ```
 4. Push the commit to `main` and let main CI finish before pushing the tag. The
    publish workflow gates on a protected `ci-green` marker, so the tag's commit
@@ -280,7 +320,9 @@ marker, so outbound SDK User-Agent metadata uses `dev` there.
 
 Use npm semver prerelease tags such as `v0.2.0-rc.1`. Follow the same Normal
 Release flow with a prerelease bump: `npm version prerelease --preid rc
---no-git-tag-version`, then `node scripts/cut-changelog.mjs`, commit, sign the
+--no-git-tag-version`, then batch the exact prerelease version with
+`changie batch vX.Y.Z-rc.N --allow-no-changes=false` and `changie merge`, sync
+the distribution manifests as above, commit, sign the
 `vX.Y.Z-rc.N` tag, and push the commit before the tag. Validate install commands
 against the prerelease tag before advertising the release candidate outside the
 release issue.

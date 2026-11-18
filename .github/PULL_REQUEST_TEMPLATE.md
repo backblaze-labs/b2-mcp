@@ -16,6 +16,8 @@
 
 ## Verification
 
+- [ ] PR and linked issue are assigned to the intended release milestone
+- [ ] Changie fragment added, or the omission is explained below
 - [ ] `pnpm install --frozen-lockfile` passes
 - [ ] `pnpm run verify` passes locally
 - [ ] `pnpm run test:contract` passes, or the PR explains why it is not applicable
