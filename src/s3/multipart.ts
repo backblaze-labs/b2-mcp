@@ -376,7 +376,7 @@ export function registerS3MultipartTools(
         copySource: z
           .string()
           .describe(
-            "Source 'bucket/key'; URL-encode the key. Optional suffix: '?versionId=<URL-encoded-version>'. URL-encode the version ID separately: 'source/file?versionId=v%2B1' selects 'v+1'. With copySourceVersionId, IDs must match after decoding; conflicting versions are rejected.",
+            "Source 'bucket/key'; URL-encode the key. Optional suffix: '?versionId=<URL-encoded-version>'. URL-encode the version ID separately: 'source/file?versionId=v%2B1' selects 'v+1'. With nonempty copySourceVersionId, IDs must match after decoding; conflicting versions are rejected.",
           ),
         copySourceRange: z
           .string()
@@ -386,10 +386,9 @@ export function registerS3MultipartTools(
           ),
         copySourceVersionId: z
           .string()
-          .min(1)
           .optional()
           .describe(
-            "The raw version ID (not URL-encoded); must match the decoded version in copySource. Omit both selectors to copy the current version.",
+            "Raw version ID (not URL-encoded); empty is treated as omitted. Nonempty values must match the decoded version in copySource. Omit both selectors to copy the current version.",
           ),
       },
     },
@@ -397,14 +396,13 @@ export function registerS3MultipartTools(
       try {
         const source = copySourceTarget(args.copySource);
         if (
-          args.copySourceVersionId === "" ||
-          (source.versionId &&
-            args.copySourceVersionId &&
-            source.versionId !== args.copySourceVersionId)
+          source.versionId &&
+          args.copySourceVersionId &&
+          source.versionId !== args.copySourceVersionId
         ) {
-          throw badRequestError("Empty or conflicting version ID.");
+          throw badRequestError("Conflicting version IDs.");
         }
-        const versionId = source.versionId ?? args.copySourceVersionId;
+        const versionId = source.versionId || args.copySourceVersionId || undefined;
         if (versionId && !options.versions) {
           throw codedError(
             503,

@@ -1913,7 +1913,7 @@
             "type": "string"
           },
           "copySource": {
-            "description": "Source 'bucket/key'; URL-encode the key. Optional suffix: '?versionId=<URL-encoded-version>'. URL-encode the version ID separately: 'source/file?versionId=v%2B1' selects 'v+1'. With copySourceVersionId, IDs must match after decoding; conflicting versions are rejected.",
+            "description": "Source 'bucket/key'; URL-encode the key. Optional suffix: '?versionId=<URL-encoded-version>'. URL-encode the version ID separately: 'source/file?versionId=v%2B1' selects 'v+1'. With nonempty copySourceVersionId, IDs must match after decoding; conflicting versions are rejected.",
             "type": "string"
           },
           "copySourceRange": {
@@ -1921,8 +1921,7 @@
             "type": "string"
           },
           "copySourceVersionId": {
-            "description": "The raw version ID (not URL-encoded); must match the decoded version in copySource. Omit both selectors to copy the current version.",
-            "minLength": 1,
+            "description": "Raw version ID (not URL-encoded); empty is treated as omitted. Nonempty values must match the decoded version in copySource. Omit both selectors to copy the current version.",
             "type": "string"
           },
           "key": {
@@ -1955,5 +1954,5 @@
     "toolsListCacheHint": null,
     "discover": null
   },
-  "hash": "0af0eb3b01b03b0641e72cc951fe1a0ef37153ed484c3247cc21df5397639f40"
+  "hash": "0ebd0f1c99a0697236b08d70399ad6c74c2be6b01a35de3cccea0e863e37feea"
 }

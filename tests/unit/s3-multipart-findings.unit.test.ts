@@ -59,18 +59,60 @@ afterEach(() => {
 });
 
 describe("Finding C15: s3_upload_part_copy source-version binding", () => {
-  it("rejects an empty source version before looking up or copying", async () => {
+  it("treats an empty separate source version as omitted", async () => {
     const result = await callTool(server, "s3_upload_part_copy", {
       ...input,
       copySourceVersionId: "",
     });
 
+    expect(result.isError).toBeFalsy();
+    expect(versionSpy).not.toHaveBeenCalled();
+    expect(copyCommands()).toHaveLength(1);
+    expect(copyCommands()[0].input.CopySource).toBe(input.copySource);
+  });
+
+  it("binds an embedded version when the separate selector is empty", async () => {
+    const result = await callTool(server, "s3_upload_part_copy", {
+      ...input,
+      copySource: `${input.copySource}?versionId=verified%2Bversion`,
+      copySourceVersionId: "",
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(versionSpy).toHaveBeenCalledExactlyOnceWith({
+      bucket: "source-bucket",
+      key: "dir/my file+1.bin",
+      versionId: "verified+version",
+    });
+    expect(copyCommands()).toHaveLength(1);
+    expect(copyCommands()[0].input.CopySource).toBe(
+      `${input.copySource}?versionId=verified%2Bversion`,
+    );
+  });
+
+  it("does not let an empty separate selector bypass embedded version binding", async () => {
+    versionSpy.mockRejectedValueOnce(
+      Object.assign(new Error("Source version does not belong to this object"), {
+        status: 404,
+        code: "not_found",
+      }),
+    );
+    const result = await callTool(server, "s3_upload_part_copy", {
+      ...input,
+      copySource: `${input.copySource}?versionId=foreign-version`,
+      copySourceVersionId: "",
+    });
+
     expect(result.isError).toBe(true);
     expect(parseErrorText(parseResult(result) as string)).toMatchObject({
-      status: 400,
-      code: "bad_request",
+      status: 404,
+      code: "not_found",
     });
-    expect(versionSpy).not.toHaveBeenCalled();
+    expect(versionSpy).toHaveBeenCalledExactlyOnceWith({
+      bucket: "source-bucket",
+      key: "dir/my file+1.bin",
+      versionId: "foreign-version",
+    });
     expect(copyCommands()).toHaveLength(0);
   });
 

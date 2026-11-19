@@ -206,7 +206,7 @@ describe("S3 object tools require bucket and key where expected", () => {
     expect(required).toContain("key");
   });
 
-  it("rejects an empty multipart copy version while allowing omitted or nonempty selectors", () => {
+  it("accepts omitted, empty, and nonempty multipart copy version selectors", () => {
     const schema = tools["s3_upload_part_copy"].inputSchema;
     const input = {
       bucket: "destination",
@@ -216,7 +216,7 @@ describe("S3 object tools require bucket and key where expected", () => {
       copySource: "source/file.bin",
     };
 
-    expect(schema.safeParse({ ...input, copySourceVersionId: "" }).success).toBe(false);
+    expect(schema.safeParse({ ...input, copySourceVersionId: "" }).success).toBe(true);
     expect(schema.safeParse(input).success).toBe(true);
     expect(schema.safeParse({ ...input, copySourceVersionId: "version-1" }).success).toBe(true);
   });
@@ -233,7 +233,8 @@ describe("S3 object tools require bucket and key where expected", () => {
     expect(sourceDescription).toMatch(/conflicting versions are rejected/i);
 
     const versionDescription = shape.copySourceVersionId.description;
-    expect(versionDescription).toMatch(/raw.*not URL-encoded/);
+    expect(versionDescription).toMatch(/raw.*not URL-encoded/i);
+    expect(versionDescription).toMatch(/empty.*treated as omitted/);
     expect(versionDescription).toMatch(/must match.*decoded.*copySource/);
     expect(versionDescription).toMatch(/omit both.*current version/i);
   });
