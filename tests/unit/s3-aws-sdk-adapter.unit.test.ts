@@ -145,27 +145,30 @@ describe("B2S3PeerClient object data-plane behavior", () => {
     },
   );
 
-  it("includes content-type in presigned PutObject signed headers", async () => {
-    const handle = vi.fn();
-    const s3 = clientWithHandler(handle);
-    try {
-      const result = await s3.presignObjectUrl({
-        bucket: "bucket",
-        key: "object",
-        operation: "PutObject",
-        expiresIn: 60,
-        contentType: "application/octet-stream",
-      });
-      expect(result).toHaveProperty("requiredHeaders", {
-        "content-type": "application/octet-stream",
-      });
-      const url = new URL(result.url);
-      expect(url.searchParams.get("X-Amz-SignedHeaders")?.split(";")).toContain("content-type");
-      expect(handle).not.toHaveBeenCalled();
-    } finally {
-      s3.destroy();
-    }
-  });
+  it.each(["application/octet-stream", "Text/Plain; charset=UTF-8"])(
+    "returns the exact required header and signs content-type %s",
+    async (contentType) => {
+      const handle = vi.fn();
+      const s3 = clientWithHandler(handle);
+      try {
+        const result = await s3.presignObjectUrl({
+          bucket: "bucket",
+          key: "object",
+          operation: "PutObject",
+          expiresIn: 60,
+          contentType: contentType,
+        });
+        expect(result).toHaveProperty("requiredHeaders", {
+          "content-type": contentType,
+        });
+        const url = new URL(result.url);
+        expect(url.searchParams.get("X-Amz-SignedHeaders")?.split(";")).toContain("content-type");
+        expect(handle).not.toHaveBeenCalled();
+      } finally {
+        s3.destroy();
+      }
+    },
+  );
 
   it("binds the presigned PutObject signature to the approved content type", async () => {
     vi.useFakeTimers();

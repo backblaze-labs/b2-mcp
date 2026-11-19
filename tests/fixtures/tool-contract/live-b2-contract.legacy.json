@@ -1580,7 +1580,7 @@
     },
     {
       "name": "s3_get_presigned_url",
-      "descriptionSha256": "4505e188fe6d85f9bfb682fd41040d11f9b1b022ac1673b6fd40abadbe084661",
+      "descriptionSha256": "fd647dfdb0e54f5c3244b665d08d4a4ac488875e1639fa38ed9ec3c2021d3c8b",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -2052,5 +2052,5 @@
     "toolsListCacheHint": null,
     "discover": null
   },
-  "hash": "1476126ec0ad641261572802bf540ff8dc64cbb258af0334605348f80e26a782"
+  "hash": "c92ddb215c8edf88c3dced6dd5e9c6ae8b0d90e00399eb540b88324f2e65fc72"
 }
