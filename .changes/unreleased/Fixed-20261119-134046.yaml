@@ -1,0 +1,3 @@
+kind: Fixed
+body: Reject an explicitly empty `copySourceVersionId` in multipart copies instead of silently copying the current version; omit the selector to copy the current version. (#1927)
+time: 2026-11-19T13:40:46.63958-06:00
