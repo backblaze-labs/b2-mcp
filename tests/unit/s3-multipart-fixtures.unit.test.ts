@@ -34,7 +34,7 @@ beforeEach(() => {
   s3 = new DeterministicS3ClientFake();
   s3.allowDefault("createMultipartUpload", "presignUploadPart", "completeMultipartUpload");
   tools = new ToolHarness();
-  registerS3MultipartTools(tools, s3.asPeerClient(), versions, testConfig);
+  registerS3MultipartTools(tools, s3.asPeerClient(), testConfig, { versions });
 });
 
 afterEach(() => {

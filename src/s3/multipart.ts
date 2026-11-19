@@ -6,7 +6,7 @@
 import type { B2S3CompletedMultipartPart, B2S3PeerClient } from "./aws-sdk-adapter.js";
 import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
-import { badRequestError, toolJson, toolError, toolSuccess } from "../utils/errors.js";
+import { badRequestError, codedError, toolJson, toolError, toolSuccess } from "../utils/errors.js";
 import type { B2Config, B2S3VersionGuard } from "../utils/types.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
 import { verifyVersionBinding } from "./objects.js";
@@ -45,13 +45,12 @@ function copySourceTarget(copySource: string): { bucket: string; key: string } {
  *
  * @param server - Tool registrar receiving multipart tools.
  * @param s3 - Repository-owned S3-compatible client facade.
- * @param versions - Native version resolver used to validate source versions.
  * @param config - Server configuration used for destructive policy.
- * @param options - Capability constraints for native version inspection.
+ * @param options - Optional version resolver and capability constraints; explicit versions require a resolver.
  *
  * @example
  * ```ts
- * registerS3MultipartTools(registrar, s3Client, b2Client, config);
+ * registerS3MultipartTools(registrar, s3Client, config, { versions: b2Client });
  * ```
  */
 export function registerS3MultipartTools(
@@ -66,9 +65,11 @@ export function registerS3MultipartTools(
     | "listParts"
     | "uploadPartCopy"
   >,
-  versions: Pick<B2S3VersionGuard, "resolveS3FileVersion">,
   config: B2Config,
-  options: { allowExplicitVersionInspection?: boolean } = {},
+  options: {
+    versions?: Pick<B2S3VersionGuard, "resolveS3FileVersion">;
+    allowExplicitVersionInspection?: boolean;
+  } = {},
 ): void {
   const allowExplicitVersionInspection = options.allowExplicitVersionInspection ?? true;
   server.registerTool(
@@ -378,11 +379,20 @@ export function registerS3MultipartTools(
     async (args) => {
       try {
         const source = copySourceTarget(args.copySource);
-        await verifyVersionBinding(
-          versions,
-          { ...source, versionId: args.copySourceVersionId },
-          { allowExplicitVersionInspection },
-        );
+        if (args.copySourceVersionId && !options.versions) {
+          throw codedError(
+            503,
+            "version_binding_unavailable",
+            "Version-targeted multipart copies require a configured native version resolver.",
+          );
+        }
+        if (options.versions) {
+          await verifyVersionBinding(
+            options.versions,
+            { ...source, versionId: args.copySourceVersionId },
+            { allowExplicitVersionInspection },
+          );
+        }
         const copySource = args.copySourceVersionId
           ? `${args.copySource}?versionId=${encodeURIComponent(args.copySourceVersionId)}`
           : args.copySource;

@@ -52,7 +52,7 @@ function adapterBackedTools() {
   const mutationSend = vi.fn();
   vi.spyOn(peer as any, "mutationClient").mockReturnValue({ send: mutationSend });
   const tools = new ToolHarness();
-  registerS3MultipartTools(tools, peer, versions, testConfig);
+  registerS3MultipartTools(tools, peer, testConfig, { versions });
   const commands = () =>
     [...send.mock.calls, ...mutationSend.mock.calls].map((call) => call[0] as SdkCommand);
   return { peer, send, mutationSend, tools, commands };
@@ -267,7 +267,7 @@ describe("resume flow: list uploads, list parts, presign only the missing parts"
     const s3 = new DeterministicS3ClientFake();
     s3.allowDefault("presignUploadPart");
     const tools = new ToolHarness();
-    registerS3MultipartTools(tools, s3.asPeerClient(), versions, testConfig);
+    registerS3MultipartTools(tools, s3.asPeerClient(), testConfig, { versions });
     const totalParts = 5;
 
     s3.respond("listMultipartUploads", {
