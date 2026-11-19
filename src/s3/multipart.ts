@@ -6,13 +6,32 @@
 import type { B2S3CompletedMultipartPart, B2S3PeerClient } from "./aws-sdk-adapter.js";
 import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
-import { toolJson, toolError, toolSuccess } from "../utils/errors.js";
-import { B2Config } from "../utils/types.js";
+import { badRequestError, toolJson, toolError, toolSuccess } from "../utils/errors.js";
+import type { B2Config, B2S3VersionGuard } from "../utils/types.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
+import { verifyVersionBinding } from "./objects.js";
 
 function multipartPartNumberSchema(description?: string) {
   const schema = z.number().int().min(1).max(10000);
   return description ? schema.describe(description) : schema;
+}
+
+function copySourceTarget(copySource: string): { bucket: string; key: string } {
+  const source = copySource.startsWith("/") ? copySource.slice(1) : copySource;
+  const separator = source.indexOf("/");
+  if (separator < 1 || separator === source.length - 1 || /[?#]/.test(source)) {
+    throw badRequestError(
+      "copySource must be bucket/key with a URL-encoded key; pass the version separately in copySourceVersionId.",
+    );
+  }
+  try {
+    return {
+      bucket: decodeURIComponent(source.slice(0, separator)),
+      key: decodeURIComponent(source.slice(separator + 1)),
+    };
+  } catch {
+    throw badRequestError("copySource contains invalid URL encoding.");
+  }
 }
 
 /**
@@ -26,11 +45,13 @@ function multipartPartNumberSchema(description?: string) {
  *
  * @param server - Tool registrar receiving multipart tools.
  * @param s3 - Repository-owned S3-compatible client facade.
+ * @param versions - Native version resolver used to validate source versions.
  * @param config - Server configuration used for destructive policy.
+ * @param options - Capability constraints for native version inspection.
  *
  * @example
  * ```ts
- * registerS3MultipartTools(registrar, s3Client, config);
+ * registerS3MultipartTools(registrar, s3Client, b2Client, config);
  * ```
  */
 export function registerS3MultipartTools(
@@ -45,8 +66,11 @@ export function registerS3MultipartTools(
     | "listParts"
     | "uploadPartCopy"
   >,
+  versions: Pick<B2S3VersionGuard, "resolveS3FileVersion">,
   config: B2Config,
+  options: { allowExplicitVersionInspection?: boolean } = {},
 ): void {
+  const allowExplicitVersionInspection = options.allowExplicitVersionInspection ?? true;
   server.registerTool(
     "s3_create_multipart_upload",
     {
@@ -353,10 +377,14 @@ export function registerS3MultipartTools(
     },
     async (args) => {
       try {
-        // Fold the source version into CopySource (same form as s3_copy_object); without
-        // this the declared copySourceVersionId was silently dropped and the live version copied.
+        const source = copySourceTarget(args.copySource);
+        await verifyVersionBinding(
+          versions,
+          { ...source, versionId: args.copySourceVersionId },
+          { allowExplicitVersionInspection },
+        );
         const copySource = args.copySourceVersionId
-          ? `${args.copySource}?versionId=${args.copySourceVersionId}`
+          ? `${args.copySource}?versionId=${encodeURIComponent(args.copySourceVersionId)}`
           : args.copySource;
         const result = await s3.uploadPartCopy({
           bucket: args.bucket,

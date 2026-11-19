@@ -615,8 +615,17 @@ async function bodyToBuffer(body: B2S3ObjectBody, maxBytes: number): Promise<Buf
   return nodeStreamToBuffer(nodeReadableFromBody(body), maxBytes);
 }
 
-async function verifyVersionBinding(
-  versions: B2S3VersionGuard,
+/**
+ * Verify that an explicitly requested S3 version belongs to its bucket and key.
+ *
+ * @param versions - Native version resolver used to bind the source object.
+ * @param input - Object identity and optional version ID.
+ * @param options - Whether the caller may inspect explicit native versions.
+ *
+ * @returns The verified binding, or null when no version is requested.
+ */
+export async function verifyVersionBinding(
+  versions: Pick<B2S3VersionGuard, "resolveS3FileVersion">,
   input: { bucket: string; key: string; versionId?: string },
   options: { allowExplicitVersionInspection: boolean },
 ): Promise<B2S3FileVersionBinding | null> {
