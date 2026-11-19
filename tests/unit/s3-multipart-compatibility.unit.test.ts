@@ -38,7 +38,10 @@ describe("multipart registration compatibility", () => {
     expect(s3.requestsFor("uploadPartCopy")).toHaveLength(1);
   });
 
-  it("refuses a versioned copy without a resolver before issuing a copy", async () => {
+  it.each([
+    { copySourceVersionId: "version-1" },
+    { copySource: "source/file.bin?versionId=version-1" },
+  ])("refuses a versioned copy without a resolver before issuing a copy: %s", async (version) => {
     const s3 = new DeterministicS3ClientFake();
     s3.allowDefault("uploadPartCopy");
     const tools = new ToolHarness();
@@ -46,7 +49,7 @@ describe("multipart registration compatibility", () => {
 
     const result = await tools.call("s3_upload_part_copy", {
       ...copy,
-      copySourceVersionId: "version-1",
+      ...version,
     });
     expect(result.isError).toBe(true);
     expect(parseErrorText(parseResult(result) as string)).toMatchObject({

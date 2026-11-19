@@ -124,24 +124,114 @@ describe("Finding C15: s3_upload_part_copy source-version binding", () => {
     );
   });
 
-  it.each([undefined, "verified-version"])(
-    "refuses a version embedded in copySource when the separate version is %s",
-    async (copySourceVersionId) => {
-      const result = await callTool(server, "s3_upload_part_copy", {
-        ...input,
-        copySource: "source-bucket/source.bin?versionId=foreign-version",
-        copySourceVersionId,
-      });
+  it("binds an embedded version to the decoded source before copying", async () => {
+    const result = await callTool(server, "s3_upload_part_copy", {
+      ...input,
+      copySource: "source-bucket/dir/my%20file%2B1.bin?versionId=verified%2Bversion",
+    });
 
-      expect(result.isError).toBe(true);
-      expect(parseErrorText(parseResult(result) as string)).toMatchObject({
-        status: 400,
-        code: "bad_request",
-      });
-      expect(versionSpy).not.toHaveBeenCalled();
-      expect(copyCommands()).toHaveLength(0);
-    },
-  );
+    expect(result.isError).toBeFalsy();
+    expect(versionSpy).toHaveBeenCalledExactlyOnceWith({
+      bucket: "source-bucket",
+      key: "dir/my file+1.bin",
+      versionId: "verified+version",
+    });
+    expect(copyCommands()).toHaveLength(1);
+    expect(copyCommands()[0].input.CopySource).toBe(
+      "source-bucket/dir/my%20file%2B1.bin?versionId=verified%2Bversion",
+    );
+  });
+
+  it("refuses an unverified embedded version without issuing a copy", async () => {
+    versionSpy.mockRejectedValueOnce(
+      Object.assign(new Error("Source version does not belong to this object"), {
+        status: 404,
+        code: "not_found",
+      }),
+    );
+    const result = await callTool(server, "s3_upload_part_copy", {
+      ...input,
+      copySource: "source-bucket/source.bin?versionId=foreign-version",
+    });
+
+    expect(result.isError).toBe(true);
+    expect(parseErrorText(parseResult(result) as string)).toMatchObject({
+      status: 404,
+      code: "not_found",
+    });
+    expect(versionSpy).toHaveBeenCalledExactlyOnceWith({
+      bucket: "source-bucket",
+      key: "source.bin",
+      versionId: "foreign-version",
+    });
+    expect(copyCommands()).toHaveLength(0);
+  });
+
+  it("refuses conflicting embedded and separate versions", async () => {
+    const result = await callTool(server, "s3_upload_part_copy", {
+      ...input,
+      copySource: "source-bucket/source.bin?versionId=foreign-version",
+      copySourceVersionId: "verified-version",
+    });
+
+    expect(result.isError).toBe(true);
+    expect(parseErrorText(parseResult(result) as string)).toMatchObject({
+      status: 400,
+      code: "bad_request",
+    });
+    expect(versionSpy).not.toHaveBeenCalled();
+    expect(copyCommands()).toHaveLength(0);
+  });
+
+  it("accepts identical embedded and separate versions after one binding check", async () => {
+    const result = await callTool(server, "s3_upload_part_copy", {
+      ...input,
+      copySource: "source-bucket/source.bin?versionId=verified%2Bversion",
+      copySourceVersionId: "verified+version",
+    });
+    expect(result.isError).toBeFalsy();
+    expect(versionSpy).toHaveBeenCalledExactlyOnceWith({
+      bucket: "source-bucket",
+      key: "source.bin",
+      versionId: "verified+version",
+    });
+    expect(copyCommands()).toHaveLength(1);
+    expect(copyCommands()[0].input.CopySource).toBe(
+      "source-bucket/source.bin?versionId=verified%2Bversion",
+    );
+  });
+
+  it.each([
+    "source-bucket/source.bin?versionId=one&versionId=two",
+    "source-bucket/source.bin?versionId=one&other=two",
+    "source-bucket/source.bin?versionId=",
+    "source-bucket/source.bin?versionId=bad%2",
+    "source-bucket/source.bin?other=value",
+  ])("refuses malformed embedded version query %s", async (copySource) => {
+    const result = await callTool(server, "s3_upload_part_copy", { ...input, copySource });
+    expect(result.isError).toBe(true);
+    expect(parseErrorText(parseResult(result) as string)).toMatchObject({
+      status: 400,
+      code: "bad_request",
+    });
+    expect(versionSpy).not.toHaveBeenCalled();
+    expect(copyCommands()).toHaveLength(0);
+  });
+
+  it("refuses embedded version copies without readFiles", async () => {
+    server = createServer(testConfig, ["writeFiles"]);
+    const result = await callTool(server, "s3_upload_part_copy", {
+      ...input,
+      copySource: "source-bucket/source.bin?versionId=verified-version",
+    });
+    expect(result.isError).toBe(true);
+    expect(parseErrorText(parseResult(result) as string)).toMatchObject({
+      status: 403,
+      code: "missing_capability",
+    });
+    expect(versionSpy).not.toHaveBeenCalled();
+    expect(copyCommands()).toHaveLength(0);
+  });
 
   it("refuses version-targeted copies without readFiles", async () => {
     server = createServer(testConfig, ["writeFiles"]);

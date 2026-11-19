@@ -16,18 +16,34 @@ function multipartPartNumberSchema(description?: string) {
   return description ? schema.describe(description) : schema;
 }
 
-function copySourceTarget(copySource: string): { bucket: string; key: string } {
-  const source = copySource.startsWith("/") ? copySource.slice(1) : copySource;
+function copySourceTarget(copySource: string): {
+  bucket: string;
+  key: string;
+  path: string;
+  versionId?: string;
+} {
+  const queryAt = copySource.indexOf("?");
+  const path = queryAt < 0 ? copySource : copySource.slice(0, queryAt);
+  const query = queryAt < 0 ? undefined : copySource.slice(queryAt + 1);
+  const versionMatch = query?.match(/^versionId=([^&?#]+)$/);
+  const source = path.startsWith("/") ? path.slice(1) : path;
   const separator = source.indexOf("/");
-  if (separator < 1 || separator === source.length - 1 || /[?#]/.test(source)) {
+  if (
+    separator < 1 ||
+    separator === source.length - 1 ||
+    path.includes("#") ||
+    (query !== undefined && !versionMatch)
+  ) {
     throw badRequestError(
-      "copySource must be bucket/key with a URL-encoded key; pass the version separately in copySourceVersionId.",
+      "copySource must be bucket/key with a URL-encoded key and optional versionId query.",
     );
   }
   try {
     return {
       bucket: decodeURIComponent(source.slice(0, separator)),
       key: decodeURIComponent(source.slice(separator + 1)),
+      path,
+      versionId: versionMatch ? decodeURIComponent(versionMatch[1]) : undefined,
     };
   } catch {
     throw badRequestError("copySource contains invalid URL encoding.");
@@ -379,7 +395,15 @@ export function registerS3MultipartTools(
     async (args) => {
       try {
         const source = copySourceTarget(args.copySource);
-        if (args.copySourceVersionId && !options.versions) {
+        if (
+          source.versionId !== undefined &&
+          args.copySourceVersionId !== undefined &&
+          source.versionId !== args.copySourceVersionId
+        ) {
+          throw badRequestError("copySource and copySourceVersionId specify different versions.");
+        }
+        const versionId = source.versionId ?? args.copySourceVersionId;
+        if (versionId && !options.versions) {
           throw codedError(
             503,
             "version_binding_unavailable",
@@ -389,13 +413,13 @@ export function registerS3MultipartTools(
         if (options.versions) {
           await verifyVersionBinding(
             options.versions,
-            { ...source, versionId: args.copySourceVersionId },
+            { bucket: source.bucket, key: source.key, versionId },
             { allowExplicitVersionInspection },
           );
         }
-        const copySource = args.copySourceVersionId
-          ? `${args.copySource}?versionId=${encodeURIComponent(args.copySourceVersionId)}`
-          : args.copySource;
+        const copySource = versionId
+          ? `${source.path}?versionId=${encodeURIComponent(versionId)}`
+          : source.path;
         const result = await s3.uploadPartCopy({
           bucket: args.bucket,
           key: args.key,
