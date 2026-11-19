@@ -386,6 +386,7 @@ export function registerS3MultipartTools(
           ),
         copySourceVersionId: z
           .string()
+          .min(1)
           .optional()
           .describe(
             "The raw version ID (not URL-encoded); must match the decoded version in copySource. Omit both selectors to copy the current version.",
@@ -396,11 +397,12 @@ export function registerS3MultipartTools(
       try {
         const source = copySourceTarget(args.copySource);
         if (
-          source.versionId !== undefined &&
-          args.copySourceVersionId !== undefined &&
-          source.versionId !== args.copySourceVersionId
+          args.copySourceVersionId === "" ||
+          (source.versionId &&
+            args.copySourceVersionId &&
+            source.versionId !== args.copySourceVersionId)
         ) {
-          throw badRequestError("copySource and copySourceVersionId specify different versions.");
+          throw badRequestError("Empty or conflicting version ID.");
         }
         const versionId = source.versionId ?? args.copySourceVersionId;
         if (versionId && !options.versions) {

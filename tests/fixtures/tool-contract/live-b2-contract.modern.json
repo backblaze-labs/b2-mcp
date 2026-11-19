@@ -2020,6 +2020,7 @@
           },
           "copySourceVersionId": {
             "description": "The raw version ID (not URL-encoded); must match the decoded version in copySource. Omit both selectors to copy the current version.",
+            "minLength": 1,
             "type": "string"
           },
           "key": {
@@ -2071,5 +2072,5 @@
       "resultType": "complete"
     }
   },
-  "hash": "005cc2ce544c14e747b859f65908e27293076f89cc6c0b6deb1d6fdf41f82149"
+  "hash": "e49a9ec28e122282b4ffa9d22331f74134c07ea9f9cc8abd027402c7f943baaf"
 }

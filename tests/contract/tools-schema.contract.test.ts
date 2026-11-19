@@ -206,6 +206,21 @@ describe("S3 object tools require bucket and key where expected", () => {
     expect(required).toContain("key");
   });
 
+  it("rejects an empty multipart copy version while allowing omitted or nonempty selectors", () => {
+    const schema = tools["s3_upload_part_copy"].inputSchema;
+    const input = {
+      bucket: "destination",
+      key: "assembled.bin",
+      uploadId: "upload-1",
+      partNumber: 1,
+      copySource: "source/file.bin",
+    };
+
+    expect(schema.safeParse({ ...input, copySourceVersionId: "" }).success).toBe(false);
+    expect(schema.safeParse(input).success).toBe(true);
+    expect(schema.safeParse({ ...input, copySourceVersionId: "version-1" }).success).toBe(true);
+  });
+
   it("documents multipart copy source version syntax, encoding, and conflicts", () => {
     const shape = getShape(tools["s3_upload_part_copy"]?.inputSchema);
     const sourceDescription = shape.copySource.description;

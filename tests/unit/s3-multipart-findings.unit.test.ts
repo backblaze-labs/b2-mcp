@@ -59,6 +59,21 @@ afterEach(() => {
 });
 
 describe("Finding C15: s3_upload_part_copy source-version binding", () => {
+  it("rejects an empty source version before looking up or copying", async () => {
+    const result = await callTool(server, "s3_upload_part_copy", {
+      ...input,
+      copySourceVersionId: "",
+    });
+
+    expect(result.isError).toBe(true);
+    expect(parseErrorText(parseResult(result) as string)).toMatchObject({
+      status: 400,
+      code: "bad_request",
+    });
+    expect(versionSpy).not.toHaveBeenCalled();
+    expect(copyCommands()).toHaveLength(0);
+  });
+
   it("binds the version to the decoded source bucket and key before copying", async () => {
     const result = await callTool(server, "s3_upload_part_copy", {
       ...input,

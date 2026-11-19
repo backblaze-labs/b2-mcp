@@ -2221,7 +2221,8 @@
           },
           "copySourceVersionId": {
             "description": "The raw version ID (not URL-encoded); must match the decoded version in copySource. Omit both selectors to copy the current version.",
-            "type": "string"
+            "type": "string",
+            "minLength": 1
           }
         },
         "required": ["bucket", "key", "uploadId", "partNumber", "copySource"],

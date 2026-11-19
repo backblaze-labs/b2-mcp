@@ -38,6 +38,21 @@ describe("multipart registration compatibility", () => {
     expect(s3.requestsFor("uploadPartCopy")).toHaveLength(1);
   });
 
+  it("rejects an empty source version even without a configured resolver", async () => {
+    const s3 = new DeterministicS3ClientFake();
+    s3.allowDefault("uploadPartCopy");
+    const tools = new ToolHarness();
+    registerS3MultipartTools(tools, s3.asPeerClient(), testConfig);
+
+    const result = await tools.call("s3_upload_part_copy", { ...copy, copySourceVersionId: "" });
+    expect(result.isError).toBe(true);
+    expect(parseErrorText(parseResult(result) as string)).toMatchObject({
+      status: 400,
+      code: "bad_request",
+    });
+    expect(s3.requestsFor("uploadPartCopy")).toHaveLength(0);
+  });
+
   it.each([
     { copySourceVersionId: "version-1" },
     { copySource: "source/file.bin?versionId=version-1" },
