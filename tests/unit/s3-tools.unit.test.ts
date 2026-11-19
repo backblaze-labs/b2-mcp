@@ -1224,6 +1224,26 @@ describe("s3_get_bucket_location", () => {
 });
 
 describe("s3_get_presigned_url", () => {
+  it("returns required upload headers through the public PutObject tool result", async () => {
+    const result = await callTool(server, "s3_get_presigned_url", {
+      bucket: "my-bucket",
+      key: "file.bin",
+      operation: "PutObject",
+      expiresIn: 60,
+      contentType: "application/octet-stream",
+      confirm: true,
+    });
+    expect(result.isError).toBeFalsy();
+    expect(parseResult(result)).toMatchObject({
+      operation: "PutObject",
+      requiredHeaders: { "content-type": "application/octet-stream" },
+    });
+    const output = parseResult(result);
+    expect(new URL(output.url).searchParams.get("X-Amz-SignedHeaders")?.split(";")).toContain(
+      "content-type",
+    );
+  });
+
   it("returns a presigned URL string for GET", async () => {
     const result = parseResult(
       await callTool(server, "s3_get_presigned_url", {

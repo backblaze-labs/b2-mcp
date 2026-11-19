@@ -406,7 +406,10 @@ export function createServer(
     allowCurrentVersionInspection,
     allowBypassGovernance,
   });
-  registerS3MultipartTools(registrar, s3Client, config);
+  registerS3MultipartTools(registrar, s3Client, config, {
+    versions: b2Client,
+    allowExplicitVersionInspection,
+  });
   const allowGetObjectUrl =
     (!filterActive || (capsSet?.has("readFiles") ?? false)) && oauthAllowsRead;
   const allowPutObjectUrl =

@@ -418,12 +418,14 @@ export interface B2S3PresignObjectUrlOptions {
   expiresIn: number;
   /** Optional version ID for GetObject URLs. */
   versionId?: string;
-  /** Required content type for PutObject URLs. */
+  /** PutObject uploads must send Content-Type exactly matching this value. */
   contentType?: string;
 }
 
 /** Generated presigned URL metadata. */
 export interface B2S3PresignObjectUrlResult {
+  /** Headers a PutObject upload must send unchanged. */
+  requiredHeaders?: Record<string, string>;
   /** Generated presigned URL. */
   url: string;
   /** S3 operation the URL authorizes. */
@@ -1188,20 +1190,23 @@ export class B2S3PeerClient {
   /**
    * Generate a presigned GetObject or PutObject URL.
    *
+   * @remarks
+   * PutObject uploads must send Content-Type exactly matching input.contentType.
+   *
    * @param input - Presign options.
    *
    * @returns Presigned URL metadata.
    *
-   * @throws Error when a PutObject URL includes a version ID.
-   * @throws A 400-style bad request Error when PutObject content type validation rejects missing
-   * or unsafe input.
+   * @throws A 400-style bad request Error for a versioned PutObject URL or missing/unsafe
+   * PutObject content type.
    */
   async presignObjectUrl(input: B2S3PresignObjectUrlOptions): Promise<B2S3PresignObjectUrlResult> {
+    const { contentType } = input;
     if (input.operation === "PutObject" && input.versionId !== undefined) {
       badRequest("versionId is only valid for GetObject presigned URLs.");
     }
     if (input.operation === "PutObject")
-      assertSafeObjectContentType(input.contentType, "Presigned PutObject URLs");
+      assertSafeObjectContentType(contentType, "Presigned PutObject URLs");
     const command =
       input.operation === "GetObject"
         ? new GetObjectCommand({
@@ -1212,11 +1217,16 @@ export class B2S3PeerClient {
         : new PutObjectCommand({
             Bucket: input.bucket,
             Key: input.key,
-            ContentType: input.contentType,
+            ContentType: contentType,
           });
     return {
-      url: await getSignedUrl(this.readClient, command, { expiresIn: input.expiresIn }),
+      url: await getSignedUrl(this.readClient, command, {
+        expiresIn: input.expiresIn,
+        signableHeaders: new Set(["content-type"]),
+      }),
       operation: input.operation,
+      requiredHeaders:
+        input.operation === "PutObject" ? { "content-type": contentType as string } : undefined,
       expiresIn: input.expiresIn,
       expiresAt: new Date(Date.now() + input.expiresIn * 1000).toISOString(),
     };

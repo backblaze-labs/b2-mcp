@@ -11,6 +11,21 @@ import {
 
 type SdkCommand = { constructor: { name: string }; input: Record<string, unknown> };
 
+const versions = {
+  async resolveS3FileVersion({ key, versionId }: { key: string; versionId: string }) {
+    return {
+      fileName: key,
+      fileId: versionId,
+      bucketId: "source-bucket-id",
+      contentLength: 10,
+      contentType: "application/octet-stream",
+      uploadTimestamp: 0,
+      fileInfo: {},
+      action: "upload" as const,
+    };
+  },
+};
+
 /**
  * Tool handlers backed by the real AWS SDK adapter with both of its transport
  * seams stubbed: `sendCommand` for read-style calls and `mutationClient().send`
@@ -37,7 +52,7 @@ function adapterBackedTools() {
   const mutationSend = vi.fn();
   vi.spyOn(peer as any, "mutationClient").mockReturnValue({ send: mutationSend });
   const tools = new ToolHarness();
-  registerS3MultipartTools(tools, peer, testConfig);
+  registerS3MultipartTools(tools, peer, testConfig, { versions });
   const commands = () =>
     [...send.mock.calls, ...mutationSend.mock.calls].map((call) => call[0] as SdkCommand);
   return { peer, send, mutationSend, tools, commands };
@@ -252,7 +267,7 @@ describe("resume flow: list uploads, list parts, presign only the missing parts"
     const s3 = new DeterministicS3ClientFake();
     s3.allowDefault("presignUploadPart");
     const tools = new ToolHarness();
-    registerS3MultipartTools(tools, s3.asPeerClient(), testConfig);
+    registerS3MultipartTools(tools, s3.asPeerClient(), testConfig, { versions });
     const totalParts = 5;
 
     s3.respond("listMultipartUploads", {
