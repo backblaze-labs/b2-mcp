@@ -206,6 +206,23 @@ describe("S3 object tools require bucket and key where expected", () => {
     expect(required).toContain("key");
   });
 
+  it("documents multipart copy source version syntax, encoding, and conflicts", () => {
+    const shape = getShape(tools["s3_upload_part_copy"]?.inputSchema);
+    const sourceDescription = shape.copySource.description;
+    expect(sourceDescription).toContain("?versionId=<URL-encoded-version>");
+    expect(sourceDescription).toContain("source/file?versionId=v%2B1");
+    expect(sourceDescription).toContain("v+1");
+    expect(sourceDescription).toMatch(/URL-encode.*key/);
+    expect(sourceDescription).toMatch(/URL-encode.*version ID.*separately/);
+    expect(sourceDescription).toMatch(/copySourceVersionId.*must match after decoding/);
+    expect(sourceDescription).toMatch(/conflicting versions are rejected/i);
+
+    const versionDescription = shape.copySourceVersionId.description;
+    expect(versionDescription).toMatch(/raw.*not URL-encoded/);
+    expect(versionDescription).toMatch(/must match.*decoded.*copySource/);
+    expect(versionDescription).toMatch(/omit both.*current version/i);
+  });
+
   it("documents s3_copy_object acl as a no-op compatibility hint", () => {
     const acl = getShape(tools["s3_copy_object"]?.inputSchema).acl;
     expect(acl).toBeDefined();

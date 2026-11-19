@@ -376,7 +376,7 @@ export function registerS3MultipartTools(
         copySource: z
           .string()
           .describe(
-            "The source object in 'bucket/key' format, e.g. 'my-bucket/path/to/file.dat'. URL-encode special characters in the key.",
+            "Source 'bucket/key'; URL-encode the key. Optional suffix: '?versionId=<URL-encoded-version>'. URL-encode the version ID separately: 'source/file?versionId=v%2B1' selects 'v+1'. With copySourceVersionId, IDs must match after decoding; conflicting versions are rejected.",
           ),
         copySourceRange: z
           .string()
@@ -388,7 +388,7 @@ export function registerS3MultipartTools(
           .string()
           .optional()
           .describe(
-            "Version ID of the source object to copy; set to copy that exact version, or omit to copy the current version.",
+            "The raw version ID (not URL-encoded); must match the decoded version in copySource. Omit both selectors to copy the current version.",
           ),
       },
     },

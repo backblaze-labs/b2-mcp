@@ -2011,7 +2011,7 @@
             "type": "string"
           },
           "copySource": {
-            "description": "The source object in 'bucket/key' format, e.g. 'my-bucket/path/to/file.dat'. URL-encode special characters in the key.",
+            "description": "Source 'bucket/key'; URL-encode the key. Optional suffix: '?versionId=<URL-encoded-version>'. URL-encode the version ID separately: 'source/file?versionId=v%2B1' selects 'v+1'. With copySourceVersionId, IDs must match after decoding; conflicting versions are rejected.",
             "type": "string"
           },
           "copySourceRange": {
@@ -2019,7 +2019,7 @@
             "type": "string"
           },
           "copySourceVersionId": {
-            "description": "Version ID of the source object to copy; set to copy that exact version, or omit to copy the current version.",
+            "description": "The raw version ID (not URL-encoded); must match the decoded version in copySource. Omit both selectors to copy the current version.",
             "type": "string"
           },
           "key": {
@@ -2071,5 +2071,5 @@
       "resultType": "complete"
     }
   },
-  "hash": "4921f72f998a1c25080d88eedfd7f183fa9e738d8cbd7735a6cd963c8552fe67"
+  "hash": "005cc2ce544c14e747b859f65908e27293076f89cc6c0b6deb1d6fdf41f82149"
 }
