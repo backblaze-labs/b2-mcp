@@ -16,7 +16,7 @@ const PUT_OBJECT_CONFIRM_DESC =
 
 /** Upload URL instructions shared by full and write-only profiles. */
 const UPLOAD_URL_DETAILS =
-  " For multipart uploads use s3_create_multipart_upload and s3_get_presigned_upload_part_url. Returns url, operation, expiry; only PutObject includes requiredHeaders; GetObject omits it. Keep URL sensitive until expiry. Bytes flow directly between client/worker and B2, bypassing MCP. PutObject uploads must send Content-Type exactly matching contentType; otherwise signature validation fails.";
+  " For multipart uploads use s3_create_multipart_upload and s3_get_presigned_upload_part_url. Returns url, operation, expiresIn, expiresAt; only PutObject includes requiredHeaders; GetObject omits it. Keep URL secret. Bytes flow directly between client/worker and B2, bypassing MCP. PutObject uploads must send Content-Type exactly matching contentType; otherwise signature validation fails.";
 
 function operationDescription(allowGetObjectUrl: boolean, allowPutObjectUrl: boolean): string {
   if (allowGetObjectUrl && allowPutObjectUrl) {

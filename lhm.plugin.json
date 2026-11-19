@@ -1767,7 +1767,7 @@
     },
     {
       "name": "s3_get_presigned_url",
-      "description": "Generate a short-lived bearer URL for one B2 object: GetObject (download) or PutObject (upload). For multipart uploads use s3_create_multipart_upload and s3_get_presigned_upload_part_url. Returns url, operation, expiry; only PutObject includes requiredHeaders; GetObject omits it. Keep URL sensitive until expiry. Bytes flow directly between client/worker and B2, bypassing MCP. PutObject uploads must send Content-Type exactly matching contentType; otherwise signature validation fails. B2 does not support presigned POST (browser form uploads); use PutObject.",
+      "description": "Generate a short-lived bearer URL for one B2 object: GetObject (download) or PutObject (upload). For multipart uploads use s3_create_multipart_upload and s3_get_presigned_upload_part_url. Returns url, operation, expiresIn, expiresAt; only PutObject includes requiredHeaders; GetObject omits it. Keep URL secret. Bytes flow directly between client/worker and B2, bypassing MCP. PutObject uploads must send Content-Type exactly matching contentType; otherwise signature validation fails. B2 does not support presigned POST (browser form uploads); use PutObject.",
       "inputSchema": {
         "type": "object",
         "properties": {

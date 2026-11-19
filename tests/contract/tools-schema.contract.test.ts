@@ -251,6 +251,8 @@ describe("S3 object tools require bucket and key where expected", () => {
       expect(tool?.description).toMatch(/signature validation fails/);
       expect(tool?.description).toMatch(/only PutObject (?:includes|returns) requiredHeaders/);
       expect(tool?.description).toMatch(/GetObject omits (?:it|requiredHeaders)/);
+      expect(tool?.description).toMatch(/\bexpiresIn\b/);
+      expect(tool?.description).toMatch(/\bexpiresAt\b/);
       const contentType = getShape(tool?.inputSchema).contentType;
       expect(contentType.description).toMatch(/must send Content-Type exactly matching this value/);
     },
