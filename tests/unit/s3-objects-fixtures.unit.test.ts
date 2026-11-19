@@ -721,23 +721,24 @@ describe("S3 object tools with deterministic handler fake", () => {
       // The temp file plus, on Linux, the parent directory pinned for the rename.
       expect(opened.paths.some((opened) => opened.endsWith(".part"))).toBe(true);
       expect(opened.handles.map((handle) => handle.fd)).toEqual(opened.handles.map(() => -1));
-      expect(fs.readdirSync(path.join(dir, "a", "b"))).toEqual([]);
+      expect(fs.readdirSync(dir)).toEqual([]);
     } finally {
       opened.restore();
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  it("refuses a parent directory it cannot create before fetching", async () => {
+  it("reports failed parent creation after staging and leaves partial parents intact", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "b2-save-parent-"));
     // made is created, then the 300-byte segment fails (ENAMETOOLONG; ENOENT on Windows).
     const target = path.join(dir, "made", "x".repeat(300), "out.txt");
+    queueWebBody("NEW");
 
     try {
       const result = await saveTo(target);
 
       expectBadRequestToolError(result, /saveToPath directory .* cannot be written/);
-      expect(s3.requestsFor("getObject")).toHaveLength(0);
+      expect(s3.requestsFor("getObject")).toHaveLength(1);
       expect(fs.readdirSync(dir)).toEqual(["made"]);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
@@ -1047,7 +1048,7 @@ describe("S3 object tools with deterministic handler fake", () => {
     }
   });
 
-  posixIt("rechecks the file root after creating directories through a symlink", async () => {
+  posixIt("rechecks the file root before staging through a symlink", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "b2-save-race-root-"));
     const outside = fs.mkdtempSync(path.join(os.tmpdir(), "b2-save-race-out-"));
     const escapeDir = path.join(outside, "escaped");
@@ -1071,10 +1072,9 @@ describe("S3 object tools with deterministic handler fake", () => {
       expect(result.isError).toBe(true);
       expectBadRequestToolError(result, /outside the allowed directory/i);
       expect(s3.requestsFor("getObject")).toHaveLength(0);
-      // Refused by the post-mkdir check, before any temp file is created.
+      // Refused before staging or creating any parent directories outside the root.
       expect(opened.handles).toHaveLength(0);
-      expect(fs.readdirSync(escapeDir)).toEqual(["sub"]);
-      expect(fs.readdirSync(path.join(escapeDir, "sub"))).toEqual([]);
+      expect(fs.readdirSync(escapeDir)).toEqual([]);
     } finally {
       opened.restore();
       fs.rmSync(root, { recursive: true, force: true });
