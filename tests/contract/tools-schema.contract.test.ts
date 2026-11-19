@@ -17,6 +17,7 @@
 import { createServer, getRegisteredTools } from "../../src/server";
 import type { McpServer } from "../../src/mcp";
 import { readJson } from "./support";
+import { testConfig } from "../support/deterministic-fakes";
 
 const contract = readJson<{
   profiles: {
@@ -238,6 +239,20 @@ describe("S3 object tools require bucket and key where expected", () => {
     expect(versionDescription).toMatch(/must match.*decoded.*copySource/);
     expect(versionDescription).toMatch(/omit both.*current version/i);
   });
+
+  it.each([undefined, ["writeFiles"]])(
+    "advertises the required PutObject Content-Type header for capabilities %s",
+    (capabilities) => {
+      const tool = getRegisteredTools(createServer(testConfig, capabilities))?.s3_get_presigned_url;
+      expect(tool).toBeDefined();
+      expect(tool?.description).toMatch(
+        /(?:PutObject|Uploads).*must send Content-Type exactly matching contentType/,
+      );
+      expect(tool?.description).toMatch(/signature validation fails/);
+      const contentType = getShape(tool?.inputSchema).contentType;
+      expect(contentType.description).toMatch(/must send Content-Type exactly matching this value/);
+    },
+  );
 
   it("documents s3_copy_object acl as a no-op compatibility hint", () => {
     const acl = getShape(tools["s3_copy_object"]?.inputSchema).acl;

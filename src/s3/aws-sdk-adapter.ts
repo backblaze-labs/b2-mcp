@@ -418,7 +418,7 @@ export interface B2S3PresignObjectUrlOptions {
   expiresIn: number;
   /** Optional version ID for GetObject URLs. */
   versionId?: string;
-  /** Required content type for PutObject URLs. */
+  /** PutObject uploads must send Content-Type exactly matching this value. */
   contentType?: string;
 }
 
@@ -1187,6 +1187,9 @@ export class B2S3PeerClient {
 
   /**
    * Generate a presigned GetObject or PutObject URL.
+   *
+   * @remarks
+   * PutObject uploads must send Content-Type exactly matching input.contentType.
    *
    * @param input - Presign options.
    *

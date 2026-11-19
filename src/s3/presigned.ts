@@ -23,10 +23,10 @@ const PUT_OBJECT_CONFIRM_DESC =
 
 function operationDescription(allowGetObjectUrl: boolean, allowPutObjectUrl: boolean): string {
   if (allowGetObjectUrl && allowPutObjectUrl) {
-    return "Generate a short-lived presigned URL bearer capability for one B2 object — GetObject (download) or PutObject (upload). Prefer this for single-object transfers; use s3_create_multipart_upload and s3_get_presigned_upload_part_url for multipart uploads. The response includes the URL, operation, expiresIn, and expiresAt; treat the URL as sensitive until it expires. This is the preferred path for moving real object data: bytes flow directly between the client/worker and B2 and never pass through the MCP server. Note: presigned POST (browser form uploads) is NOT supported by B2; use a PutObject URL instead.";
+    return "Generate a short-lived bearer URL for one B2 object: GetObject (download) or PutObject (upload). For multipart uploads use s3_create_multipart_upload and s3_get_presigned_upload_part_url. Returns url, operation, expiresIn, expiresAt; keep URL sensitive until expiry. Bytes flow directly between client/worker and B2, bypassing MCP. PutObject uploads must send Content-Type exactly matching contentType; otherwise signature validation fails. B2 does not support presigned POST (browser form uploads); use PutObject.";
   }
   if (allowPutObjectUrl) {
-    return "Generate a short-lived PutObject presigned URL bearer capability for uploading one B2 object. Prefer this for single-object uploads; use s3_create_multipart_upload and s3_get_presigned_upload_part_url for multipart uploads. The response includes the URL, operation, expiresIn, and expiresAt; treat the URL as sensitive until it expires. This is the preferred upload path for real object data because bytes flow directly between the client/worker and B2 and never pass through the MCP server.";
+    return "Generate a short-lived PutObject bearer URL for one B2 object. For multipart uploads use s3_create_multipart_upload and s3_get_presigned_upload_part_url. Returns url, operation, expiresIn, expiresAt; keep URL sensitive until expiry. Bytes flow directly between client/worker and B2, bypassing MCP. Uploads must send Content-Type exactly matching contentType; otherwise signature validation fails.";
   }
   return "Generate a short-lived GetObject presigned URL bearer capability for downloading one B2 object. Prefer this for single-object downloads; multipart uploads use s3_create_multipart_upload and s3_get_presigned_upload_part_url. The response includes the URL, operation, expiresIn, and expiresAt; treat the URL as sensitive until it expires. Read-only profiles expose download URLs only.";
 }
@@ -102,7 +102,7 @@ export function registerS3PresignedTools(
           contentType: z
             .string()
             .optional()
-            .describe("For PutObject: restrict the upload to this content type."),
+            .describe("For PutObject, uploads must send Content-Type exactly matching this value; otherwise signature validation fails."),
           confirm: z.boolean().optional().describe(PUT_OBJECT_CONFIRM_DESC),
         }
       : {}),
