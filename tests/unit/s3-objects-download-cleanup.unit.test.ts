@@ -204,3 +204,23 @@ it("a hard kill leaves only a partial temp file, with no final file or new final
     await exited;
   }
 });
+
+it.each(["tool", "saveToPath"])(
+  "documents ancestor staging and interruption behavior in the %s description",
+  (field) => {
+    const registrar = new ToolHarness();
+    const registration = vi.spyOn(registrar, "registerTool");
+    registerS3ObjectTools(registrar, s3.asPeerClient(), versions, {
+      ...testConfig,
+      fileRoot: root,
+    });
+    const definition = registration.mock.calls.find(([name]) => name === "s3_get_object")?.[1];
+    expect(definition).toBeDefined();
+    const shape = definition?.inputSchema as Record<string, { description?: string }>;
+    const description = field === "tool" ? definition?.description : shape.saveToPath.description;
+    expect(description).toMatch(/nearest existing ancestor/);
+    expect(description).toMatch(/parent directories only after a complete download/);
+    expect(description).toMatch(/SIGKILL may leave a \.part there/);
+    expect(description).not.toMatch(/temporary sibling file/);
+  },
+);

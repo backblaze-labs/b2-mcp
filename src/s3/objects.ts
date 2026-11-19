@@ -32,6 +32,8 @@ import { assertSafeObjectContentType, b2S3DeleteErrorEntry } from "./aws-sdk-ada
 
 const CONFIRM_DESC =
   "Fallback confirmation for this destructive/irreversible operation when the effective server destructive policy is 'confirm' and MCP elicitation cannot run.";
+const SAVE_TO_PATH_DESC =
+  "Stage a .part file in the nearest existing ancestor, creating parent directories only after a complete download. Rename atomically on success; transfer errors preserve the target. SIGKILL may leave a .part there; finalization errors may leave parents.";
 
 interface DeleteObjectEntry {
   key: string;
@@ -925,16 +927,15 @@ export function registerS3ObjectTools(
     "s3_get_object",
     {
       description:
-        "Read a SMALL object inline (≤1 MiB, returned base64) — for manifests, sidecars, and configs the agent must inspect — or stream any size to a local path with saveToPath. saveToPath writes the fetched bytes to the local filesystem (creating parent directories) via a temporary sibling file that replaces the target only after a complete download, so a failed transfer leaves any existing file untouched; it performs no mutation of B2 or any remote data. For real object data, generate a GetObject URL with s3_get_presigned_url and download directly from B2 (bytes never pass through the server or the model context).",
+        "Read a SMALL object inline (≤1 MiB, base64) for manifests, sidecars, and configs, or stream any size to a local saveToPath. " +
+        SAVE_TO_PATH_DESC +
+        " No B2 or remote data is mutated. For bulk data, use s3_get_presigned_url (GetObject) to download directly from B2, bypassing the server and model context.",
       inputSchema: {
         bucket: z.string().describe("The bucket name."),
         key: z.string().describe("The object key."),
         range: z.string().optional().describe("Byte range, e.g. 'bytes=0-1048575'."),
         ...getObjectVersionIdInput,
-        saveToPath: z
-          .string()
-          .optional()
-          .describe("If provided, save the file to this local path."),
+        saveToPath: z.string().optional().describe(SAVE_TO_PATH_DESC),
       },
     },
     async (args) => {

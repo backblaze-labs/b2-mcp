@@ -1683,7 +1683,7 @@
     },
     {
       "name": "s3_get_object",
-      "description": "Read a SMALL object inline (≤1 MiB, returned base64) — for manifests, sidecars, and configs the agent must inspect — or stream any size to a local path with saveToPath. saveToPath writes the fetched bytes to the local filesystem (creating parent directories) via a temporary sibling file that replaces the target only after a complete download, so a failed transfer leaves any existing file untouched; it performs no mutation of B2 or any remote data. For real object data, generate a GetObject URL with s3_get_presigned_url and download directly from B2 (bytes never pass through the server or the model context).",
+      "description": "Read a SMALL object inline (≤1 MiB, base64) for manifests, sidecars, and configs, or stream any size to a local saveToPath. Stage a .part file in the nearest existing ancestor, creating parent directories only after a complete download. Rename atomically on success; transfer errors preserve the target. SIGKILL may leave a .part there; finalization errors may leave parents. No B2 or remote data is mutated. For bulk data, use s3_get_presigned_url (GetObject) to download directly from B2, bypassing the server and model context.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -1704,7 +1704,7 @@
             "type": "string"
           },
           "saveToPath": {
-            "description": "If provided, save the file to this local path.",
+            "description": "Stage a .part file in the nearest existing ancestor, creating parent directories only after a complete download. Rename atomically on success; transfer errors preserve the target. SIGKILL may leave a .part there; finalization errors may leave parents.",
             "type": "string"
           }
         },
