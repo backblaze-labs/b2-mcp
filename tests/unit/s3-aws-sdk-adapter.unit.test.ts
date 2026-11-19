@@ -156,6 +156,9 @@ describe("B2S3PeerClient object data-plane behavior", () => {
         expiresIn: 60,
         contentType: "application/octet-stream",
       });
+      expect(result).toHaveProperty("requiredHeaders", {
+        "content-type": "application/octet-stream",
+      });
       const url = new URL(result.url);
       expect(url.searchParams.get("X-Amz-SignedHeaders")?.split(";")).toContain("content-type");
       expect(handle).not.toHaveBeenCalled();
@@ -209,6 +212,7 @@ describe("B2S3PeerClient object data-plane behavior", () => {
       expect(new URL(result.url).searchParams.get("X-Amz-SignedHeaders")?.split(";")).not.toContain(
         "content-type",
       );
+      expect(result.requiredHeaders).toBeUndefined();
       expect(handle).not.toHaveBeenCalled();
     } finally {
       s3.destroy();

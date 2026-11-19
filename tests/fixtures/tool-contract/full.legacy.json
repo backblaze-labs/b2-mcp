@@ -1588,7 +1588,7 @@
     },
     {
       "name": "s3_get_presigned_url",
-      "descriptionSha256": "770415f40ed847baab602122091a3c9d445618f55138d3d3c0080f3287698d75",
+      "descriptionSha256": "4505e188fe6d85f9bfb682fd41040d11f9b1b022ac1673b6fd40abadbe084661",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -1601,7 +1601,7 @@
             "type": "boolean"
           },
           "contentType": {
-            "description": "For PutObject, uploads must send Content-Type exactly matching this value; otherwise signature validation fails.",
+            "description": "For PutObject, uploads must send Content-Type exactly matching this value; otherwise signature validation fails. Use requiredHeaders.",
             "type": "string"
           },
           "expiresIn": {
@@ -2060,5 +2060,5 @@
     "toolsListCacheHint": null,
     "discover": null
   },
-  "hash": "af353427d53f6765c2b3891b69d1bbcbf9f159725bf954daefbc81a83dcaeb88"
+  "hash": "84f1a45da69860fa5c39e23d987e0f11addb1905890259f8d3ed988b15c86889"
 }

@@ -16,15 +16,19 @@ function multipartPartNumberSchema(description?: string) {
   return description ? schema.describe(description) : schema;
 }
 
-function copySourceTarget(copySource: string): {
+function copySourceTarget(
+  copySource: string,
+  versionId?: string,
+): {
   bucket: string;
   key: string;
   path: string;
   versionId?: string;
-} {
+} | null {
   const queryAt = copySource.indexOf("?");
   const path = queryAt < 0 ? copySource : copySource.slice(0, queryAt);
   const query = queryAt < 0 ? undefined : copySource.slice(queryAt + 1);
+  if (!versionId && !new URLSearchParams(query).has("versionId")) return null;
   const versionMatch = query?.match(/^versionId=([^&?#]+)$/);
   const source = path.startsWith("/") ? path.slice(1) : path;
   const separator = source.indexOf("/");
@@ -54,10 +58,8 @@ function copySourceTarget(copySource: string): {
  * Register S3-compatible multipart upload tools.
  *
  * @remarks
- * Multipart upload is control-plane-first: the server creates the upload,
- * presigns individual upload-part URLs, completes/aborts the upload, and lists
- * multipart state, but client bytes move directly to B2 through the presigned
- * URLs.
+ * Multipart tools manage upload state; clients send part bytes directly to B2
+ * using presigned URLs. createServer supplies the registrar and clients.
  *
  * @param server - Tool registrar receiving multipart tools.
  * @param s3 - Repository-owned S3-compatible client facade.
@@ -66,7 +68,8 @@ function copySourceTarget(copySource: string): {
  *
  * @example
  * ```ts
- * registerS3MultipartTools(registrar, s3Client, config, { versions: b2Client });
+ * import { createServer, loadConfig } from "../server.js";
+ * export const server = createServer(loadConfig());
  * ```
  */
 export function registerS3MultipartTools(
@@ -394,23 +397,22 @@ export function registerS3MultipartTools(
     },
     async (args) => {
       try {
-        const source = copySourceTarget(args.copySource);
+        const source = copySourceTarget(args.copySource, args.copySourceVersionId);
         if (
-          source.versionId &&
+          source?.versionId &&
           args.copySourceVersionId &&
           source.versionId !== args.copySourceVersionId
         ) {
           throw badRequestError("Conflicting version IDs.");
         }
-        const versionId = source.versionId || args.copySourceVersionId || undefined;
-        if (versionId && !options.versions) {
-          throw codedError(
-            503,
-            "version_binding_unavailable",
-            "Version-targeted multipart copies require a configured native version resolver.",
-          );
-        }
-        if (options.versions) {
+        const versionId = source?.versionId || args.copySourceVersionId || undefined;
+        if (versionId) {
+          if (!options.versions || !source)
+            throw codedError(
+              503,
+              "version_binding_unavailable",
+              "Version-targeted multipart copies require a configured native version resolver.",
+            );
           await verifyVersionBinding(
             options.versions,
             { bucket: source.bucket, key: source.key, versionId },
@@ -418,8 +420,8 @@ export function registerS3MultipartTools(
           );
         }
         const copySource = versionId
-          ? `${source.path}?versionId=${encodeURIComponent(versionId)}`
-          : source.path;
+          ? `${source?.path ?? args.copySource}?versionId=${encodeURIComponent(versionId)}`
+          : args.copySource;
         const result = await s3.uploadPartCopy({
           bucket: args.bucket,
           key: args.key,

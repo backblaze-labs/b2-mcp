@@ -59,6 +59,35 @@ afterEach(() => {
 });
 
 describe("Finding C15: s3_upload_part_copy source-version binding", () => {
+  it.each([
+    "source-bucket/report#1.bin",
+    "source-bucket/report.bin?download=1",
+    "source-bucket/source.bin?other=value",
+    "source-bucket/report.bin?download=1#fragment",
+  ])("passes through an unversioned copy source %s unchanged", async (copySource) => {
+    const result = await callTool(server, "s3_upload_part_copy", { ...input, copySource });
+    expect(result.isError).toBeFalsy();
+    expect(versionSpy).not.toHaveBeenCalled();
+    expect(copyCommands()).toHaveLength(1);
+    expect(copyCommands()[0].input.CopySource).toBe(copySource);
+  });
+
+  it.each([
+    "source-bucket/report.bin?download=1&versionId=foreign-version",
+    "source-bucket/report.bin?%76ersionId=foreign-version",
+    "source-bucket/report.bin?versionId",
+    "source-bucket/report#1.bin?versionId=foreign-version",
+  ])("refuses malformed embedded version selectors in %s", async (copySource) => {
+    const result = await callTool(server, "s3_upload_part_copy", { ...input, copySource });
+    expect(result.isError).toBe(true);
+    expect(parseErrorText(parseResult(result) as string)).toMatchObject({
+      status: 400,
+      code: "bad_request",
+    });
+    expect(versionSpy).not.toHaveBeenCalled();
+    expect(copyCommands()).toHaveLength(0);
+  });
+
   it("treats an empty separate source version as omitted", async () => {
     const result = await callTool(server, "s3_upload_part_copy", {
       ...input,
@@ -263,7 +292,6 @@ describe("Finding C15: s3_upload_part_copy source-version binding", () => {
     "source-bucket/source.bin?versionId=one&other=two",
     "source-bucket/source.bin?versionId=",
     "source-bucket/source.bin?versionId=bad%2",
-    "source-bucket/source.bin?other=value",
   ])("refuses malformed embedded version query %s", async (copySource) => {
     const result = await callTool(server, "s3_upload_part_copy", { ...input, copySource });
     expect(result.isError).toBe(true);
@@ -311,6 +339,7 @@ describe("Finding C15: s3_upload_part_copy source-version binding", () => {
     "source-bucket/",
     "source-bucket/bad%key",
     "source-bucket/source.bin#versionId=foreign-version",
+    "source-bucket/source.bin?other=value",
   ])("refuses malformed or spliced copySource %s", async (copySource) => {
     const result = await callTool(server, "s3_upload_part_copy", {
       ...input,
