@@ -737,15 +737,22 @@ async function nearestSnapshotDate(
   budget: ReportScanBudget = createReportScanBudget(),
 ): Promise<{ date: string | null; bucketMissing: boolean }> {
   try {
-    if (!ensureReportPageBudget(budget)) return { date: null, bucketMissing: false };
-    const page = await reportClient.listReportObjectKeys(bucketName, {
-      startAfter: target,
-      maxKeys: 1,
-      timeoutMs: reportScanRemainingMs(budget),
-    });
-    budget.stats.pages++;
-    budget.stats.listed_keys += page.keys.length;
-    return { date: snapshotDateOf(page.keys[0] ?? ""), bucketMissing: false };
+    let token: string | undefined;
+    do {
+      if (!ensureReportPageBudget(budget)) break;
+      const page = await reportClient.listReportObjectKeys(bucketName, {
+        startAfter: target,
+        continuationToken: token,
+        maxKeys: token ? REPORT_SCAN_LIMITS.maxKeysPerPage : 1,
+        timeoutMs: reportScanRemainingMs(budget),
+      });
+      budget.stats.pages++;
+      budget.stats.listed_keys += page.keys.length;
+      const key = page.keys.find((candidate) => REPORT_DAY_CSV_RE.test(candidate));
+      if (key) return { date: snapshotDateOf(key), bucketMissing: false };
+      token = page.isTruncated ? page.nextContinuationToken : undefined;
+    } while (token);
+    return { date: null, bucketMissing: false };
   } catch (e) {
     if (is404(e)) return { date: null, bucketMissing: true };
     throw e;
