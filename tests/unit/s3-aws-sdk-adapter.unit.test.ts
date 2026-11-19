@@ -123,6 +123,98 @@ describe("B2S3PeerClient object data-plane behavior", () => {
     }
   });
 
+  it.each(["text/html", "image/svg+xml", "application/javascript", "application/xhtml+xml"])(
+    "refuses a presigned PutObject URL for %s",
+    async (contentType) => {
+      const handle = vi.fn();
+      const s3 = clientWithHandler(handle);
+      try {
+        await expect(
+          s3.presignObjectUrl({
+            bucket: "bucket",
+            key: "object",
+            operation: "PutObject",
+            expiresIn: 60,
+            contentType,
+          }),
+        ).rejects.toMatchObject({ status: 400, code: "bad_request" });
+        expect(handle).not.toHaveBeenCalled();
+      } finally {
+        s3.destroy();
+      }
+    },
+  );
+
+  it("includes content-type in presigned PutObject signed headers", async () => {
+    const handle = vi.fn();
+    const s3 = clientWithHandler(handle);
+    try {
+      const result = await s3.presignObjectUrl({
+        bucket: "bucket",
+        key: "object",
+        operation: "PutObject",
+        expiresIn: 60,
+        contentType: "application/octet-stream",
+      });
+      const url = new URL(result.url);
+      expect(url.searchParams.get("X-Amz-SignedHeaders")?.split(";")).toContain("content-type");
+      expect(handle).not.toHaveBeenCalled();
+    } finally {
+      s3.destroy();
+    }
+  });
+
+  it("binds the presigned PutObject signature to the approved content type", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    const handle = vi.fn();
+    const s3 = clientWithHandler(handle);
+    try {
+      const input = {
+        bucket: "bucket",
+        key: "object",
+        operation: "PutObject" as const,
+        expiresIn: 60,
+      };
+      const binary = new URL(
+        (await s3.presignObjectUrl({ ...input, contentType: "application/octet-stream" })).url,
+      );
+      const text = new URL(
+        (await s3.presignObjectUrl({ ...input, contentType: "text/plain" })).url,
+      );
+      expect(binary.origin + binary.pathname).toBe(text.origin + text.pathname);
+      expect(binary.searchParams.get("X-Amz-Date")).toBe(text.searchParams.get("X-Amz-Date"));
+      expect(binary.searchParams.get("X-Amz-Signature")).toBeTruthy();
+      expect(text.searchParams.get("X-Amz-Signature")).toBeTruthy();
+      expect(binary.searchParams.get("X-Amz-Signature")).not.toBe(
+        text.searchParams.get("X-Amz-Signature"),
+      );
+      expect(handle).not.toHaveBeenCalled();
+    } finally {
+      s3.destroy();
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps presigned GetObject URLs independent of a content-type header", async () => {
+    const handle = vi.fn();
+    const s3 = clientWithHandler(handle);
+    try {
+      const result = await s3.presignObjectUrl({
+        bucket: "bucket",
+        key: "object",
+        operation: "GetObject",
+        expiresIn: 60,
+      });
+      expect(new URL(result.url).searchParams.get("X-Amz-SignedHeaders")?.split(";")).not.toContain(
+        "content-type",
+      );
+      expect(handle).not.toHaveBeenCalled();
+    } finally {
+      s3.destroy();
+    }
+  });
+
   it("uses operation-neutral wording for a missing required content type", async () => {
     const s3 = clientWithHandler(vi.fn());
     try {

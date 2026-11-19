@@ -1192,9 +1192,8 @@ export class B2S3PeerClient {
    *
    * @returns Presigned URL metadata.
    *
-   * @throws Error when a PutObject URL includes a version ID.
-   * @throws A 400-style bad request Error when PutObject content type validation rejects missing
-   * or unsafe input.
+   * @throws A 400-style bad request Error for a versioned PutObject URL or missing/unsafe
+   * PutObject content type.
    */
   async presignObjectUrl(input: B2S3PresignObjectUrlOptions): Promise<B2S3PresignObjectUrlResult> {
     if (input.operation === "PutObject" && input.versionId !== undefined) {
@@ -1215,7 +1214,10 @@ export class B2S3PeerClient {
             ContentType: input.contentType,
           });
     return {
-      url: await getSignedUrl(this.readClient, command, { expiresIn: input.expiresIn }),
+      url: await getSignedUrl(this.readClient, command, {
+        expiresIn: input.expiresIn,
+        signableHeaders: new Set(["content-type"]),
+      }),
       operation: input.operation,
       expiresIn: input.expiresIn,
       expiresAt: new Date(Date.now() + input.expiresIn * 1000).toISOString(),
