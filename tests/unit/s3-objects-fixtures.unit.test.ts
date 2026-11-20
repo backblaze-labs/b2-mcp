@@ -1130,6 +1130,7 @@ describe("S3 object tools with deterministic handler fake", () => {
         const dir = path.join(base, "shared", "lock");
         fs.mkdirSync(path.join(base, "shared"));
         const target = path.join(dir, "out.txt");
+        fs.mkdirSync(dir);
         const realOpen = fs.promises.open.bind(fs.promises);
         const openSpy = vi.spyOn(fs.promises, "open").mockImplementation(async (...args) => {
           const handle = await realOpen(...(args as Parameters<typeof realOpen>));
@@ -1461,6 +1462,7 @@ describe("S3 object tools with deterministic handler fake", () => {
   linuxIt("refuses a sandboxed save whose parent cannot be pinned", async () => {
     const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "b2-save-pin-none-")));
     const dir = path.join(root, "a", "b");
+    fs.mkdirSync(dir, { recursive: true });
     const sandboxed = sandboxedTools(root);
     const realOpen = fs.promises.open.bind(fs.promises);
     const openSpy = vi.spyOn(fs.promises, "open").mockImplementation(async (...args) => {
@@ -1478,7 +1480,7 @@ describe("S3 object tools with deterministic handler fake", () => {
         /cannot open the directory .* \(EACCES\), which is required/i,
       );
       expect(s3.requestsFor("getObject")).toHaveLength(0);
-      // Left in place: directories this request created are never removed.
+      // The pre-existing parent is left in place.
       expect(fs.readdirSync(dir)).toEqual([]);
     } finally {
       openSpy.mockRestore();
