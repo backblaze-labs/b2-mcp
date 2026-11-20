@@ -7,7 +7,7 @@ import { circuitBreaker } from "../../src/utils/circuit-breaker";
 import { _consumeRetryToken, _resetRetryBudget } from "../../src/utils/retry";
 import type { B2AuthResponse } from "../../src/utils/types";
 import { testConfig } from "../support/deterministic-fakes";
-import { knownDefect } from "../support/known-defect";
+import { expectDefect, knownDefect } from "../support/known-defect";
 import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
 import {
   authorizeResponse,
@@ -1048,10 +1048,21 @@ describe("B2Client native edge branches", () => {
         // Correct: either the abort is surfaced, or one entry comes back per requested object
         // in request order. Silently dropping the unprocessed targets is the defect.
         if ("value" in outcome) {
+          await expectDefect(() =>
+            expect(
+              outcome.value.map((entry) => entry.object.key),
+              "one result per requested object, in request order",
+            ).toEqual(objects.map((object) => object.key)),
+          );
+        } else {
+          // A rejection is only correct when it surfaces the caller's abort. Any other error
+          // (authorization, lookup, ...) is a different failure and must fail this test.
+          const reason = controller.signal.reason;
+          const error = outcome.error as { cause?: unknown };
           expect(
-            outcome.value.map((entry) => entry.object.key),
-            "one result per requested object, in request order",
-          ).toEqual(objects.map((object) => object.key));
+            outcome.error === reason || error?.cause === reason,
+            `rejection carries the caller's abort reason, got: ${String(outcome.error)}`,
+          ).toBe(true);
         }
       },
     );

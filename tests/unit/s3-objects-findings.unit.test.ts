@@ -10,7 +10,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { registerS3ObjectTools } from "../../src/s3/objects";
 import type { B2S3DownloadedObject } from "../../src/s3/aws-sdk-adapter";
-import { MAX_MCP_BODY_BYTES } from "../../src/utils/http-body-limit";
+import { MAX_MCP_BODY_BYTES, readCappedBodyBytes } from "../../src/utils/http-body-limit";
 import {
   circuitBreaker,
   s3CircuitBreaker,
@@ -25,7 +25,7 @@ import {
   testConfig,
 } from "../support/deterministic-fakes";
 import { FASTCHECK_SEED } from "../support/fast-check-seed";
-import { knownDefect } from "../support/known-defect";
+import { expectDefect, knownDefect } from "../support/known-defect";
 
 const INLINE_LIMIT = 1024 * 1024;
 
@@ -86,10 +86,9 @@ describe("Finding C5: early local-file refusals are client errors (400), not 500
       contentType: "text/plain",
     });
     expect(result.isError, "request is refused").toBe(true);
-    expect(parseErrorText(parseResult(result) as string), "error status").toMatchObject({
-      status: 400,
-    });
     expect(s3.requests, "no S3 request sent").toEqual([]);
+    const error = parseErrorText(parseResult(result) as string);
+    await expectDefect(() => expect(error, "error status").toMatchObject({ status: 400 }));
   });
 
   knownDefect("s3_put_object with a filePath outside the sandbox root returns 400", async () => {
@@ -101,10 +100,9 @@ describe("Finding C5: early local-file refusals are client errors (400), not 500
       contentType: "text/plain",
     });
     expect(result.isError, "request is refused").toBe(true);
-    expect(parseErrorText(parseResult(result) as string), "error status").toMatchObject({
-      status: 400,
-    });
     expect(s3.requests, "no S3 request sent").toEqual([]);
+    const error = parseErrorText(parseResult(result) as string);
+    await expectDefect(() => expect(error, "error status").toMatchObject({ status: 400 }));
   });
 
   knownDefect("s3_get_object with local files disabled and saveToPath returns 400", async () => {
@@ -115,10 +113,9 @@ describe("Finding C5: early local-file refusals are client errors (400), not 500
       saveToPath: path.join(dir, "out.bin"),
     });
     expect(result.isError, "request is refused").toBe(true);
-    expect(parseErrorText(parseResult(result) as string), "error status").toMatchObject({
-      status: 400,
-    });
     expect(s3.requests, "no S3 request sent").toEqual([]);
+    const error = parseErrorText(parseResult(result) as string);
+    await expectDefect(() => expect(error, "error status").toMatchObject({ status: 400 }));
   });
 
   knownDefect("s3_get_object with a saveToPath outside the sandbox root returns 400", async () => {
@@ -129,10 +126,9 @@ describe("Finding C5: early local-file refusals are client errors (400), not 500
       saveToPath: path.join(outside, "out.bin"),
     });
     expect(result.isError, "request is refused").toBe(true);
-    expect(parseErrorText(parseResult(result) as string), "error status").toMatchObject({
-      status: 400,
-    });
     expect(s3.requests, "no S3 request sent").toEqual([]);
+    const error = parseErrorText(parseResult(result) as string);
+    await expectDefect(() => expect(error, "error status").toMatchObject({ status: 400 }));
   });
 });
 
@@ -147,7 +143,10 @@ describe("Finding C6: empty inline content", () => {
     });
 
     expect(result.isError, "empty content is accepted").toBeFalsy();
-    expect(s3.requestsFor("putObject"), "one put sent").toHaveLength(1);
+    const puts = s3.requestsFor("putObject");
+    expect(puts, "one put sent").toHaveLength(1);
+    const body = (puts[0].input as { body: Uint8Array }).body;
+    expect(Buffer.from(body), "uploaded body is zero bytes").toEqual(Buffer.alloc(0));
   });
 });
 
@@ -155,7 +154,9 @@ describe("Finding C7: inline upload input handling", () => {
   knownDefect(
     "rejects content that is not valid base64 instead of uploading decoded garbage (property)",
     async () => {
-      await fc.assert(
+      // fc.check reports the property's own failure (the AssertionError from the checks below)
+      // as errorInstance, so only that failure is accepted as the defect.
+      const details = await fc.check(
         fc.asyncProperty(
           fc.string({ minLength: 1, maxLength: 24 }),
           fc.constantFrom("!", "@", "#", "$", "%", "^", "*", "("),
@@ -174,6 +175,9 @@ describe("Finding C7: inline upload input handling", () => {
         ),
         { numRuns: 25, seed: FASTCHECK_SEED },
       );
+      await expectDefect(() => {
+        if (details.failed) throw details.errorInstance;
+      });
     },
   );
 
@@ -210,32 +214,89 @@ describe("Finding C7: inline upload input handling", () => {
       });
 
       // Ambiguous input must be refused, not resolved by quietly ignoring one source.
-      expect(result.isError, "filePath plus content is refused").toBe(true);
-      expect(s3.requestsFor("putObject"), "no put sent").toHaveLength(0);
+      await expectDefect(() => {
+        expect(result.isError, "filePath plus content is refused").toBe(true);
+        expect(s3.requestsFor("putObject"), "no put sent").toHaveLength(0);
+      });
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
 });
 
+/** Inline limit the s3_put_object description advertises, in bytes (for example "≤1 MiB"). */
+function advertisedInlineLimitBytes(): number {
+  let description = "";
+  const registrar = {
+    registerTool(name: string, config: { description?: string }) {
+      if (name === "s3_put_object") description = config.description ?? "";
+    },
+  };
+  const s3 = new DeterministicS3ClientFake();
+  registerS3ObjectTools(registrar as never, s3.asPeerClient(), noVersions, testConfig);
+  const match = /≤\s*(\d+)\s*MiB/.exec(description);
+  if (!match) throw new Error(`s3_put_object description has no "≤N MiB" limit: ${description}`);
+  return Number(match[1]) * 1024 * 1024;
+}
+
+/** The complete JSON-RPC tools/call request an MCP client sends for an inline upload. */
+function putObjectRequestBody(payloadBytes: number): Uint8Array {
+  const request = {
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/call",
+    params: {
+      name: "s3_put_object",
+      arguments: {
+        bucket: "b",
+        key: "limit.bin",
+        content: Buffer.alloc(payloadBytes).toString("base64"),
+        contentType: "application/octet-stream",
+      },
+    },
+  };
+  return new TextEncoder().encode(JSON.stringify(request));
+}
+
+const postRequest = (body: Uint8Array) =>
+  new Request("http://localhost/mcp", { method: "POST", body: body as never });
+
 describe("Finding C8: inline put limit versus the HTTP body cap", () => {
+  it("the HTTP body reader accepts a request of exactly the cap and rejects one byte more (guard)", async () => {
+    expect(
+      await readCappedBodyBytes(postRequest(new Uint8Array(MAX_MCP_BODY_BYTES))),
+      "request of exactly the cap",
+    ).not.toBeNull();
+    expect(
+      await readCappedBodyBytes(postRequest(new Uint8Array(MAX_MCP_BODY_BYTES + 1))),
+      "request one byte over the cap",
+    ).toBeNull();
+  });
+
   knownDefect(
-    "an inline upload the tool accepts still fits in an MCP request body once base64-encoded",
+    "a complete MCP tools/call request carrying the largest inline upload is accepted by the HTTP body cap",
     async () => {
+      const inlineLimit = advertisedInlineLimitBytes();
+      expect(inlineLimit, "the tool advertises 1 MiB inline").toBe(INLINE_LIMIT);
+
       const { tools, s3 } = setup();
       const result = await tools.call("s3_put_object", {
         bucket: "b",
         key: "limit.bin",
-        content: Buffer.alloc(INLINE_LIMIT).toString("base64"),
+        content: Buffer.alloc(inlineLimit).toString("base64"),
         contentType: "application/octet-stream",
       });
-      expect(result.isError, "the tool advertises up to 1 MiB inline").toBeFalsy();
+      expect(result.isError, "the tool accepts the advertised maximum inline payload").toBeFalsy();
       expect(s3.requestsFor("putObject"), "one put sent").toHaveLength(1);
 
-      const base64Bytes = Math.ceil(INLINE_LIMIT / 3) * 4;
+      // The whole serialized request (JSON-RPC envelope included) goes through the HTTP reader.
       // A payload the tool accepts but the HTTP transport rejects (413) is a contract gap.
-      expect(base64Bytes, "base64 size of the largest inline upload").toBeLessThanOrEqual(
-        MAX_MCP_BODY_BYTES,
+      const accepted = await readCappedBodyBytes(postRequest(putObjectRequestBody(inlineLimit)));
+      await expectDefect(() =>
+        expect(
+          accepted,
+          "HTTP accepts the full request for the largest inline upload",
+        ).not.toBeNull(),
       );
     },
   );
@@ -258,7 +319,9 @@ describe("Finding C9: failed save-to-path downloads leave nothing behind", () =>
       });
 
       expect(result.isError, "missing object is an error").toBe(true);
-      expect(fs.existsSync(path.join(root, "made")), "parent directory created").toBe(false);
+      await expectDefect(() =>
+        expect(fs.existsSync(path.join(root, "made")), "parent directory created").toBe(false),
+      );
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
@@ -281,9 +344,11 @@ describe("Finding C2: inline s3_get_object checks the received length", () => {
 
     const result = await tools.call("s3_get_object", { bucket: "b", key: "k" });
 
-    expect(result.isError, "truncated body is an error").toBe(true);
-    expect(parseErrorText(parseResult(result) as string), "error code").toMatchObject({
-      code: "incomplete_download",
+    await expectDefect(() => {
+      expect(result.isError, "truncated body is an error").toBe(true);
+      expect(parseErrorText(parseResult(result) as string), "error code").toMatchObject({
+        code: "incomplete_download",
+      });
     });
   });
 });

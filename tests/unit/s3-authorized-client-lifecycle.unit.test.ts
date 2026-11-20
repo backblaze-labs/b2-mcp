@@ -4,11 +4,18 @@
  * so the test uses `knownDefect` (see tests/support/known-defect.ts).
  */
 import { describe, expect, vi } from "vitest";
-import { knownDefect } from "../support/known-defect";
+import { expectDefect, knownDefect } from "../support/known-defect";
 
-const peers = vi.hoisted(
-  () => [] as Array<{ destroy: ReturnType<typeof vi.fn>; destroyedAtReturn?: boolean }>,
-);
+const BODY_BYTES = vi.hoisted(() => new TextEncoder().encode("stream-bound-to-this-client"));
+
+interface FakePeer {
+  destroy: ReturnType<typeof vi.fn>;
+  getObject: ReturnType<typeof vi.fn>;
+  /** Set when the response body is pulled after the owning client was destroyed. */
+  pulledAfterDestroy: boolean;
+}
+
+const peers = vi.hoisted(() => [] as FakePeer[]);
 
 vi.mock("@backblaze-labs/b2-sdk/s3", () => ({
   createS3ClientConfig: vi.fn((input) => ({
@@ -20,9 +27,30 @@ vi.mock("@backblaze-labs/b2-sdk/s3", () => ({
 
 vi.mock("../../src/s3/aws-sdk-adapter.js", () => ({
   createB2S3PeerClient: vi.fn(() => {
-    const peer = {
+    const peer: FakePeer = {
       destroy: vi.fn(),
-      getObject: vi.fn(async () => ({ body: "stream-bound-to-this-client" })),
+      pulledAfterDestroy: false,
+      // A real S3 body is a stream bound to the client's connection: once the client is
+      // destroyed, the stream can no longer be read.
+      getObject: vi.fn(async () => ({
+        key: "k",
+        metadata: {},
+        // highWaterMark 0: bytes are produced only when the caller reads, like a socket.
+        body: new ReadableStream<Uint8Array>(
+          {
+            pull(controller) {
+              if (peer.destroy.mock.calls.length > 0) {
+                peer.pulledAfterDestroy = true;
+                controller.error(new Error("socket closed: client destroyed"));
+                return;
+              }
+              controller.enqueue(BODY_BYTES);
+              controller.close();
+            },
+          },
+          { highWaterMark: 0 },
+        ),
+      })),
     };
     peers.push(peer);
     return peer;
@@ -57,13 +85,44 @@ describe("createAuthorizedS3Client fallback client lifecycle (Finding C1)", () =
       });
 
       const object = await (
-        facade as unknown as { getObject: (input: unknown) => Promise<{ body: unknown }> }
+        facade as unknown as {
+          getObject: (input: unknown) => Promise<{ body: ReadableStream<Uint8Array> }>;
+          destroy: () => void;
+        }
       ).getObject({ bucket: "b", key: "k" });
-
-      expect(object.body, "object body is returned").toBe("stream-bound-to-this-client");
       expect(peers, "one fallback client created").toHaveLength(1);
-      // The body is still unread here; tearing the client down now would cut the transfer.
-      expect(peers[0].destroy).not.toHaveBeenCalled();
+      const [peer] = peers;
+
+      // Consume the body the way a caller does, to completion.
+      const received: Uint8Array[] = [];
+      let readError: unknown;
+      try {
+        const reader = object.body.getReader();
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          received.push(value);
+        }
+      } catch (error) {
+        readError = error;
+      }
+
+      // The body must stay readable while the caller reads it; destroying the client at
+      // return would cut the transfer.
+      await expectDefect(() => {
+        expect(readError, "body readable while the fallback client is alive").toBeUndefined();
+        expect(peer.pulledAfterDestroy, "body pulled after the client was destroyed").toBe(false);
+        expect(Buffer.concat(received).toString(), "bytes read from the body").toBe(
+          Buffer.from(BODY_BYTES).toString(),
+        );
+      });
+
+      // Once the body is consumed and the facade is closed, the fallback client is released.
+      object.body.cancel?.().catch(() => undefined);
+      facade.destroy();
+      await vi.waitFor(() => expect(peer.destroy, "fallback client destroyed").toHaveBeenCalled(), {
+        timeout: 1000,
+      });
     },
   );
 });

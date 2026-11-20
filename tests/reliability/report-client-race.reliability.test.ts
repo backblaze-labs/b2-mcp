@@ -6,7 +6,7 @@
 import { B2ReportClient } from "../../src/b2/report-client";
 import { createReportS3Client } from "../../src/s3/client";
 import { DeterministicS3ClientFake, testConfig } from "../support/deterministic-fakes";
-import { knownDefect } from "../support/known-defect";
+import { expectDefect, knownDefect } from "../support/known-defect";
 import { deferred } from "../support/sdk-test-helpers";
 
 vi.mock("../../src/s3/client", async (importOriginal) => ({
@@ -57,8 +57,11 @@ describe("B2ReportClient concurrency", () => {
       client.destroy();
 
       // Either only one client is built, or every extra one is released.
+      expect(created.length, "at least one S3 client was created").toBeGreaterThan(0);
       const leaked = created.filter((fake) => !fake.destroyed);
-      expect(leaked, "S3 clients created but never destroyed").toHaveLength(0);
+      await expectDefect(() =>
+        expect(leaked, "S3 clients created but never destroyed").toHaveLength(0),
+      );
     },
   );
 });

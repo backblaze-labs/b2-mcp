@@ -11,7 +11,7 @@ import type {
   ReportObjectText,
 } from "../../src/b2/report-client";
 import { parseResult, ToolHarness } from "../support/deterministic-fakes";
-import { knownDefect } from "../support/known-defect";
+import { expectDefect, knownDefect } from "../support/known-defect";
 
 const REPORT_CLOCK = new Date("2026-01-31T12:00:00.000Z");
 
@@ -94,11 +94,14 @@ describe("b2_report_usage_growth findings", () => {
         }),
       );
 
+      expect(result.accounts, "limit=1 keeps exactly one account").toHaveLength(1);
       // The single most-shrunk account ("huge", -90 GB) must be the one kept.
-      expect(
-        result.accounts.map((a: { account: string }) => a.account),
-        "accounts kept under limit=1",
-      ).toEqual(["huge"]);
+      await expectDefect(() =>
+        expect(
+          result.accounts.map((a: { account: string }) => a.account),
+          "accounts kept under limit=1",
+        ).toEqual(["huge"]),
+      );
     },
   );
 
@@ -123,7 +126,10 @@ describe("b2_report_usage_growth findings", () => {
         }),
       );
 
-      expect(result.from_date, "comparison snapshot date").toBe("2026-01-05");
+      expect(result.to_date, "latest snapshot date").toBe("2026-01-30");
+      await expectDefect(() =>
+        expect(result.from_date, "comparison snapshot date").toBe("2026-01-05"),
+      );
     },
   );
 
@@ -146,9 +152,14 @@ describe("b2_report_usage_growth findings", () => {
         }),
       );
 
-      expect(result.note, "no insufficient-history note").toBeUndefined();
-      expect(result.to_date, "latest snapshot date").toBe("2026-01-30");
-      expect(result.from_date, "previous snapshot date").toBe("2026-01-29");
+      expect(typeof result, "the tool returned a structured report, not an error string").toBe(
+        "object",
+      );
+      await expectDefect(() => {
+        expect(result.note, "no insufficient-history note").toBeUndefined();
+        expect(result.to_date, "latest snapshot date").toBe("2026-01-30");
+        expect(result.from_date, "previous snapshot date").toBe("2026-01-29");
+      });
     },
   );
 });

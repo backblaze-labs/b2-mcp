@@ -9,7 +9,7 @@ import * as os from "os";
 import * as path from "path";
 import { FileAccessError, isInsideFileRoot, resolveLocalPath } from "../../src/utils/fs-guard";
 import { B2Config } from "../../src/utils/types";
-import { knownDefect } from "../support/known-defect";
+import { expectDefect, knownDefect } from "../support/known-defect";
 
 const baseConfig: B2Config = {
   applicationKeyId: "k",
@@ -146,18 +146,33 @@ describe("isInsideFileRoot", () => {
 describe("resolveLocalPath — sandbox names that begin with two dots (case C22)", () => {
   knownDefect(
     "Finding C22: allows a file inside a directory named '..cache' under the root",
-    () => {
+    async () => {
       const dir = path.join(root, "..cache");
       fs.mkdirSync(dir);
       const file = path.join(dir, "data.bin");
       fs.writeFileSync(file, "x");
       const cfg = { ...baseConfig, fileRoot: root };
 
-      expect(resolveLocalPath(cfg, file, "read"), "read path resolves").toBe(fs.realpathSync(file));
-      expect(resolveLocalPath(cfg, path.join(dir, "new.bin"), "write"), "write path resolves").toBe(
-        path.join(fs.realpathSync(dir), "new.bin"),
+      // The defect is the sandbox wrongly refusing the path (FileAccessError) or reporting it
+      // outside the root; any other error (for example a TypeError) is not the defect.
+      await expectDefect(
+        () => {
+          expect(resolveLocalPath(cfg, file, "read"), "read path resolves").toBe(
+            fs.realpathSync(file),
+          );
+          expect(
+            resolveLocalPath(cfg, path.join(dir, "new.bin"), "write"),
+            "write path resolves",
+          ).toBe(path.join(fs.realpathSync(dir), "new.bin"));
+          expect(isInsideFileRoot(cfg, fs.realpathSync(file)), "file is inside the root").toBe(
+            true,
+          );
+        },
+        {
+          match: (error) =>
+            error instanceof FileAccessError || (error as Error)?.name === "AssertionError",
+        },
       );
-      expect(isInsideFileRoot(cfg, fs.realpathSync(file)), "file is inside the root").toBe(true);
     },
   );
 

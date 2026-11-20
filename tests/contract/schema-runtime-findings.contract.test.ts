@@ -9,7 +9,7 @@ import { createServer, getRegisteredTools, invalidateAuthManagerCache } from "..
 import type { McpServer } from "../../src/mcp";
 import { circuitBreaker, s3CircuitBreaker } from "../../src/utils/circuit-breaker";
 import { callTool, parseResult, testConfig } from "../support/deterministic-fakes";
-import { knownDefect } from "../support/known-defect";
+import { expectDefect, knownDefect } from "../support/known-defect";
 import { restoreB2SdkTransportForTests } from "../support/sdk-factory-hook";
 import { installAuthorizedS3Transport } from "../support/sdk-test-helpers";
 
@@ -40,29 +40,29 @@ function inputSchema(name: string): { safeParse(value: unknown): { success: bool
 const base = { bucket: "b", key: "k", uploadId: "u" };
 
 describe("Finding C15: s3_complete_multipart_upload schema bounds", () => {
-  knownDefect("rejects a partNumber below 1", () => {
+  knownDefect("rejects a partNumber below 1", async () => {
     const parsed = inputSchema("s3_complete_multipart_upload").safeParse({
       ...base,
       parts: [{ partNumber: 0, etag: '"e"' }],
     });
-    expect(parsed.success, "partNumber 0 is rejected").toBe(false);
+    await expectDefect(() => expect(parsed.success, "partNumber 0 is rejected").toBe(false));
   });
 
-  knownDefect("rejects a partNumber above 10000", () => {
+  knownDefect("rejects a partNumber above 10000", async () => {
     const parsed = inputSchema("s3_complete_multipart_upload").safeParse({
       ...base,
       parts: [{ partNumber: 10001, etag: '"e"' }],
     });
-    expect(parsed.success, "partNumber 10001 is rejected").toBe(false);
+    await expectDefect(() => expect(parsed.success, "partNumber 10001 is rejected").toBe(false));
   });
 
-  knownDefect("rejects a parts list longer than 10000 entries", () => {
+  knownDefect("rejects a parts list longer than 10000 entries", async () => {
     const parts = Array.from({ length: 10001 }, (_, i) => ({
       partNumber: (i % 10000) + 1,
       etag: "e",
     }));
     const parsed = inputSchema("s3_complete_multipart_upload").safeParse({ ...base, parts });
-    expect(parsed.success, "10001 parts are rejected").toBe(false);
+    await expectDefect(() => expect(parsed.success, "10001 parts are rejected").toBe(false));
   });
 
   it("accepts the boundary values 1 and 10000 (guard)", () => {
@@ -90,9 +90,18 @@ describe("Finding C16: s3_put_object contentType declaration matches runtime beh
         content: Buffer.from("hello").toString("base64"),
       });
       const acceptedAtRuntime = !result.isError;
+      expect(typeof declaredOptional, "schema optionality was read").toBe("boolean");
+      if (!acceptedAtRuntime) {
+        // A refusal must be about the missing contentType, not an unrelated runtime failure.
+        expect(String(parseResult(result)), "runtime refusal names contentType").toMatch(
+          /content.?type/i,
+        );
+      }
 
       // Schema and runtime must agree: optional in the schema <=> accepted without it.
-      expect(acceptedAtRuntime, String(parseResult(result))).toBe(declaredOptional);
+      await expectDefect(() =>
+        expect(acceptedAtRuntime, String(parseResult(result))).toBe(declaredOptional),
+      );
     },
   );
 });

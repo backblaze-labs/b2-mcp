@@ -7,7 +7,7 @@
 import { execFileSync } from "child_process";
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
-import { knownDefect } from "../support/known-defect";
+import { expectDefect, knownDefect } from "../support/known-defect";
 import { root } from "./support";
 
 const read = (relativePath: string) => readFileSync(join(root, relativePath), "utf8");
@@ -41,12 +41,14 @@ describe.skipIf(!fullCheckout)(
   () => {
     knownDefect(
       "does not call B2_ALLOW_LOCAL_FILES / B2_FILE_ROOT HTTP-only (stdio reads both)",
-      () => {
+      async () => {
         const line = read("README.md")
           .split("\n")
           .find((l) => l.includes("B2_ALLOW_LOCAL_FILES") && l.includes("B2_FILE_ROOT"));
         expect(line, "README mentions both variables").toBeDefined();
-        expect(line, "README line describing the local-file variables").not.toMatch(/HTTP-only/i);
+        await expectDefect(() =>
+          expect(line, "README line describing the local-file variables").not.toMatch(/HTTP-only/i),
+        );
       },
     );
 
@@ -63,17 +65,19 @@ describe.skipIf(!fullCheckout)(
 describe.skipIf(!fullCheckout)(
   "Finding C4: SECURITY.md supported-versions text matches the released package",
   () => {
-    knownDefect("does not describe the package as not yet published", () => {
+    knownDefect("does not describe the package as not yet published", async () => {
       const security = read("SECURITY.md");
       const section = security.slice(
         security.indexOf("## Supported Versions"),
         security.indexOf("## Reporting a Vulnerability"),
       );
       expect(section.length, "Supported Versions section found").toBeGreaterThan(0);
-      expect(section, "SECURITY.md supported-versions text").not.toMatch(
-        /no supported installable npm version/i,
-      );
-      expect(section, "SECURITY.md supported-versions text").not.toMatch(/Before that publish/i);
+      await expectDefect(() => {
+        expect(section, "SECURITY.md supported-versions text").not.toMatch(
+          /no supported installable npm version/i,
+        );
+        expect(section, "SECURITY.md supported-versions text").not.toMatch(/Before that publish/i);
+      });
     });
   },
 );
@@ -85,7 +89,7 @@ describe("Finding C11: CHANGELOG [0.2.2] claims about held-back dependency bumps
   // tags are fetched (`fetch-depth: 0` or `fetch-tags: true`) or locally.
   (releaseTagsAvailable ? knownDefect : knownDefect.skip)(
     "packages the changelog says were held back are unchanged between v0.2.1 and v0.2.2",
-    () => {
+    async () => {
       type Manifest = {
         dependencies?: Record<string, string>;
         devDependencies?: Record<string, string>;
@@ -112,7 +116,9 @@ describe("Finding C11: CHANGELOG [0.2.2] claims about held-back dependency bumps
       const changed = heldBack.filter(
         (name) => versionOf(previous, name) !== versionOf(released, name),
       );
-      expect(changed, "held-back packages whose version changed").toEqual([]);
+      await expectDefect(() =>
+        expect(changed, "held-back packages whose version changed").toEqual([]),
+      );
     },
   );
 });
@@ -121,25 +127,35 @@ describe.skipIf(!fullCheckout)(
   "Finding C12: README pointers into docs/AUTHENTICATION.md resolve to real content",
   () => {
     knownDefect(
-      "AUTHENTICATION.md covers what README says it covers: destructive gate, secret sinks, idempotency keys, POSIX vs Windows",
-      () => {
-        const readme = read("README.md");
-        expect(readme, "README pointer text").toMatch(
-          /destructive-gate policy and durable-secret handling/,
-        );
-        expect(readme, "README pointer text").toMatch(
-          /\(secret sinks, idempotency keys, POSIX vs\. Windows behavior\)/,
-        );
+      "AUTHENTICATION.md covers every topic the README pointer to it claims",
+      async () => {
+        // Derive the claims from the pointer README makes today. If the pointer is removed or
+        // reworded to claim only what the destination has, there is nothing unsupported left.
+        const topics: Array<{ name: string; pattern: RegExp }> = [
+          { name: "destructive gate", pattern: /destructive/i },
+          { name: "secret sinks", pattern: /secret sink/i },
+          { name: "idempotency keys", pattern: /idempotency/i },
+          { name: "POSIX behavior", pattern: /POSIX/i },
+          { name: "Windows behavior", pattern: /Windows/i },
+        ];
+        const pointerLines = read("README.md")
+          .split("\n")
+          .filter((line) => line.includes("docs/AUTHENTICATION.md"));
+        const destination = join(root, "docs/AUTHENTICATION.md");
+        // The destination of a pointer must exist; a dangling pointer is a different defect.
+        expect(existsSync(destination), "docs/AUTHENTICATION.md exists").toBe(true);
         const auth = read("docs/AUTHENTICATION.md");
-        for (const topic of [
-          /destructive/i,
-          /secret sink/i,
-          /idempotency/i,
-          /POSIX/i,
-          /Windows/i,
-        ]) {
-          expect(auth, `AUTHENTICATION.md should cover ${topic}`).toMatch(topic);
-        }
+
+        const unsupported = pointerLines.flatMap((line) =>
+          topics
+            .filter(({ pattern }) => pattern.test(line) && !pattern.test(auth))
+            .map(({ name }) => name),
+        );
+        await expectDefect(() =>
+          expect(unsupported, "topics README claims AUTHENTICATION.md covers but it lacks").toEqual(
+            [],
+          ),
+        );
       },
     );
   },

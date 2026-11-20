@@ -10,7 +10,7 @@ import type { McpServer } from "../../src/mcp";
 import { circuitBreaker, s3CircuitBreaker } from "../../src/utils/circuit-breaker";
 import { callTool, testConfig } from "../support/deterministic-fakes";
 import { installAuthorizedS3Transport } from "../support/sdk-test-helpers";
-import { knownDefect } from "../support/known-defect";
+import { expectDefect, knownDefect } from "../support/known-defect";
 import { restoreB2SdkTransportForTests } from "../support/sdk-factory-hook";
 import type { MockInstance } from "vitest";
 
@@ -83,7 +83,7 @@ describe("Finding C26: create-multipart acl is a documented no-op and must not b
     expect(result.isError, "create succeeds").toBeFalsy();
     const creates = commandsNamed("CreateMultipartUploadCommand");
     expect(creates, "one create sent").toHaveLength(1);
-    expect(creates[0].input.ACL, "ACL is not forwarded").toBeUndefined();
+    await expectDefect(() => expect(creates[0].input.ACL, "ACL is not forwarded").toBeUndefined());
   });
 });
 
@@ -109,6 +109,9 @@ describe("Finding C10: abort multipart upload does not use the retrying client",
     });
 
     expect(result.isError, "abort succeeds").toBeFalsy();
-    expect(attempts, "max attempts of the client used for the abort").toBe(1);
+    expect(attempts, "abort command reached the client").toBeDefined();
+    await expectDefect(() =>
+      expect(attempts, "max attempts of the client used for the abort").toBe(1),
+    );
   });
 });

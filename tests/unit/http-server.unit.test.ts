@@ -30,7 +30,7 @@ import { getDestructivePolicy } from "../../src/utils/destructive-gate";
 import * as loggerModule from "../../src/utils/logger";
 import { _resetRateLimiter, allowRequest, rateLimiterConfig } from "../../src/utils/rate-limiter";
 import { closeHttpServer, listenOnLocalhost, request } from "../support/http";
-import { knownDefect } from "../support/known-defect";
+import { expectDefect, knownDefect } from "../support/known-defect";
 
 type ShutdownSignal = "SIGTERM" | "SIGINT";
 
@@ -1455,11 +1455,13 @@ describe("buildHttpServer — getAuthInfo failure (Finding C24)", () => {
         const port = await listenOnLocalhost(handle);
         const res = await request(port, "GET", "/mcp").catch((err: Error) => err);
 
-        expect(res, "request completed with a response").not.toBeInstanceOf(Error);
-        expect((res as { status: number }).status, "error status").toBeGreaterThanOrEqual(400);
         expect(fetch, "MCP handler not reached").not.toHaveBeenCalled();
         await new Promise((resolve) => setImmediate(resolve));
-        expect(unhandled, "unhandled rejections").toEqual([]);
+        await expectDefect(() => {
+          expect(res, "request completed with a response").not.toBeInstanceOf(Error);
+          expect((res as { status: number }).status, "error status").toBeGreaterThanOrEqual(400);
+          expect(unhandled, "unhandled rejections").toEqual([]);
+        });
       } finally {
         process.off("unhandledRejection", onUnhandled);
         await closeHttpServer(handle);
