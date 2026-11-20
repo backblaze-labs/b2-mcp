@@ -6,6 +6,8 @@
  * Max retries: 3 (4 total attempts).
  */
 
+import { readFileSync } from "fs";
+import { join } from "path";
 import { abortError } from "../../src/utils/named-error";
 import {
   _consumeRetryToken,
@@ -13,6 +15,7 @@ import {
   isRetryableError,
   withRetry,
 } from "../../src/utils/retry";
+import { knownDefect } from "../support/known-defect";
 
 // Suppress actual sleep delays by mocking timers
 beforeAll(() => {
@@ -333,5 +336,42 @@ describe("withRetry — global retry budget", () => {
 
     expect(fn).toHaveBeenCalledTimes(1);
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+// -- Case C13 (known defects; see tests/support/known-defect.ts) --------------------
+
+describe("withRetry — case C13", () => {
+  knownDefect(
+    "Finding C13: backoff sleeps do not leave abort listeners on a long-lived signal",
+    async () => {
+      const abort = new AbortController();
+      const addSpy = vi.spyOn(abort.signal, "addEventListener");
+      const removeSpy = vi.spyOn(abort.signal, "removeEventListener");
+      const fn = vi
+        .fn()
+        .mockRejectedValueOnce(httpError(503))
+        .mockRejectedValueOnce(httpError(503))
+        .mockResolvedValue("ok");
+
+      const promise = withRetry(fn, 3, abort.signal);
+      await flushRetries();
+      await expect(promise).resolves.toBe("ok");
+
+      const added = addSpy.mock.calls.filter(([type]) => type === "abort").map(([, l]) => l);
+      const removed = removeSpy.mock.calls.filter(([type]) => type === "abort").map(([, l]) => l);
+      expect(added.length).toBeGreaterThan(0);
+      // Every abort listener registered for a finished sleep must have been removed.
+      expect(removed, "abort listeners removed").toHaveLength(added.length);
+    },
+  );
+
+  // Source-text check: it pins the opening 400 characters of src/utils/retry.ts, so moving or
+  // rewording that header comment requires updating it.
+  knownDefect("Finding C13: the module header lists every status that is actually retried", () => {
+    const header = readFileSync(join(__dirname, "../../src/utils/retry.ts"), "utf8").slice(0, 400);
+    for (const status of ["408", "429", "500", "502", "503", "504"]) {
+      expect(header, `module header mentions status ${status}`).toContain(status);
+    }
   });
 });

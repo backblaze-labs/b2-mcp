@@ -1,0 +1,289 @@
+/**
+ * Cases for src/s3/objects.ts: C2, C5, C6, C7, C8, C9. Each asserts the correct behavior.
+ * C6 and the valid-base64 property already hold and run as normal tests; the other cases are
+ * still defective and use `knownDefect` (see tests/support/known-defect.ts).
+ */
+import fc from "fast-check";
+import { ReadableStream } from "node:stream/web";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { registerS3ObjectTools } from "../../src/s3/objects";
+import type { B2S3DownloadedObject } from "../../src/s3/aws-sdk-adapter";
+import { MAX_MCP_BODY_BYTES } from "../../src/utils/http-body-limit";
+import {
+  circuitBreaker,
+  s3CircuitBreaker,
+  s3TransferCircuitBreaker,
+} from "../../src/utils/circuit-breaker";
+import { parseErrorText } from "../../src/utils/errors";
+import type { B2Config, B2S3VersionGuard } from "../../src/utils/types";
+import {
+  DeterministicS3ClientFake,
+  ToolHarness,
+  parseResult,
+  testConfig,
+} from "../support/deterministic-fakes";
+import { FASTCHECK_SEED } from "../support/fast-check-seed";
+import { knownDefect } from "../support/known-defect";
+
+const INLINE_LIMIT = 1024 * 1024;
+
+const noVersions: B2S3VersionGuard = {
+  async resolveS3FileVersion() {
+    throw new Error("not used");
+  },
+  async resolveS3FileVersions(input) {
+    return input.objects.map((object) => ({ object, version: null }));
+  },
+  async getCurrentS3FileVersion() {
+    return null;
+  },
+};
+
+function streamFrom(chunks: Uint8Array[]): B2S3DownloadedObject["body"] {
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const chunk of chunks) controller.enqueue(chunk);
+      controller.close();
+    },
+  }) as unknown as B2S3DownloadedObject["body"];
+}
+
+function setup(config: B2Config = testConfig) {
+  const s3 = new DeterministicS3ClientFake();
+  s3.allowDefault("putObject");
+  const tools = new ToolHarness();
+  registerS3ObjectTools(tools, s3.asPeerClient(), noVersions, config);
+  return { s3, tools };
+}
+
+afterEach(() => {
+  circuitBreaker.close();
+  s3CircuitBreaker.close();
+  s3TransferCircuitBreaker.close();
+});
+
+describe("Finding C5: early local-file refusals are client errors (400), not 500", () => {
+  let dir: string;
+  let outside: string;
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "b2-c5-root-"));
+    outside = fs.mkdtempSync(path.join(os.tmpdir(), "b2-c5-out-"));
+    fs.writeFileSync(path.join(outside, "secret.txt"), "x");
+  });
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  });
+
+  knownDefect("s3_put_object with local files disabled returns 400", async () => {
+    const { tools, s3 } = setup({ ...testConfig, allowLocalFiles: false });
+    const result = await tools.call("s3_put_object", {
+      bucket: "b",
+      key: "k",
+      filePath: path.join(outside, "secret.txt"),
+      contentType: "text/plain",
+    });
+    expect(result.isError, "request is refused").toBe(true);
+    expect(parseErrorText(parseResult(result) as string), "error status").toMatchObject({
+      status: 400,
+    });
+    expect(s3.requests, "no S3 request sent").toEqual([]);
+  });
+
+  knownDefect("s3_put_object with a filePath outside the sandbox root returns 400", async () => {
+    const { tools, s3 } = setup({ ...testConfig, fileRoot: dir });
+    const result = await tools.call("s3_put_object", {
+      bucket: "b",
+      key: "k",
+      filePath: path.join(outside, "secret.txt"),
+      contentType: "text/plain",
+    });
+    expect(result.isError, "request is refused").toBe(true);
+    expect(parseErrorText(parseResult(result) as string), "error status").toMatchObject({
+      status: 400,
+    });
+    expect(s3.requests, "no S3 request sent").toEqual([]);
+  });
+
+  knownDefect("s3_get_object with local files disabled and saveToPath returns 400", async () => {
+    const { tools, s3 } = setup({ ...testConfig, allowLocalFiles: false });
+    const result = await tools.call("s3_get_object", {
+      bucket: "b",
+      key: "k",
+      saveToPath: path.join(dir, "out.bin"),
+    });
+    expect(result.isError, "request is refused").toBe(true);
+    expect(parseErrorText(parseResult(result) as string), "error status").toMatchObject({
+      status: 400,
+    });
+    expect(s3.requests, "no S3 request sent").toEqual([]);
+  });
+
+  knownDefect("s3_get_object with a saveToPath outside the sandbox root returns 400", async () => {
+    const { tools, s3 } = setup({ ...testConfig, fileRoot: dir });
+    const result = await tools.call("s3_get_object", {
+      bucket: "b",
+      key: "k",
+      saveToPath: path.join(outside, "out.bin"),
+    });
+    expect(result.isError, "request is refused").toBe(true);
+    expect(parseErrorText(parseResult(result) as string), "error status").toMatchObject({
+      status: 400,
+    });
+    expect(s3.requests, "no S3 request sent").toEqual([]);
+  });
+});
+
+describe("Finding C6: empty inline content", () => {
+  it("uploads a zero-byte object for content='' instead of rejecting it as missing", async () => {
+    const { tools, s3 } = setup();
+    const result = await tools.call("s3_put_object", {
+      bucket: "b",
+      key: "empty.txt",
+      content: "",
+      contentType: "text/plain",
+    });
+
+    expect(result.isError, "empty content is accepted").toBeFalsy();
+    expect(s3.requestsFor("putObject"), "one put sent").toHaveLength(1);
+  });
+});
+
+describe("Finding C7: inline upload input handling", () => {
+  knownDefect(
+    "rejects content that is not valid base64 instead of uploading decoded garbage (property)",
+    async () => {
+      await fc.assert(
+        fc.asyncProperty(
+          fc.string({ minLength: 1, maxLength: 24 }),
+          fc.constantFrom("!", "@", "#", "$", "%", "^", "*", "("),
+          fc.string({ maxLength: 24 }),
+          async (head, bad, tail) => {
+            const { tools, s3 } = setup();
+            const result = await tools.call("s3_put_object", {
+              bucket: "b",
+              key: "k",
+              content: `${head}${bad}${tail}`,
+              contentType: "text/plain",
+            });
+            expect(result.isError, "invalid base64 is refused").toBe(true);
+            expect(s3.requestsFor("putObject"), "no put sent").toHaveLength(0);
+          },
+        ),
+        { numRuns: 25, seed: FASTCHECK_SEED },
+      );
+    },
+  );
+
+  it("uploads exactly the bytes of any valid base64 content (property, guard)", async () => {
+    await fc.assert(
+      fc.asyncProperty(fc.uint8Array({ minLength: 1, maxLength: 64 }), async (bytes) => {
+        const { tools, s3 } = setup();
+        const result = await tools.call("s3_put_object", {
+          bucket: "b",
+          key: "k",
+          content: Buffer.from(bytes).toString("base64"),
+          contentType: "application/octet-stream",
+        });
+        expect(result.isError, "valid base64 is accepted").toBeFalsy();
+        const body = (s3.requestsFor("putObject")[0].input as { body: Uint8Array }).body;
+        expect(Buffer.from(body).equals(Buffer.from(bytes)), "uploaded bytes match").toBe(true);
+      }),
+      { numRuns: 25, seed: FASTCHECK_SEED },
+    );
+  });
+
+  knownDefect("does not silently let filePath win when content is also supplied", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "b2-c7-"));
+    try {
+      const file = path.join(dir, "a.txt");
+      fs.writeFileSync(file, "FROM-FILE");
+      const { tools, s3 } = setup();
+      const result = await tools.call("s3_put_object", {
+        bucket: "b",
+        key: "k",
+        filePath: file,
+        content: Buffer.from("FROM-CONTENT").toString("base64"),
+        contentType: "text/plain",
+      });
+
+      // Ambiguous input must be refused, not resolved by quietly ignoring one source.
+      expect(result.isError, "filePath plus content is refused").toBe(true);
+      expect(s3.requestsFor("putObject"), "no put sent").toHaveLength(0);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("Finding C8: inline put limit versus the HTTP body cap", () => {
+  knownDefect(
+    "an inline upload the tool accepts still fits in an MCP request body once base64-encoded",
+    async () => {
+      const { tools, s3 } = setup();
+      const result = await tools.call("s3_put_object", {
+        bucket: "b",
+        key: "limit.bin",
+        content: Buffer.alloc(INLINE_LIMIT).toString("base64"),
+        contentType: "application/octet-stream",
+      });
+      expect(result.isError, "the tool advertises up to 1 MiB inline").toBeFalsy();
+      expect(s3.requestsFor("putObject"), "one put sent").toHaveLength(1);
+
+      const base64Bytes = Math.ceil(INLINE_LIMIT / 3) * 4;
+      // A payload the tool accepts but the HTTP transport rejects (413) is a contract gap.
+      expect(base64Bytes, "base64 size of the largest inline upload").toBeLessThanOrEqual(
+        MAX_MCP_BODY_BYTES,
+      );
+    },
+  );
+});
+
+describe("Finding C9: failed save-to-path downloads leave nothing behind", () => {
+  knownDefect("does not create the parent directories when the object fetch fails", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "b2-c9-"));
+    try {
+      const { tools, s3 } = setup();
+      s3.respond("getObject", () => {
+        throw Object.assign(new Error("Object not found"), { status: 404, code: "not_found" });
+      });
+      const target = path.join(root, "made", "up", "out.bin");
+
+      const result = await tools.call("s3_get_object", {
+        bucket: "b",
+        key: "missing",
+        saveToPath: target,
+      });
+
+      expect(result.isError, "missing object is an error").toBe(true);
+      expect(fs.existsSync(path.join(root, "made")), "parent directory created").toBe(false);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("Finding C2: inline s3_get_object checks the received length", () => {
+  knownDefect("fails when the body ends before the advertised contentLength", async () => {
+    const { tools, s3 } = setup();
+    s3.respond("getObject", () => ({
+      key: "k",
+      contentType: "text/plain",
+      contentLength: 10,
+      lastModified: new Date("2026-01-01T00:00:00.000Z"),
+      etag: '"e"',
+      versionId: "v",
+      metadata: {},
+      body: streamFrom([new TextEncoder().encode("abc")]),
+    }));
+
+    const result = await tools.call("s3_get_object", { bucket: "b", key: "k" });
+
+    expect(result.isError, "truncated body is an error").toBe(true);
+    expect(parseErrorText(parseResult(result) as string), "error code").toMatchObject({
+      code: "incomplete_download",
+    });
+  });
+});

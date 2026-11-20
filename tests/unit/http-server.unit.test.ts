@@ -30,6 +30,7 @@ import { getDestructivePolicy } from "../../src/utils/destructive-gate";
 import * as loggerModule from "../../src/utils/logger";
 import { _resetRateLimiter, allowRequest, rateLimiterConfig } from "../../src/utils/rate-limiter";
 import { closeHttpServer, listenOnLocalhost, request } from "../support/http";
+import { knownDefect } from "../support/known-defect";
 
 type ShutdownSignal = "SIGTERM" | "SIGINT";
 
@@ -1432,4 +1433,37 @@ describe("getHost", () => {
     process.argv.push("--host=");
     expect(() => getHost()).toThrow(/--host requires a value/);
   });
+});
+
+describe("buildHttpServer — getAuthInfo failure (Finding C24)", () => {
+  knownDefect(
+    "Finding C24: a throwing getAuthInfo hook yields an HTTP error response, not a hung request",
+    async () => {
+      const fetch = vi.fn(async () => new Response("should not be reached", { status: 200 }));
+      const handle = buildHttpServer({
+        idleSweepMode: "request",
+        getAuthInfo: () => {
+          throw new Error("token verifier unavailable");
+        },
+        mcpHandler: { fetch, close: vi.fn(async () => undefined) },
+      });
+      const unhandled: unknown[] = [];
+      const onUnhandled = (reason: unknown) => unhandled.push(reason);
+      process.on("unhandledRejection", onUnhandled);
+
+      try {
+        const port = await listenOnLocalhost(handle);
+        const res = await request(port, "GET", "/mcp").catch((err: Error) => err);
+
+        expect(res, "request completed with a response").not.toBeInstanceOf(Error);
+        expect((res as { status: number }).status, "error status").toBeGreaterThanOrEqual(400);
+        expect(fetch, "MCP handler not reached").not.toHaveBeenCalled();
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(unhandled, "unhandled rejections").toEqual([]);
+      } finally {
+        process.off("unhandledRejection", onUnhandled);
+        await closeHttpServer(handle);
+      }
+    },
+  );
 });
