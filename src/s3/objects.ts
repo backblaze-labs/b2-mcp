@@ -370,8 +370,11 @@ async function pinParentDir(
       if (await pinnedDirInsideRoot(dirHandle.fd, sandbox)) return dirHandle;
       refusal = outsideRootError(sandbox);
     }
-  } catch {
-    // Fail closed.
+  } catch (err) {
+    if (!NOT_WRITABLE_CODES.has((err as NodeJS.ErrnoException | null)?.code ?? "")) {
+      await dirHandle.close().catch(ignoreError);
+      throw err;
+    }
   }
   await dirHandle.close().catch(ignoreError);
   throw refusal;
@@ -782,13 +785,8 @@ async function validateDeleteObjectVersions(
   };
 }
 
-// Inline object content moves bytes *through* the server — and, for base64,
-// through the model's context window. Keep that path for small control-plane
-// payloads only (manifests, sidecars, tiny configs the agent must inspect or
-// write) and steer real object data to a presigned URL (s3_get_presigned_url),
-// so bytes flow client/worker↔B2 directly and never touch the server. On the
-// internet-facing HTTP transport, local-file access is off by default, so this
-// cap is what keeps the data plane off the server: anything larger must presign.
+// Inline content crosses the server and model context; use presigned URLs for larger transfers.
+// The cap keeps hosted transports without local files control-plane only.
 const MAX_INLINE_OBJECT_BYTES = 1024 * 1024; // 1 MiB
 
 /**

@@ -128,3 +128,38 @@ describe("filesystem guard expected path refusals", () => {
     expect(parseB2Error(caught)).toMatchObject({ status: 400, code: "bad_request" });
   });
 });
+
+it.skipIf(process.platform !== "linux" || !fs.existsSync("/proc/self/fd")).each(["EIO", "EMFILE"])(
+  "returns 500 and closes the directory if pinning encounters %s",
+  async (code) => {
+    const s3 = new DeterministicS3ClientFake();
+    const tools = new ToolHarness();
+    registerS3ObjectTools(tools, s3.asPeerClient(), versions, { ...testConfig, fileRoot: root });
+    const open = fs.promises.open.bind(fs.promises);
+    let pin: fs.promises.FileHandle | undefined;
+    const spy = vi.spyOn(fs.promises, "open").mockImplementation(async (...args) => {
+      const handle = await open(...(args as Parameters<typeof open>));
+      if (String(args[0]) === parent && typeof args[1] === "number") {
+        pin = handle;
+        fault.path = root;
+        fault.error = Object.assign(new Error(`simulated ${code}`), { code });
+      }
+      return handle;
+    });
+    try {
+      const result = await tools.call("s3_get_object", {
+        bucket: "b",
+        key: "k",
+        saveToPath: path.join(parent, "out"),
+      });
+      expect(pin).toBeDefined();
+      expect(result.isError).toBe(true);
+      expect(parseErrorText(parseResult(result) as string)).toMatchObject({ status: 500, code });
+      expect(s3.requests).toEqual([]);
+      expect(pin?.fd).toBe(-1);
+      expect(fs.readdirSync(parent)).toEqual([]);
+    } finally {
+      spy.mockRestore();
+    }
+  },
+);
