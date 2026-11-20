@@ -9,9 +9,17 @@ describe("usage growth snapshot selection", () => {
     try {
       const objects: Record<string, string> = {
         "2026-01-02/notes.txt": "not a usage report",
+        "2026-01-02a-unrelated.csv": "not a dated snapshot",
+        "2026-01-03/metadata.json": "not a usage report",
         "2026-01-03/usage.account.csv": "account_id,date,stored_gb\nacct,2026-01-03,10\n",
         "2026-01-30/usage.account.csv": "account_id,date,stored_gb\nacct,2026-01-30,20\n",
       };
+      const pages: Array<{
+        startAfter?: string;
+        continuationToken?: string;
+        maxKeys?: number;
+        keys: string[];
+      }> = [];
       const client: ReportObjectClient = {
         async listReportObjectKeys(_bucket, options = {}) {
           const keys = Object.keys(objects)
@@ -19,7 +27,8 @@ describe("usage growth snapshot selection", () => {
             .filter((key) => !options.prefix || key.startsWith(options.prefix))
             .filter((key) => !options.startAfter || key > options.startAfter);
           const offset = Number(options.continuationToken ?? 0);
-          const page = keys.slice(offset, offset + Math.min(options.maxKeys ?? 1, 1));
+          const page = keys.slice(offset, offset + (options.maxKeys ?? 1000));
+          pages.push({ ...options, keys: page });
           const next = offset + page.length;
           return {
             keys: page,
@@ -53,6 +62,23 @@ describe("usage growth snapshot selection", () => {
       expect(result.to_date).toBe("2026-01-30");
       expect(result.accounts).toEqual([
         expect.objectContaining({ account: "acct", start_gb: 10, current_gb: 20, growth_gb: 10 }),
+      ]);
+      expect(pages.filter((page) => page.startAfter === "2026-01-01")).toEqual([
+        expect.objectContaining({
+          maxKeys: 1,
+          continuationToken: undefined,
+          keys: ["2026-01-02/notes.txt"],
+        }),
+        expect.objectContaining({
+          maxKeys: 1000,
+          continuationToken: "1",
+          keys: [
+            "2026-01-02a-unrelated.csv",
+            "2026-01-03/metadata.json",
+            "2026-01-03/usage.account.csv",
+            "2026-01-30/usage.account.csv",
+          ],
+        }),
       ]);
     } finally {
       vi.useRealTimers();
