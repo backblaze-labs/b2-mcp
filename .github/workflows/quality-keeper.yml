@@ -1,15 +1,7 @@
-# Quality Keeper private-repository caller (backblaze-labs/quality-keeper#312).
-#
-# This repository keeps its existing test, contract, smoke, and publish
-# workflows as the authoritative product gates; Quality Keeper is advisory and
-# must not block required CI.
-#
-# Trust boundary:
-# - This pull_request workflow is analysis-only and passes no repository secrets.
-# - It does not call the private reusable workflow because that workflow's report
-#   job requires PR write permission and an app private key.
-# - A future trusted workflow_run reporter must consume inert artifacts and never
-#   check out or run PR head code before minting any reporting credential.
+# Public-repository QK installation (QK #402). Native CI owns product execution;
+# QK produces a cheap assessment preview and preserves missing/unbound proof.
+# The read-only assessment job never receives the App key. The report job runs
+# trusted pinned QK code and consumes JSON artifacts, without checking out PR code.
 
 name: Quality Keeper
 
@@ -20,26 +12,127 @@ on:
 # No pull_request_target: fork, draft, and unknown-head code is never trusted.
 permissions: {}
 
-# Advisory PR analysis: cancel superseded runs on the same PR.
 concurrency:
-  group: quality-keeper-${{ github.repository }}-${{ github.event.pull_request.number || github.ref }}
+  group: qk-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
+
+env:
+  QK_SOURCE_SHA: da3df2255df129a292616e65417d333946f4cd6f
+  QK_APP_CLIENT_ID: Iv23li5rGH3xKaNknGmc
 
 jobs:
   quality-keeper:
     if: >-
       ${{
         github.event.pull_request.user.login != 'dependabot[bot]' &&
+        github.actor != 'dependabot[bot]' &&
         github.event.pull_request.head.repo.full_name == github.repository &&
         github.event.pull_request.draft == false
       }}
-    name: Quality Keeper advisory guard
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      assessed: ${{ steps.assess.outcome == 'success' }}
     permissions:
       contents: read
     steps:
-      - name: Keep PR Quality Keeper unprivileged
-        shell: bash
+      - name: Check installation readiness
+        id: preflight
+        env:
+          QK_INSTALL_TOKEN: ${{ secrets.QK_INSTALL_TOKEN }}
         run: |
-          echo "Quality Keeper reporting is disabled on pull_request."
-          echo "A trusted workflow_run reporter must consume inert artifacts only."
+          OUT_DIR="$RUNNER_TEMP/qk-public-run"
+          mkdir -p "$OUT_DIR"
+          if [ -z "$QK_INSTALL_TOKEN" ]; then
+            echo 'ready=false' >> "$GITHUB_OUTPUT"
+            echo '::warning::QK did not assess this revision: QK_INSTALL_TOKEN is missing.'
+            echo 'QK setup blocked: add the read-only QK_INSTALL_TOKEN repository secret. No quality assessment was produced.' >> "$GITHUB_STEP_SUMMARY"
+            printf '%s\n' '{"status":"setup_blocked","reason":"missing_token","assessed":false,"is_quality_failure":false}' > "$OUT_DIR/qk-setup-blocked.json"
+          else
+            echo 'ready=true' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Set up Python
+        if: steps.preflight.outputs.ready == 'true'
+        # actions/setup-python v7.1.0, reviewed 2026-11-17.
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - name: Install pinned Quality Keeper
+        if: steps.preflight.outputs.ready == 'true'
+        env:
+          QK_INSTALL_TOKEN: ${{ secrets.QK_INSTALL_TOKEN }}
+        run: python -m pip install --quiet "git+https://x-access-token:${QK_INSTALL_TOKEN}@github.com/backblaze-labs/quality-keeper.git@${QK_SOURCE_SHA}"
+      - name: Checkout assessed revision
+        if: steps.preflight.outputs.ready == 'true'
+        # actions/checkout v7.0.1, reviewed 2026-11-17.
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Assess without repeating native CI suites
+        id: assess
+        if: steps.preflight.outputs.ready == 'true'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          OUT_DIR="$RUNNER_TEMP/qk-public-run"
+          quality-keeper local-run --repo "$GITHUB_WORKSPACE" \
+            --full-name "$GITHUB_REPOSITORY" --base "$BASE_SHA" --head "$HEAD_SHA" \
+            --pr-number "$PR_NUMBER" --out "$OUT_DIR" --no-execute
+          cat "$OUT_DIR/operator-summary.md" >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload assessment or setup-blocked evidence
+        if: always()
+        # actions/upload-artifact v7.0.2, reviewed 2026-11-17.
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: quality-run
+          path: ${{ runner.temp }}/qk-public-run/**
+          if-no-files-found: error
+
+  report:
+    needs: quality-keeper
+    if: needs.quality-keeper.outputs.assessed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pull-requests: write
+      actions: read
+    steps:
+      - name: Set up Python
+        # actions/setup-python v7.1.0, reviewed 2026-11-17.
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - name: Install pinned Quality Keeper
+        env:
+          QK_INSTALL_TOKEN: ${{ secrets.QK_INSTALL_TOKEN }}
+        run: python -m pip install --quiet "git+https://x-access-token:${QK_INSTALL_TOKEN}@github.com/backblaze-labs/quality-keeper.git@${QK_SOURCE_SHA}"
+      - name: Download inert proof artifacts
+        # actions/download-artifact v8.0.2, reviewed 2026-11-17.
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: quality-run
+          path: artifacts
+      - name: Mint QK reporting token
+        id: app-token
+        # actions/create-github-app-token v3.3.0, reviewed 2026-11-17.
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ env.QK_APP_CLIENT_ID }}
+          private-key: ${{ secrets.QK_APP_PRIVATE_KEY }}
+          permission-pull-requests: write
+      - name: Publish one advisory report
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          EXPECTED_REPO: ${{ github.repository }}
+          EXPECTED_AUTHOR: ${{ steps.app-token.outputs.app-slug }}[bot]
+          ISSUE_URL: ${{ github.event.pull_request.html_url }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          quality-keeper quality-run-comment --assessment artifacts/assessment.json \
+            --harvest artifacts/harvest.json --issue-url "$ISSUE_URL" \
+            --expect-repo "$EXPECTED_REPO" --expect-author "$EXPECTED_AUTHOR" \
+            --run-url "$RUN_URL" --artifact quality-run.json --artifact quality-run.html
