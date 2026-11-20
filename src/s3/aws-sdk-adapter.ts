@@ -418,12 +418,14 @@ export interface B2S3PresignObjectUrlOptions {
   expiresIn: number;
   /** Optional version ID for GetObject URLs. */
   versionId?: string;
-  /** Required content type for PutObject URLs. */
+  /** PutObject uploads must send Content-Type exactly matching this value. */
   contentType?: string;
 }
 
 /** Generated presigned URL metadata. */
 export interface B2S3PresignObjectUrlResult {
+  /** Headers a PutObject upload must send unchanged. */
+  requiredHeaders?: Record<string, string>;
   /** Generated presigned URL. */
   url: string;
   /** S3 operation the URL authorizes. */
@@ -791,14 +793,15 @@ function badRequest(message: string): never {
 }
 
 /**
- * Reject browser-executable content types for signed upload capabilities.
+ * Require a content type and reject browser-executable types for object writes.
  *
  * @remarks
  * Presigned PutObject URLs are bearer capabilities. Requiring a specific,
  * non-browser-executable content type reduces the blast radius if a generated
- * URL is mishandled.
+ * URL is mishandled. Object writes use the same type restrictions; callers that
+ * permit S3's default content type skip this assertion for omitted or empty values.
  *
- * @param contentType - Content type supplied for an upload.
+ * @param contentType - Content type supplied for an object write.
  * @param context - Human-readable operation context for error messages.
  *
  * @throws A 400-style bad request Error when the type is missing or unsafe.
@@ -809,7 +812,7 @@ export function assertSafeObjectContentType(
 ): void {
   const mediaType = normalizedMediaType(contentType);
   if (!mediaType) {
-    badRequest(`${context} requires a signed contentType.`);
+    badRequest(`${context} requires a contentType.`);
   }
   if (BROWSER_EXECUTABLE_CONTENT_TYPE.test(mediaType)) {
     badRequest(`${context} rejects browser-executable content type '${contentType}'.`);
@@ -1111,6 +1114,9 @@ export class B2S3PeerClient {
    * @param input - CopyObject options.
    */
   async copyObject(input: B2S3CopyObjectOptions): Promise<void> {
+    if (input.metadataDirective === "REPLACE" && input.contentType) {
+      assertSafeObjectContentType(input.contentType, "s3_copy_object");
+    }
     await this.sendUnsafeMutationWithCircuit(
       new CopyObjectCommand({
         Bucket: input.destinationBucket,
@@ -1184,20 +1190,23 @@ export class B2S3PeerClient {
   /**
    * Generate a presigned GetObject or PutObject URL.
    *
+   * @remarks
+   * PutObject uploads must send Content-Type exactly matching input.contentType.
+   *
    * @param input - Presign options.
    *
    * @returns Presigned URL metadata.
    *
-   * @throws Error when a PutObject URL includes a version ID.
-   * @throws A 400-style bad request Error when PutObject content type validation rejects missing
-   * or unsafe input.
+   * @throws A 400-style bad request Error for a versioned PutObject URL or missing/unsafe
+   * PutObject content type.
    */
   async presignObjectUrl(input: B2S3PresignObjectUrlOptions): Promise<B2S3PresignObjectUrlResult> {
+    const { contentType } = input;
     if (input.operation === "PutObject" && input.versionId !== undefined) {
       badRequest("versionId is only valid for GetObject presigned URLs.");
     }
     if (input.operation === "PutObject")
-      assertSafeObjectContentType(input.contentType, "Presigned PutObject URLs");
+      assertSafeObjectContentType(contentType, "Presigned PutObject URLs");
     const command =
       input.operation === "GetObject"
         ? new GetObjectCommand({
@@ -1208,11 +1217,16 @@ export class B2S3PeerClient {
         : new PutObjectCommand({
             Bucket: input.bucket,
             Key: input.key,
-            ContentType: input.contentType,
+            ContentType: contentType,
           });
     return {
-      url: await getSignedUrl(this.readClient, command, { expiresIn: input.expiresIn }),
+      url: await getSignedUrl(this.readClient, command, {
+        expiresIn: input.expiresIn,
+        signableHeaders: new Set(["content-type"]),
+      }),
       operation: input.operation,
+      requiredHeaders:
+        input.operation === "PutObject" ? { "content-type": contentType as string } : undefined,
       expiresIn: input.expiresIn,
       expiresAt: new Date(Date.now() + input.expiresIn * 1000).toISOString(),
     };
@@ -1228,6 +1242,9 @@ export class B2S3PeerClient {
   async createMultipartUpload(
     input: B2S3CreateMultipartUploadOptions,
   ): Promise<B2S3CreateMultipartUploadResult> {
+    if (input.contentType) {
+      assertSafeObjectContentType(input.contentType, "s3_create_multipart_upload");
+    }
     const result = await this.sendUnsafeMutationWithCircuit(
       new CreateMultipartUploadCommand({
         Bucket: input.bucket,

@@ -275,6 +275,8 @@ export function createServer(
       version: VERSION,
     },
     {
+      // Bound collection validation before Zod runs (GHSA-46jr-4wx8-v453).
+      maxToolInputElements: 10_000,
       instructions: [
         SERVER_INSTRUCTION_OPENING,
         "",
@@ -404,7 +406,10 @@ export function createServer(
     allowCurrentVersionInspection,
     allowBypassGovernance,
   });
-  registerS3MultipartTools(registrar, s3Client, config);
+  registerS3MultipartTools(registrar, s3Client, config, {
+    versions: b2Client,
+    allowExplicitVersionInspection,
+  });
   const allowGetObjectUrl =
     (!filterActive || (capsSet?.has("readFiles") ?? false)) && oauthAllowsRead;
   const allowPutObjectUrl =

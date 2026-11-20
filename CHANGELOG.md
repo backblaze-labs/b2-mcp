@@ -7,11 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-- Local filesystem policy refusals for `s3_put_object` `filePath` and
-  `s3_get_object` `saveToPath`, including a configured `B2_FILE_ROOT` that does
-  not exist, now return `bad_request` (HTTP 400) instead of `internal_error`
-  (HTTP 500). (#452)
+Pending notes are maintained as [Changie fragments](https://github.com/backblaze-labs/b2-mcp/tree/main/.changes/unreleased).
+See [CONTRIBUTING.md](https://github.com/backblaze-labs/b2-mcp/blob/main/CONTRIBUTING.md#changelog-entries) to add an entry.
 
 ## [0.2.2] - 2026-09-29
 
@@ -41,6 +38,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Overrode the dev-only `markdown-it` (via `typedoc`) to the patched 14.3.x line
   for the `linkify` quadratic-time DoS (GHSA-253c-mchw-3w2r), published after
   the batch above. (#458)
+
+[0.2.2]: https://github.com/backblaze-labs/b2-mcp/compare/v0.2.1...v0.2.2
 
 ## [0.2.1] - 2026-09-04
 
@@ -144,6 +143,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     retired header/env names for the migration window so a still-in-flight
     legacy secret is never written to logs in cleartext.
 
+[0.2.1]: https://github.com/backblaze-labs/b2-mcp/compare/v0.2.0...v0.2.1
+
 ## [0.2.0] - 2026-09-01
 
 ### Added
@@ -196,6 +197,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `b2_usage_growth` and `b2_egress_leaders`; added regression coverage closing
   the QA F12–F20 error-classification and fault-injection detection gaps. (#345)
 
+[0.2.0]: https://github.com/backblaze-labs/b2-mcp/compare/v0.1.2...v0.2.0
+
 ## [0.1.2] - 2026-08-23
 
 ### Changed
@@ -243,6 +246,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   post-publish verification retry and legacy rerun allowance for immutable
   `0.1.0` and `0.1.1` metadata.
 
+[0.1.2]: https://github.com/backblaze-labs/b2-mcp/compare/v0.1.1...v0.1.2
+
 ## [0.1.1] - 2026-08-18
 
 ### Changed
@@ -260,6 +265,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead of an ephemeral one.
 - Exercise the Partner API read paths in CI against a Partner-entitled account
   via a master key (`B2_MASTER_KEY_ID`/`B2_MASTER_KEY`).
+
+[0.1.1]: https://github.com/backblaze-labs/b2-mcp/compare/v0.1.0...v0.1.1
 
 ## [0.1.0] - 2026-08-18
 
@@ -444,10 +451,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added explicit read-only workflow permissions and consolidated the safe AWS
   SDK, Axios, and TypeScript dependency updates from superseded Dependabot PRs.
 
-[Unreleased]: https://github.com/backblaze-labs/b2-mcp/compare/v0.2.2...HEAD
-[0.2.2]: https://github.com/backblaze-labs/b2-mcp/compare/v0.2.1...v0.2.2
-[0.2.1]: https://github.com/backblaze-labs/b2-mcp/compare/v0.2.0...v0.2.1
-[0.2.0]: https://github.com/backblaze-labs/b2-mcp/compare/v0.1.2...v0.2.0
-[0.1.2]: https://github.com/backblaze-labs/b2-mcp/compare/v0.1.1...v0.1.2
-[0.1.1]: https://github.com/backblaze-labs/b2-mcp/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/backblaze-labs/b2-mcp/releases/tag/v0.1.0

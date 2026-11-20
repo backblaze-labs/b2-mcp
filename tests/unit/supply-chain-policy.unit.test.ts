@@ -633,7 +633,7 @@ describe("supply-chain audit policy", () => {
     );
     expect(packageJson.scripts["release:stamp"]).toBe("node scripts/write-release-version.mjs");
     expect(packageJson.scripts.version).toBe(
-      "node scripts/cut-changelog.mjs && node scripts/update-server-json-version.mjs && git add CHANGELOG.md server.json lhm.plugin.json mcpb/manifest.json",
+      "node scripts/update-server-json-version.mjs && git add server.json lhm.plugin.json mcpb/manifest.json",
     );
     expect(packageJson.mcpName).toBe("io.github.backblaze-labs/b2-mcp");
     expect(packageJson.scripts.prepublishOnly).toContain("pnpm run build");
@@ -1794,6 +1794,7 @@ describe("supply-chain audit policy", () => {
         PATH: `${dir}${process.platform === "win32" ? ";" : ":"}${process.env.PATH ?? ""}`,
         NODE_ENV: "test",
         B2_MCP_AUDIT_POLICY_JSON: JSON.stringify(exceptionPolicy),
+        B2_MCP_AUDIT_TODAY: "2026-09-30",
       };
       delete env.B2_MCP_AUDIT_REPORT_JSON;
       const result = spawnSync(process.execPath, ["scripts/audit-supply-chain.mjs"], {
@@ -1842,6 +1843,7 @@ describe("supply-chain audit policy", () => {
         NODE_ENV: "test",
         B2_MCP_FAKE_NPM_STATE: state,
         B2_MCP_AUDIT_POLICY_JSON: JSON.stringify(exceptionPolicy),
+        B2_MCP_AUDIT_TODAY: "2026-09-30",
       };
       delete env.B2_MCP_AUDIT_REPORT_JSON;
       const result = spawnSync(process.execPath, ["scripts/audit-supply-chain.mjs"], {

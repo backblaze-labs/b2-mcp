@@ -13,7 +13,7 @@ const { workflowJobBlock, workflowJobBlocks, yamlMappingForKey, yamlValuesForKey
   yamlValuesForKey: (text: string, key: string) => Array<string | string[]>;
 };
 
-const pnpmSetupAction = "pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413";
+const pnpmSetupAction = "pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115";
 const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
   packageManager?: string;
   scripts?: Record<string, string>;
@@ -248,7 +248,7 @@ describe("CI workflow policy", () => {
     expect(runtimeFloorJob).toContain("needs: package-install-smoke");
     expect(runtimeFloorJob).toContain("node-version: 22.22.2");
     expect(runtimeFloorJob).toContain(
-      "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+      "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333",
     );
     expect(runtimeFloorJob).toContain("find reports/package-install-smoke -name '*.tgz'");
     expect(runtimeFloorJob).toContain(
@@ -363,10 +363,10 @@ describe("CI workflow policy", () => {
     expect(workflowSecurity).toContain("actions: read");
     expect(workflowSecurity).toContain("security-events: write");
     expect(workflowSecurity).toContain(
-      "github/codeql-action/init@1c5b675653bb5c22dbe9b12b556ec555138e09fd",
+      "github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066",
     );
     expect(workflowSecurity).toContain(
-      "github/codeql-action/analyze@1c5b675653bb5c22dbe9b12b556ec555138e09fd",
+      "github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066",
     );
     expect(workflowSecurity).toContain("upload: never");
     expect(workflowSecurity).toContain("persist-credentials: false");
@@ -410,7 +410,7 @@ describe("CI workflow policy", () => {
     expect(uploadIdx).toBeGreaterThan(-1);
     expect(countGateIdx).toBeLessThan(uploadIdx);
     expect(workflowSecurity).toContain(
-      "github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd",
+      "github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066",
     );
     expect(workflowSecurity).toContain("category: zizmor-offline");
 

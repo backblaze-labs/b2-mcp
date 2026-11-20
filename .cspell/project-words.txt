@@ -20,6 +20,7 @@ BuildKit
 cgroup
 cobertura
 corepack
+cpqp
 cosign
 cspell
 CycloneDX
@@ -30,6 +31,7 @@ flyctl
 stryker
 workerd
 GHCR
+gobin
 iocs
 junit
 MCP
@@ -98,4 +100,6 @@ gqgx
 pvrc
 smol
 linkify
+librsvg
+vccf
 mchw

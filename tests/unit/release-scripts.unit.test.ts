@@ -282,29 +282,30 @@ describe("release scripts", () => {
     });
   });
 
-  it("promotes Unreleased notes into the bumped version changelog section", () => {
+  it("keeps archived Changie release notes compatible with the release extractor", () => {
     withFixture((fixtureRoot) => {
       const packagePath = join(fixtureRoot, "package.json");
       const pkg = JSON.parse(readFileSync(packagePath, "utf8"));
       writeFileSync(packagePath, JSON.stringify({ ...pkg, version: "0.2.0" }, null, 2));
 
-      const result = spawnSync(process.execPath, ["scripts/cut-changelog.mjs"], {
-        cwd: root,
-        env: scriptEnv(fixtureRoot),
-        encoding: "utf8",
-      });
+      writeFileSync(
+        join(fixtureRoot, "CHANGELOG.md"),
+        readFileSync(join(root, ".changes/v0.2.0.md"), "utf8"),
+      );
+      const result = spawnSync(
+        process.execPath,
+        ["scripts/extract-release-notes.mjs", "--version", "0.2.0"],
+        {
+          cwd: root,
+          env: scriptEnv(fixtureRoot),
+          encoding: "utf8",
+        },
+      );
 
-      const changelog = readFileSync(join(fixtureRoot, "CHANGELOG.md"), "utf8");
       expect(result.status).toBe(0);
-      expect(result.stdout).toContain("cut-changelog: promoted [Unreleased] to [0.2.0]");
-      expect(changelog).toMatch(/^## \[Unreleased\]\n\n## \[0\.2\.0\] - \d{4}-\d{2}-\d{2}/m);
-      expect(changelog).toContain("Future change.");
-      expect(changelog).toContain(
-        "[Unreleased]: https://github.com/backblaze-labs/b2-mcp/compare/v0.2.0...HEAD",
-      );
-      expect(changelog).toContain(
-        "[0.2.0]: https://github.com/backblaze-labs/b2-mcp/compare/v0.1.0...v0.2.0",
-      );
+      expect(result.stdout).toContain("# @backblaze-labs/b2-mcp v0.2.0");
+      expect(result.stdout).toContain("### Added");
+      expect(result.stdout).not.toContain("[Unreleased]");
     });
   });
 
@@ -1186,7 +1187,7 @@ describe("release scripts", () => {
     );
   });
 
-  it("runs the pnpm version changelog lifecycle with install scripts disabled", () => {
+  it("syncs manifests during the pnpm version lifecycle without changing Changie notes", () => {
     withFixture((fixtureRoot) => {
       const packagePath = join(fixtureRoot, "package.json");
       const pkg = JSON.parse(readFileSync(packagePath, "utf8"));
@@ -1197,9 +1198,8 @@ describe("release scripts", () => {
             ...pkg,
             scripts: {
               version: [
-                `node ${join(root, "scripts/cut-changelog.mjs")}`,
                 `node ${join(root, "scripts/update-server-json-version.mjs")}`,
-                "git add CHANGELOG.md server.json lhm.plugin.json mcpb/manifest.json",
+                "git add server.json lhm.plugin.json mcpb/manifest.json",
               ].join(" && "),
             },
           },
@@ -1213,6 +1213,7 @@ describe("release scripts", () => {
       runGit(fixtureRoot, ["config", "user.name", "Release Test"]);
       runGit(fixtureRoot, ["add", "."]);
       runGit(fixtureRoot, ["commit", "-m", "initial"]);
+      const originalChangelog = readFileSync(join(fixtureRoot, "CHANGELOG.md"), "utf8");
 
       const result = spawnSync(
         "pnpm",
@@ -1229,14 +1230,13 @@ describe("release scripts", () => {
       const stagedFiles = runGit(fixtureRoot, ["diff", "--cached", "--name-only"]);
 
       expect(result.status).toBe(0);
-      expect(result.stdout).toContain("cut-changelog: promoted [Unreleased] to [0.1.1]");
       expect(bumpedPackage.version).toBe("0.1.1");
       expect(bumpedServerJson.version).toBe("0.1.1");
       expect(bumpedServerJson.packages[0].version).toBe("0.1.1");
       expect(bumpedLhm.version).toBe("0.1.1");
       expect(bumpedMcpb.version).toBe("0.1.1");
-      expect(changelog).toMatch(/^## \[Unreleased\]\n\n## \[0\.1\.1\] - \d{4}-\d{2}-\d{2}/m);
-      expect(stagedFiles.split(/\r?\n/)).toContain("CHANGELOG.md");
+      expect(changelog).toBe(originalChangelog);
+      expect(stagedFiles.split(/\r?\n/)).not.toContain("CHANGELOG.md");
       expect(stagedFiles.split(/\r?\n/)).toContain("server.json");
       expect(stagedFiles.split(/\r?\n/)).toContain("lhm.plugin.json");
       expect(stagedFiles.split(/\r?\n/)).toContain("mcpb/manifest.json");

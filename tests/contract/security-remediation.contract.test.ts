@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { createRequire } from "module";
-import { listFiles, readLock, root } from "./support";
+import { listFiles, readLock, root, serverAcceptedByNodeAdapter } from "./support";
 
 type PackageLock = {
   packages: Record<
@@ -66,24 +66,32 @@ describe("security dependency policy", () => {
     expect(versionTuple(lockedVersion)[0]).toBe(expectedMajor);
   };
 
-  it("keeps the MCP Node adapter out of the published graph while pinning the dev SDK split", () => {
+  it("keeps the MCP Node adapter out of the published graph while pinning the patched dev adapter", () => {
     expect(pkg.dependencies).not.toHaveProperty("@modelcontextprotocol/node");
-    expect(pkg.devDependencies["@modelcontextprotocol/node"]).toBe(
-      pkg.dependencies["@modelcontextprotocol/server"],
-    );
+    expect(
+      serverAcceptedByNodeAdapter(pkg.dependencies["@modelcontextprotocol/server"] as string),
+    ).toBe(true);
     expect(lock.packages["node_modules/@modelcontextprotocol/node"]?.version).toBe(
       pkg.devDependencies["@modelcontextprotocol/node"],
     );
     expect(lock.packages["node_modules/@modelcontextprotocol/node"]?.dev).toBe(true);
     expect(pkg).not.toHaveProperty("overrides");
     expect(readFileSync(join(root, "pnpm-workspace.yaml"), "utf8")).toContain(
-      "'@hono/node-server': 2.0.10",
+      "'@hono/node-server': 2.1.7",
     );
     expect(readFileSync(join(root, "pnpm-workspace.yaml"), "utf8")).toContain(
       "'@typescript-eslint/visitor-keys>eslint-visitor-keys': 4.2.1",
     );
-    expect(lock.packages["node_modules/@hono/node-server"]?.version).toBe("2.0.10");
+    expect(lock.packages["node_modules/@hono/node-server"]?.version).toBe("2.1.7");
     expect(lock.packages["node_modules/@hono/node-server"]?.dev).toBe(true);
+    const auditPolicy = JSON.parse(readFileSync(join(root, "audit-policy.json"), "utf8")) as {
+      allowedAdvisories: Array<{ name: string; source: number }>;
+    };
+    expect(
+      auditPolicy.allowedAdvisories.some(
+        (entry) => entry.name === "@hono/node-server" && entry.source === 1243661,
+      ),
+    ).toBe(false);
   });
 
   it("keeps the B2 SDK simulator out of production source and built output", () => {

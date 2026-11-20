@@ -215,6 +215,20 @@ describe("S3 object tools with deterministic handler fake", () => {
     expect(s3.requests).toEqual([]);
   });
 
+  it("stores a zero-byte object for an empty inline content string", async () => {
+    const result = await tools.call("s3_put_object", {
+      bucket: "b",
+      key: "empty.bin",
+      content: "",
+      contentType: "application/octet-stream",
+    });
+
+    expect(result.isError).toBeFalsy();
+    const request = firstRequest<B2S3PutObjectOptions>("putObject");
+    expect(request).toMatchObject({ bucket: "b", key: "empty.bin", contentLength: 0 });
+    expect(putBodyBuffer(request).byteLength).toBe(0);
+  });
+
   it("refuses oversized inline uploads before calling S3", async () => {
     const result = await tools.call("s3_put_object", {
       bucket: "b",
@@ -707,23 +721,24 @@ describe("S3 object tools with deterministic handler fake", () => {
       // The temp file plus, on Linux, the parent directory pinned for the rename.
       expect(opened.paths.some((opened) => opened.endsWith(".part"))).toBe(true);
       expect(opened.handles.map((handle) => handle.fd)).toEqual(opened.handles.map(() => -1));
-      expect(fs.readdirSync(path.join(dir, "a", "b"))).toEqual([]);
+      expect(fs.readdirSync(dir)).toEqual([]);
     } finally {
       opened.restore();
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  it("refuses a parent directory it cannot create before fetching", async () => {
+  it("reports failed parent creation after staging and leaves partial parents intact", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "b2-save-parent-"));
     // made is created, then the 300-byte segment fails (ENAMETOOLONG; ENOENT on Windows).
     const target = path.join(dir, "made", "x".repeat(300), "out.txt");
+    queueWebBody("NEW");
 
     try {
       const result = await saveTo(target);
 
       expectBadRequestToolError(result, /saveToPath directory .* cannot be written/);
-      expect(s3.requestsFor("getObject")).toHaveLength(0);
+      expect(s3.requestsFor("getObject")).toHaveLength(1);
       expect(fs.readdirSync(dir)).toEqual(["made"]);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
@@ -1033,7 +1048,7 @@ describe("S3 object tools with deterministic handler fake", () => {
     }
   });
 
-  posixIt("rechecks the file root after creating directories through a symlink", async () => {
+  posixIt("rechecks the file root before staging through a symlink", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "b2-save-race-root-"));
     const outside = fs.mkdtempSync(path.join(os.tmpdir(), "b2-save-race-out-"));
     const escapeDir = path.join(outside, "escaped");
@@ -1057,10 +1072,9 @@ describe("S3 object tools with deterministic handler fake", () => {
       expect(result.isError).toBe(true);
       expectBadRequestToolError(result, /outside the allowed directory/i);
       expect(s3.requestsFor("getObject")).toHaveLength(0);
-      // Refused by the post-mkdir check, before any temp file is created.
+      // Refused before staging or creating any parent directories outside the root.
       expect(opened.handles).toHaveLength(0);
-      expect(fs.readdirSync(escapeDir)).toEqual(["sub"]);
-      expect(fs.readdirSync(path.join(escapeDir, "sub"))).toEqual([]);
+      expect(fs.readdirSync(escapeDir)).toEqual([]);
     } finally {
       opened.restore();
       fs.rmSync(root, { recursive: true, force: true });
@@ -1116,6 +1130,7 @@ describe("S3 object tools with deterministic handler fake", () => {
         const dir = path.join(base, "shared", "lock");
         fs.mkdirSync(path.join(base, "shared"));
         const target = path.join(dir, "out.txt");
+        fs.mkdirSync(dir);
         const realOpen = fs.promises.open.bind(fs.promises);
         const openSpy = vi.spyOn(fs.promises, "open").mockImplementation(async (...args) => {
           const handle = await realOpen(...(args as Parameters<typeof realOpen>));
@@ -1447,6 +1462,7 @@ describe("S3 object tools with deterministic handler fake", () => {
   linuxIt("refuses a sandboxed save whose parent cannot be pinned", async () => {
     const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "b2-save-pin-none-")));
     const dir = path.join(root, "a", "b");
+    fs.mkdirSync(dir, { recursive: true });
     const sandboxed = sandboxedTools(root);
     const realOpen = fs.promises.open.bind(fs.promises);
     const openSpy = vi.spyOn(fs.promises, "open").mockImplementation(async (...args) => {
@@ -1464,7 +1480,7 @@ describe("S3 object tools with deterministic handler fake", () => {
         /cannot open the directory .* \(EACCES\), which is required/i,
       );
       expect(s3.requestsFor("getObject")).toHaveLength(0);
-      // Left in place: directories this request created are never removed.
+      // The pre-existing parent is left in place.
       expect(fs.readdirSync(dir)).toEqual([]);
     } finally {
       openSpy.mockRestore();

@@ -1,0 +1,107 @@
+// enc.sse_b2 (yes). Run by ../run-conformance; see ../../README.md.
+//
+// SSE-B2 through the two inputs the card names: `serverSideEncryption: "AES256"` on s3_put_object, and
+// the bucket's default mode `SSE-B2` (`defaultServerSideEncryption` on b2_create_bucket and
+// b2_update_bucket). What B2 documents: an object stored with the AES256 header "is encrypted with
+// SSE-B2" and the answer carries `x-amz-server-side-encryption: AES256`; a bucket with default
+// encryption on encrypts what is uploaded into it, or copied into it, from then on, and not the files
+// that were already there; encryption is transparent to a reader. The effect asserted is the one a
+// caller sees on the stored object: the `serverSideEncryption` s3_head_object reports.
+// Measured against real B2 on 2026-10-13 (b2-simulator PR 42, ledger F-111): every object B2 stores is
+// encrypted with SSE-B2, so HEAD, GET, put, copy and multipart answers carry
+// `x-amz-server-side-encryption: AES256` whether or not the request asked for it, and in a bucket with
+// or without a default mode. A check can therefore not tell a file stored before a default was turned
+// on from one stored after it by the header; what the default mode adds is its own listing
+// (`defaultServerSideEncryption`), asserted below. Needs the simulator that reports AES256 on every
+// object (b2-simulator 3907358 or later); an older build leaves the header off a plain upload.
+// Measured against real B2 on 2026-10-14 (b2-simulator PR 43, ledger F-11): a bucket created with no
+// `defaultServerSideEncryption` is listed with `{mode: "SSE-B2", algorithm: "AES256"}`, as the b2_create_bucket
+// page says ("If this field is omitted, the bucket uses SSE-B2 with AES256"). Accounts observed in
+// 2026-09 listed `null` there; the simulator keeps that behaviour behind `--default-encryption none`, which
+// this check does not use. Needs b2-simulator 64f038e or later.
+// https://www.backblaze.com/apidocs/s3-put-object https://www.backblaze.com/apidocs/s3-copy-object
+// https://www.backblaze.com/docs/cloud-storage-server-side-encryption
+// https://www.backblaze.com/apidocs/b2-update-bucket
+import { bucketInfo, check, eq, payload, put, readBytes, runScenario } from "../lib/session.mjs";
+
+await runScenario("enc.sse_b2", async (s) => {
+  const encryptionOf = async (bucket, key) =>
+    (await s.call("s3_head_object", { bucket: bucket.name, key })).serverSideEncryption;
+  const putEncrypted = (bucket, key, bytes) =>
+    s.call("s3_put_object", {
+      bucket: bucket.name,
+      key,
+      content: bytes.toString("base64"),
+      contentType: "application/octet-stream",
+      serverSideEncryption: "AES256",
+    });
+
+  s.step("a bucket created with no encryption setting defaults to SSE-B2");
+  const bucket = await s.bucket();
+  const plainDefault = (await bucketInfo(s, bucket)).defaultServerSideEncryption;
+  eq(
+    "default mode and algorithm of a plain bucket",
+    ["SSE-B2", "AES256"],
+    [plainDefault.mode, plainDefault.algorithm],
+  );
+
+  s.step("a plain upload is reported as encrypted too (B2 encrypts every object)");
+  const plain = payload(2048, 80);
+  await put(s, bucket, "st/enc/plain.bin", plain);
+  eq("encryption of a plain upload", "AES256", await encryptionOf(bucket, "st/enc/plain.bin"));
+
+  s.step("an upload with serverSideEncryption AES256 is encrypted");
+  const secret = payload(4096, 81);
+  await putEncrypted(bucket, "st/enc/aes256.bin", secret);
+  eq("encryption of the AES256 upload", "AES256", await encryptionOf(bucket, "st/enc/aes256.bin"));
+
+  s.step("the encrypted object reads back as the bytes uploaded");
+  const read = await readBytes(s, bucket, "st/enc/aes256.bin");
+  check(read.bytes.equals(secret), "the encrypted object's bytes differ from what was uploaded");
+  eq("size of the encrypted object", secret.length, read.contentLength);
+
+  s.step("bucket default SSE-B2 at creation");
+  const born = await s.bucket({
+    defaultServerSideEncryption: { mode: "SSE-B2", algorithm: "AES256" },
+  });
+  const info = (await bucketInfo(s, born)).defaultServerSideEncryption;
+  eq("default mode listed after create", ["SSE-B2", "AES256"], [info.mode, info.algorithm]);
+  await put(s, born, "st/enc/default.bin", plain);
+  eq(
+    "a plain upload into a default-encrypted bucket",
+    "AES256",
+    await encryptionOf(born, "st/enc/default.bin"),
+  );
+
+  s.step("turning the default on later is listed, and new files are encrypted");
+  const later = await s.bucket();
+  await put(s, later, "st/enc/before.bin", plain);
+  await s.call("b2_update_bucket", {
+    bucketId: later.id,
+    defaultServerSideEncryption: { mode: "SSE-B2", algorithm: "AES256" },
+  });
+  const turned = (await bucketInfo(s, later)).defaultServerSideEncryption;
+  eq("default mode listed after update", ["SSE-B2", "AES256"], [turned.mode, turned.algorithm]);
+  await put(s, later, "st/enc/after.bin", plain);
+  eq(
+    "an upload after the default was turned on",
+    "AES256",
+    await encryptionOf(later, "st/enc/after.bin"),
+  );
+  eq(
+    "an upload from before the default (B2 encrypts it too)",
+    "AES256",
+    await encryptionOf(later, "st/enc/before.bin"),
+  );
+
+  s.step("an object copied into a default-encrypted bucket is encrypted");
+  await s.call("s3_copy_object", {
+    sourceBucket: bucket.name,
+    sourceKey: "st/enc/plain.bin",
+    destinationBucket: born.name,
+    destinationKey: "st/enc/copied.bin",
+  });
+  eq("encryption of the copy", "AES256", await encryptionOf(born, "st/enc/copied.bin"));
+  const copied = await readBytes(s, born, "st/enc/copied.bin");
+  check(copied.bytes.equals(plain), "the copy's bytes differ from the source's");
+});

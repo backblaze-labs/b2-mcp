@@ -13,13 +13,28 @@ import {
 let s3: DeterministicS3ClientFake;
 let tools: ToolHarness;
 
+const versions = {
+  async resolveS3FileVersion({ key, versionId }: { key: string; versionId: string }) {
+    return {
+      fileName: key,
+      fileId: versionId,
+      bucketId: "source-bucket-id",
+      contentLength: 10,
+      contentType: "application/octet-stream",
+      uploadTimestamp: 0,
+      fileInfo: {},
+      action: "upload" as const,
+    };
+  },
+};
+
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
   s3 = new DeterministicS3ClientFake();
   s3.allowDefault("createMultipartUpload", "presignUploadPart", "completeMultipartUpload");
   tools = new ToolHarness();
-  registerS3MultipartTools(tools, s3.asPeerClient(), testConfig);
+  registerS3MultipartTools(tools, s3.asPeerClient(), testConfig, { versions });
 });
 
 afterEach(() => {

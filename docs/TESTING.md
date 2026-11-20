@@ -232,6 +232,12 @@ Biome is also the only formatter. `pnpm run format` and `pnpm run format:check`
 cover Biome-supported file types; Markdown and YAML files are not part of the
 automated format gate.
 
+## Coverage Map
+
+[`TEST-COVERAGE-MAP.md`](TEST-COVERAGE-MAP.md) maps the existing tests to a shared list of
+38 B2 capabilities and records known gaps. It is a snapshot; regenerate it when
+tools or tests change.
+
 ## File Naming Convention
 
 Test files must use these suffixes so scripts do not depend on accidental paths:
@@ -314,6 +320,36 @@ Tool-surface tests inspect the repository-owned registration registry, not SDK
 private fields. The registry is sorted by tool name and mirrors the public
 `registerTool()` calls made at server construction.
 
+## Local Fake Endpoint
+
+Protocol tests can drive the real built server against a local HTTPS fake with
+no real B2 credentials. The server normally trusts only `https` Backblaze hosts
+with no port, so a test-only override exists:
+
+- `B2_TEST_REALM` names one bare `https:` origin (host, optional port, no
+  userinfo, path, query, or fragment; the host must be neither an IP literal nor
+  `localhost`). It is read only when `NODE_ENV` is exactly `test`
+  (`src/utils/test-endpoint.ts`). Otherwise it is ignored. An open gate with a
+  malformed value throws instead of falling back.
+- With the gate open the SDK clients authorize against that realm, and the
+  native and S3 endpoint validators additionally accept that exact origin.
+  Production hosts and every other rule are unchanged; there is no wildcard or
+  suffix trust.
+- `test-support/fake-b2-endpoint.ts` serves the native API with the SDK's public
+  in-process `B2Simulator` transport and a minimal in-memory S3 handler
+  (put, head, get, list, copy, delete, multipart) on a loopback HTTPS socket.
+  The certificate is generated per run with the `openssl` CLI and is never
+  committed; the spawned server trusts it through `NODE_EXTRA_CA_CERTS`.
+- `test-support/loopback-dns-preload.cjs` (`node --require`) resolves the single
+  host in `B2_TEST_LOOPBACK_HOST` to `127.0.0.1`, because the SDK URL guard
+  refuses IP literals and `localhost`.
+
+`tests/protocol/basic-path.stdio.modern-protocol.test.ts` is the reference use.
+Fixture credentials must not overlap (the secret sanitizer redacts a key id that
+appears inside the key). The fake does not verify SigV4 signatures, enforce the
+5 MiB minimum part size, or model versioning, so it proves wiring and data
+integrity, not B2 semantics; keep those in the live suites.
+
 ## Deterministic Local Runtime Smoke
 
 The local runtime smoke is the credential-free startup check for clean
@@ -340,7 +376,7 @@ credential-free evidence. External clients are advisory evidence until they
 prove deterministic enough for CI.
 
 Manual Inspector compatibility is pinned by the repository wrapper to
-`@modelcontextprotocol/inspector@2.8.0`. That Inspector release requires
+`@modelcontextprotocol/inspector@2.12.0`. That Inspector release requires
 Node.js 22.19.0 or newer, so it is supplemental evidence for the patched Node
 22 LTS development/runtime pin. Install project dependencies, build from a
 non-serving checkout, then run the locked Inspector CLI through the wrapper:
@@ -356,7 +392,7 @@ isolated temporary home/cache, fake B2 credentials, and the same no-network
 server guard as `smoke:client`.
 
 The non-interactive external client smoke uses the official
-`@modelcontextprotocol/client@2.0.0` SDK over stdio. It sends fake test
+`@modelcontextprotocol/client@2.2.0` SDK over stdio. It sends fake test
 credentials, sets `B2_REGISTER_ALL_TOOLS=true` so startup performs no B2
 capability-discovery network call, validates `server/discover`, server
 name/version, instructions, and `tools/list`, then compares the returned surface
@@ -436,7 +472,7 @@ Credential-free unit tests cover the structured result serializer:
 
 - default compact JSON text output preserves the same `structuredContent`;
 - `B2_MCP_OUTPUT_FORMAT=toon` round-trips through the repo-owned encoder and
-  official `@toon-format/toon@4.1.1` dev/test decoder in a sanitized child
+  official `@toon-format/toon@4.4.0` dev/test decoder in a sanitized child
   process while preserving the same `structuredContent`;
 - unknown output formats fail during config resolution;
 - HTTP header-mode readiness rejects unknown output formats and TOON preflight

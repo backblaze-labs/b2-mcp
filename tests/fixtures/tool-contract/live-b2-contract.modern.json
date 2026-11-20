@@ -8,8 +8,8 @@
   "mcpRevision": "2026-07-28",
   "sdk": {
     "@backblaze-labs/b2-sdk": "0.4.0",
-    "@modelcontextprotocol/client": "2.0.0",
-    "@modelcontextprotocol/server": "2.0.0"
+    "@modelcontextprotocol/client": "2.4.0",
+    "@modelcontextprotocol/server": "2.4.0"
   },
   "capabilities": [
     "bypassGovernance",
@@ -385,7 +385,7 @@
           "email": {
             "description": "New email for the ejected account. If omitted, the existing email is kept. Must not already be a Backblaze account.",
             "format": "email",
-            "pattern": "^(?!\\.)(?!.*\\.\\.)([A-Za-z0-9_'+\\-\\.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$",
+            "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$",
             "type": "string"
           },
           "groupId": {
@@ -1288,7 +1288,7 @@
             "type": "string"
           },
           "contentType": {
-            "description": "New content type (only used with REPLACE).",
+            "description": "New content type (only used with REPLACE). Browser-executable types are rejected; omitted or empty uses S3's default type.",
             "type": "string"
           },
           "destinationBucket": {
@@ -1496,7 +1496,7 @@
     },
     {
       "name": "s3_get_object",
-      "descriptionSha256": "90cc9e6f4d6fb0a7fbbbf15ae1bf0e0d55052b043b1068453f85a6f0ca717691",
+      "descriptionSha256": "c0d417954437d7995c006a3af05bb5119a1ba85723a0f41a4e63813eac8b4600",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -1513,7 +1513,7 @@
             "type": "string"
           },
           "saveToPath": {
-            "description": "If provided, save the file to this local path.",
+            "description": "Stage a .part file in the nearest existing ancestor, creating parent directories only after a complete download. Rename atomically on success; transfer errors preserve the target. SIGKILL may leave a .part there; finalization errors may leave parents.",
             "type": "string"
           },
           "versionId": {
@@ -1580,7 +1580,7 @@
     },
     {
       "name": "s3_get_presigned_url",
-      "descriptionSha256": "397d1f8c0e6b4a9bf55ab4d9dfa7fc91767d58b6b56ab30519e8dd6e24ae16d2",
+      "descriptionSha256": "70c84c05875d9c8cd67496cdbe4c1afffba57fecf715bb180d0b03216a4fbb76",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -1593,7 +1593,7 @@
             "type": "boolean"
           },
           "contentType": {
-            "description": "For PutObject: restrict the upload to this content type.",
+            "description": "For PutObject, uploads must send Content-Type exactly matching this value; otherwise signature validation fails. Use requiredHeaders.",
             "type": "string"
           },
           "expiresIn": {
@@ -2011,7 +2011,7 @@
             "type": "string"
           },
           "copySource": {
-            "description": "The source object in 'bucket/key' format, e.g. 'my-bucket/path/to/file.dat'. URL-encode special characters in the key.",
+            "description": "Source 'bucket/key'; URL-encode the key. Optional suffix: '?versionId=<URL-encoded-version>'. URL-encode the version ID separately: 'source/file?versionId=v%2B1' selects 'v+1'. With nonempty copySourceVersionId, IDs must match after decoding; conflicting versions are rejected.",
             "type": "string"
           },
           "copySourceRange": {
@@ -2019,7 +2019,7 @@
             "type": "string"
           },
           "copySourceVersionId": {
-            "description": "Version ID of the source object to copy; set to copy that exact version, or omit to copy the current version.",
+            "description": "Raw version ID (not URL-encoded); empty is treated as omitted. Nonempty values must match the decoded version in copySource. Omit both selectors to copy the current version.",
             "type": "string"
           },
           "key": {
@@ -2071,5 +2071,5 @@
       "resultType": "complete"
     }
   },
-  "hash": "3b73320b5680a9658fb9fd95939272341352086a86c5ae00f0c0bf91acd8cabc"
+  "hash": "2a0e25c8cec8224aa9fcd00ca40291cfa4fbbad4dea10050951dc2bfe72f8f31"
 }

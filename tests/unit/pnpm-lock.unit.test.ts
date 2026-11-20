@@ -160,6 +160,32 @@ describe("pnpm lock adapter", () => {
     expect(() => parseYaml(text)).toThrow(/Unsupported (?:YAML|multiline)/);
   });
 
+  it("reads a block-scalar deprecated notice as text", () => {
+    const lock = parseYaml(
+      [
+        "packages:",
+        "  old-lib@1.0.0:",
+        "    deprecated: |-",
+        "      First line of the notice.",
+        "        Second line.",
+        "    engines: {node: '>=18'}",
+      ].join("\n"),
+    ) as { packages: Record<string, { deprecated: string; engines?: unknown }> };
+    expect(lock.packages["old-lib@1.0.0"]).toEqual({
+      deprecated: "First line of the notice.\nSecond line.",
+      engines: { node: ">=18" },
+    });
+    expect(parseYaml("packages:\n  b@1.0.0:\n    deprecated: |\n      last\n")).toEqual({
+      packages: { "b@1.0.0": { deprecated: "last" } },
+    });
+  });
+
+  it("still fails closed for a folded deprecated notice", () => {
+    expect(() => parseYaml("packages:\n  a@1.0.0:\n    deprecated: >\n      text\n")).toThrow(
+      /Unsupported YAML/,
+    );
+  });
+
   it.each([
     ["importer link dependency", { dependencies: { "local-lib": { version: "link:../local" } } }],
     ["importer file dependency", { dependencies: { "local-lib": { version: "file:../local" } } }],

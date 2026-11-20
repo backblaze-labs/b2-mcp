@@ -10,6 +10,15 @@ const { createMcpHttpTransport, setB2SdkClientFactoryForTests } = require("../..
 
 const API_TIMEOUT_MS = 30_000;
 const READ_ONLY_CAPABILITIES = ["listBuckets", "listFiles", "readFiles"];
+// Capability set of the committed `read-only` tool profile
+// (src/tool-contract.ts PROFILE_CAPABILITIES["read-only"]).
+const READ_ONLY_PROFILE_CAPABILITIES = [
+  "listBuckets",
+  "listFiles",
+  "listKeys",
+  "readBucketNotifications",
+  "readFiles",
+];
 
 class JsonResponse {
   body = null;
@@ -63,6 +72,9 @@ function credentialScopedTransport(inner) {
         }
         if (applicationKeyId.includes("other")) {
           storageApi.allowed.capabilities = READ_ONLY_CAPABILITIES;
+        }
+        if (applicationKeyId.includes("read-only-profile")) {
+          storageApi.allowed.capabilities = READ_ONLY_PROFILE_CAPABILITIES;
         }
       }
       return new JsonResponse(response.status, body, Object.fromEntries(response.headers ?? []));

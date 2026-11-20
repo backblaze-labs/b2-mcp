@@ -9,8 +9,8 @@
   },
   "sdk": {
     "@backblaze-labs/b2-sdk": "0.4.0",
-    "@modelcontextprotocol/client": "2.0.0",
-    "@modelcontextprotocol/server": "2.0.0"
+    "@modelcontextprotocol/client": "2.4.0",
+    "@modelcontextprotocol/server": "2.4.0"
   },
   "backingCategories": {
     "nativeB2Sdk": {
@@ -204,7 +204,7 @@
         "s3_get_presigned_url",
         "s3_put_bucket_lifecycle"
       ],
-      "hash": "91f2294b2e4be34ec05c1face2e489b9fee186e04b5fe856b94c8eb3d2bdf49f",
+      "hash": "a63a701cf67ba4cd37327e8062469d9f07ca71f88932abe66c98fbb046c91fea",
       "fixtures": {
         "modern": "tests/fixtures/tool-contract/full.modern.json",
         "legacy": "tests/fixtures/tool-contract/full.legacy.json"
@@ -358,7 +358,7 @@
         "s3_get_presigned_url",
         "s3_put_bucket_lifecycle"
       ],
-      "hash": "3b73320b5680a9658fb9fd95939272341352086a86c5ae00f0c0bf91acd8cabc",
+      "hash": "2a0e25c8cec8224aa9fcd00ca40291cfa4fbbad4dea10050951dc2bfe72f8f31",
       "fixtures": {
         "modern": "tests/fixtures/tool-contract/live-b2-contract.modern.json",
         "legacy": "tests/fixtures/tool-contract/live-b2-contract.legacy.json"
@@ -502,7 +502,7 @@
         "s3_get_presigned_url",
         "s3_put_bucket_lifecycle"
       ],
-      "hash": "49121cb2ee0387d7a9623e50920b2bfa91916e7f323f0a0351bb98ab217a67ba",
+      "hash": "0f1b7f558f8b1b3e496644dc9c3524bb759fdc578bed1224c76a703549225155",
       "fixtures": {
         "modern": "tests/fixtures/tool-contract/phase1-default.modern.json",
         "legacy": "tests/fixtures/tool-contract/phase1-default.legacy.json"
@@ -582,7 +582,7 @@
         "b2_create_key",
         "b2_reserve_trial_create_account"
       ],
-      "hash": "735537dedc1479eb270133bcc0c588fae08dff31886565328f6cd823c89ca421",
+      "hash": "093ff20c7699910e30beb33f1d75186e5e1b2ac371ebc2f7f98ba13f4067d37d",
       "fixtures": {
         "modern": "tests/fixtures/tool-contract/read-only.modern.json",
         "legacy": "tests/fixtures/tool-contract/read-only.legacy.json"

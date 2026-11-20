@@ -10,23 +10,20 @@ import { checkDestructive } from "../utils/destructive-gate.js";
 import type { B2Config, B2S3VersionGuard } from "../utils/types.js";
 import type { B2S3PeerClient } from "./aws-sdk-adapter.js";
 
-/**
- * Presigned URL tools for the B2 S3-compatible API.
- *
- * NOTE: Backblaze B2 does NOT support browser-based POST uploads using
- * presigned POST policies (the S3 POST Object API). Only presigned GET
- * and PUT URLs are supported. s3_get_presigned_post has been intentionally
- * omitted for this reason.
- */
+/** Presigned GET/PUT only: B2 does not support presigned POST uploads. */
 const PUT_OBJECT_CONFIRM_DESC =
   "Fallback confirmation for minting a PutObject presigned URL bearer capability when the effective server destructive policy is 'confirm' and MCP elicitation cannot run.";
 
+/** Upload URL instructions shared by full and write-only profiles. */
+const UPLOAD_URL_DETAILS =
+  " For multipart uploads use s3_create_multipart_upload and s3_get_presigned_upload_part_url. Returns url, operation, expiresIn, expiresAt; only PutObject includes requiredHeaders; GetObject omits it. Keep URL secret. Bytes flow directly between client/worker and B2, bypassing MCP. PutObject uploads must send Content-Type exactly matching contentType; otherwise signature validation fails.";
+
 function operationDescription(allowGetObjectUrl: boolean, allowPutObjectUrl: boolean): string {
   if (allowGetObjectUrl && allowPutObjectUrl) {
-    return "Generate a short-lived presigned URL bearer capability for one B2 object — GetObject (download) or PutObject (upload). Prefer this for single-object transfers; use s3_create_multipart_upload and s3_get_presigned_upload_part_url for multipart uploads. The response includes the URL, operation, expiresIn, and expiresAt; treat the URL as sensitive until it expires. This is the preferred path for moving real object data: bytes flow directly between the client/worker and B2 and never pass through the MCP server. Note: presigned POST (browser form uploads) is NOT supported by B2; use a PutObject URL instead.";
+    return `Generate a short-lived bearer URL for one B2 object: GetObject (download) or PutObject (upload).${UPLOAD_URL_DETAILS} B2 does not support presigned POST (browser form uploads); use PutObject.`;
   }
   if (allowPutObjectUrl) {
-    return "Generate a short-lived PutObject presigned URL bearer capability for uploading one B2 object. Prefer this for single-object uploads; use s3_create_multipart_upload and s3_get_presigned_upload_part_url for multipart uploads. The response includes the URL, operation, expiresIn, and expiresAt; treat the URL as sensitive until it expires. This is the preferred upload path for real object data because bytes flow directly between the client/worker and B2 and never pass through the MCP server.";
+    return `Generate a short-lived PutObject bearer URL for one B2 object.${UPLOAD_URL_DETAILS}`;
   }
   return "Generate a short-lived GetObject presigned URL bearer capability for downloading one B2 object. Prefer this for single-object downloads; multipart uploads use s3_create_multipart_upload and s3_get_presigned_upload_part_url. The response includes the URL, operation, expiresIn, and expiresAt; treat the URL as sensitive until it expires. Read-only profiles expose download URLs only.";
 }
@@ -102,7 +99,9 @@ export function registerS3PresignedTools(
           contentType: z
             .string()
             .optional()
-            .describe("For PutObject: restrict the upload to this content type."),
+            .describe(
+              "For PutObject, uploads must send Content-Type exactly matching this value; otherwise signature validation fails. Use requiredHeaders.",
+            ),
           confirm: z.boolean().optional().describe(PUT_OBJECT_CONFIRM_DESC),
         }
       : {}),

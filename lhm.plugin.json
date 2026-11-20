@@ -349,7 +349,7 @@
           "memberEmail": {
             "type": "string",
             "format": "email",
-            "pattern": "^(?!\\.)(?!.*\\.\\.)([A-Za-z0-9_'+\\-\\.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$",
+            "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$",
             "description": "Email address for the new group member account."
           },
           "region": {
@@ -541,7 +541,7 @@
             "description": "New email for the ejected account. If omitted, the existing email is kept. Must not already be a Backblaze account.",
             "type": "string",
             "format": "email",
-            "pattern": "^(?!\\.)(?!.*\\.\\.)([A-Za-z0-9_'+\\-\\.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+            "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
           },
           "confirm": {
             "description": "Fallback confirmation for this destructive/irreversible operation when the effective server destructive policy is 'confirm' and MCP elicitation cannot run.",
@@ -844,7 +844,7 @@
           "email": {
             "type": "string",
             "format": "email",
-            "pattern": "^(?!\\.)(?!.*\\.\\.)([A-Za-z0-9_'+\\-\\.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$",
+            "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$",
             "description": "Email address for the new B2 Reserve trial account."
           },
           "region": {
@@ -1496,7 +1496,7 @@
             "enum": ["COPY", "REPLACE"]
           },
           "contentType": {
-            "description": "New content type (only used with REPLACE).",
+            "description": "New content type (only used with REPLACE). Browser-executable types are rejected; omitted or empty uses S3's default type.",
             "type": "string"
           },
           "metadata": {
@@ -1683,7 +1683,7 @@
     },
     {
       "name": "s3_get_object",
-      "description": "Read a SMALL object inline (≤1 MiB, returned base64) — for manifests, sidecars, and configs the agent must inspect — or stream any size to a local path with saveToPath. saveToPath writes the fetched bytes to the local filesystem (creating parent directories) via a temporary sibling file that replaces the target only after a complete download, so a failed transfer leaves any existing file untouched; it performs no mutation of B2 or any remote data. For real object data, generate a GetObject URL with s3_get_presigned_url and download directly from B2 (bytes never pass through the server or the model context).",
+      "description": "Read a SMALL object inline (≤1 MiB, base64) for manifests, sidecars, and configs, or stream any size to a local saveToPath. Stage a .part file in the nearest existing ancestor, creating parent directories only after a complete download. Rename atomically on success; transfer errors preserve the target. SIGKILL may leave a .part there; finalization errors may leave parents. No B2 or remote data is mutated. For bulk data, use s3_get_presigned_url (GetObject) to download directly from B2, bypassing the server and model context.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -1704,7 +1704,7 @@
             "type": "string"
           },
           "saveToPath": {
-            "description": "If provided, save the file to this local path.",
+            "description": "Stage a .part file in the nearest existing ancestor, creating parent directories only after a complete download. Rename atomically on success; transfer errors preserve the target. SIGKILL may leave a .part there; finalization errors may leave parents.",
             "type": "string"
           }
         },
@@ -1767,7 +1767,7 @@
     },
     {
       "name": "s3_get_presigned_url",
-      "description": "Generate a short-lived presigned URL bearer capability for one B2 object — GetObject (download) or PutObject (upload). Prefer this for single-object transfers; use s3_create_multipart_upload and s3_get_presigned_upload_part_url for multipart uploads. The response includes the URL, operation, expiresIn, and expiresAt; treat the URL as sensitive until it expires. This is the preferred path for moving real object data: bytes flow directly between the client/worker and B2 and never pass through the MCP server. Note: presigned POST (browser form uploads) is NOT supported by B2; use a PutObject URL instead.",
+      "description": "Generate a short-lived bearer URL for one B2 object: GetObject (download) or PutObject (upload). For multipart uploads use s3_create_multipart_upload and s3_get_presigned_upload_part_url. Returns url, operation, expiresIn, expiresAt; only PutObject includes requiredHeaders; GetObject omits it. Keep URL secret. Bytes flow directly between client/worker and B2, bypassing MCP. PutObject uploads must send Content-Type exactly matching contentType; otherwise signature validation fails. B2 does not support presigned POST (browser form uploads); use PutObject.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -1796,7 +1796,7 @@
             "type": "string"
           },
           "contentType": {
-            "description": "For PutObject: restrict the upload to this content type.",
+            "description": "For PutObject, uploads must send Content-Type exactly matching this value; otherwise signature validation fails. Use requiredHeaders.",
             "type": "string"
           },
           "confirm": {
@@ -2213,14 +2213,14 @@
           },
           "copySource": {
             "type": "string",
-            "description": "The source object in 'bucket/key' format, e.g. 'my-bucket/path/to/file.dat'. URL-encode special characters in the key."
+            "description": "Source 'bucket/key'; URL-encode the key. Optional suffix: '?versionId=<URL-encoded-version>'. URL-encode the version ID separately: 'source/file?versionId=v%2B1' selects 'v+1'. With nonempty copySourceVersionId, IDs must match after decoding; conflicting versions are rejected."
           },
           "copySourceRange": {
             "description": "Byte range to copy from the source, e.g. 'bytes=0-104857599' for the first 100 MiB; omit to copy the entire source object. The copied range must be ≥5 MiB unless this is the last part, and at most 5 GiB.",
             "type": "string"
           },
           "copySourceVersionId": {
-            "description": "Version ID of the source object to copy; set to copy that exact version, or omit to copy the current version.",
+            "description": "Raw version ID (not URL-encoded); empty is treated as omitted. Nonempty values must match the decoded version in copySource. Omit both selectors to copy the current version.",
             "type": "string"
           }
         },

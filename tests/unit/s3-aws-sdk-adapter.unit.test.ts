@@ -22,8 +22,215 @@ function clientWithHandler(handle: ReturnType<typeof vi.fn>) {
 
 describe("B2S3PeerClient object data-plane behavior", () => {
   afterEach(() => {
+    vi.restoreAllMocks();
     circuitBreaker.close();
     s3CircuitBreaker.close();
+  });
+
+  it.each(["text/html", "image/svg+xml", "application/xhtml+xml", "Text/HTML; charset=utf-8"])(
+    "rejects direct copyObject replacement content type %s before sending",
+    async (contentType) => {
+      const s3 = clientWithHandler(vi.fn());
+      const send = vi.spyOn(s3 as any, "sendUnsafeMutationWithCircuit").mockResolvedValue({});
+      try {
+        await expect(
+          s3.copyObject({
+            sourceBucket: "b",
+            sourceKey: "source",
+            destinationBucket: "b",
+            destinationKey: "copy",
+            metadataDirective: "REPLACE",
+            contentType,
+          }),
+        ).rejects.toMatchObject({
+          code: "bad_request",
+          status: 400,
+          message: expect.stringContaining(
+            "s3_copy_object rejects browser-executable content type",
+          ),
+        });
+        expect(send).not.toHaveBeenCalled();
+      } finally {
+        s3.destroy();
+      }
+    },
+  );
+
+  it.each(["text/html", "image/svg+xml", "application/xhtml+xml", "Text/HTML; charset=utf-8"])(
+    "rejects direct createMultipartUpload content type %s before sending",
+    async (contentType) => {
+      const s3 = clientWithHandler(vi.fn());
+      const send = vi.spyOn(s3 as any, "sendUnsafeMutationWithCircuit").mockResolvedValue({});
+      try {
+        await expect(
+          s3.createMultipartUpload({ bucket: "b", key: "k", contentType }),
+        ).rejects.toMatchObject({
+          code: "bad_request",
+          status: 400,
+          message: expect.stringContaining(
+            "s3_create_multipart_upload rejects browser-executable content type",
+          ),
+        });
+        expect(send).not.toHaveBeenCalled();
+      } finally {
+        s3.destroy();
+      }
+    },
+  );
+
+  it.each([undefined, "", "text/plain"])(
+    "allows direct copyObject replacement content type %s",
+    async (contentType) => {
+      const s3 = clientWithHandler(vi.fn());
+      const send = vi.spyOn(s3 as any, "sendUnsafeMutationWithCircuit").mockResolvedValue({});
+      try {
+        await expect(
+          s3.copyObject({
+            sourceBucket: "b",
+            sourceKey: "source",
+            destinationBucket: "b",
+            destinationKey: "copy",
+            metadataDirective: "REPLACE",
+            contentType,
+          }),
+        ).resolves.toBeUndefined();
+        expect(send).toHaveBeenCalledTimes(1);
+        const command = send.mock.calls[0][0] as { input: Record<string, unknown> };
+        expect(command.input.ContentType).toBe(contentType);
+      } finally {
+        s3.destroy();
+      }
+    },
+  );
+
+  it("ignores direct copyObject content types with the COPY directive", async () => {
+    const s3 = clientWithHandler(vi.fn());
+    const send = vi.spyOn(s3 as any, "sendUnsafeMutationWithCircuit").mockResolvedValue({});
+    try {
+      await s3.copyObject({
+        sourceBucket: "b",
+        sourceKey: "source",
+        destinationBucket: "b",
+        destinationKey: "copy",
+        metadataDirective: "COPY",
+        contentType: "text/html",
+      });
+      expect(send).toHaveBeenCalledTimes(1);
+      const command = send.mock.calls[0][0] as { input: Record<string, unknown> };
+      expect(command.input.ContentType).toBeUndefined();
+    } finally {
+      s3.destroy();
+    }
+  });
+
+  it.each(["text/html", "image/svg+xml", "application/javascript", "application/xhtml+xml"])(
+    "refuses a presigned PutObject URL for %s",
+    async (contentType) => {
+      const handle = vi.fn();
+      const s3 = clientWithHandler(handle);
+      try {
+        await expect(
+          s3.presignObjectUrl({
+            bucket: "bucket",
+            key: "object",
+            operation: "PutObject",
+            expiresIn: 60,
+            contentType,
+          }),
+        ).rejects.toMatchObject({ status: 400, code: "bad_request" });
+        expect(handle).not.toHaveBeenCalled();
+      } finally {
+        s3.destroy();
+      }
+    },
+  );
+
+  it.each(["application/octet-stream", "Text/Plain; charset=UTF-8"])(
+    "returns the exact required header and signs content-type %s",
+    async (contentType) => {
+      const handle = vi.fn();
+      const s3 = clientWithHandler(handle);
+      try {
+        const result = await s3.presignObjectUrl({
+          bucket: "bucket",
+          key: "object",
+          operation: "PutObject",
+          expiresIn: 60,
+          contentType: contentType,
+        });
+        expect(result).toHaveProperty("requiredHeaders", {
+          "content-type": contentType,
+        });
+        const url = new URL(result.url);
+        expect(url.searchParams.get("X-Amz-SignedHeaders")?.split(";")).toContain("content-type");
+        expect(handle).not.toHaveBeenCalled();
+      } finally {
+        s3.destroy();
+      }
+    },
+  );
+
+  it("binds the presigned PutObject signature to the approved content type", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    const handle = vi.fn();
+    const s3 = clientWithHandler(handle);
+    try {
+      const input = {
+        bucket: "bucket",
+        key: "object",
+        operation: "PutObject" as const,
+        expiresIn: 60,
+      };
+      const binary = new URL(
+        (await s3.presignObjectUrl({ ...input, contentType: "application/octet-stream" })).url,
+      );
+      const text = new URL(
+        (await s3.presignObjectUrl({ ...input, contentType: "text/plain" })).url,
+      );
+      expect(binary.origin + binary.pathname).toBe(text.origin + text.pathname);
+      expect(binary.searchParams.get("X-Amz-Date")).toBe(text.searchParams.get("X-Amz-Date"));
+      expect(binary.searchParams.get("X-Amz-Signature")).toBeTruthy();
+      expect(text.searchParams.get("X-Amz-Signature")).toBeTruthy();
+      expect(binary.searchParams.get("X-Amz-Signature")).not.toBe(
+        text.searchParams.get("X-Amz-Signature"),
+      );
+      expect(handle).not.toHaveBeenCalled();
+    } finally {
+      s3.destroy();
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps presigned GetObject URLs independent of a content-type header", async () => {
+    const handle = vi.fn();
+    const s3 = clientWithHandler(handle);
+    try {
+      const result = await s3.presignObjectUrl({
+        bucket: "bucket",
+        key: "object",
+        operation: "GetObject",
+        expiresIn: 60,
+      });
+      expect(new URL(result.url).searchParams.get("X-Amz-SignedHeaders")?.split(";")).not.toContain(
+        "content-type",
+      );
+      expect(result.requiredHeaders).toBeUndefined();
+      expect(handle).not.toHaveBeenCalled();
+    } finally {
+      s3.destroy();
+    }
+  });
+
+  it("uses operation-neutral wording for a missing required content type", async () => {
+    const s3 = clientWithHandler(vi.fn());
+    try {
+      await expect(
+        s3.presignObjectUrl({ bucket: "b", key: "k", operation: "PutObject", expiresIn: 60 }),
+      ).rejects.toThrow("Presigned PutObject URLs requires a contentType.");
+    } finally {
+      s3.destroy();
+    }
   });
 
   it("does not gate S3 data-plane calls on the native circuit breaker", async () => {

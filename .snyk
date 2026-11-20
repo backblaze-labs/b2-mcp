@@ -1,0 +1,21 @@
+# Snyk policy. `exclude.code` keeps paths out of Snyk Code (SAST) scanning.
+exclude:
+  code:
+    # Test code and test-only fixtures. They are not shipped, except the tool
+    # and prompt contract fixtures (tests/fixtures/*-contract/*.json, schemas
+    # with no credentials) that `files` in package.json publishes. Test code
+    # is credential-shaped on purpose (fake application keys, auth tokens,
+    # presigned URLs and OAuth secrets), which Snyk Code reports as hardcoded
+    # secrets. Production source (src/), build
+    # and release scripts (scripts/), deployment adapters (deploy/) and the eval
+    # provider drivers (evals/*.ts) are still scanned. GitHub secret scanning
+    # with push protection still covers every path, tests included, and the
+    # release secret scan runs TruffleHog over the full history
+    # (docs/design-docs/security-review.md).
+    - '**/*.test.*'
+    - '**/*.spec.*'
+    - tests/**
+    - test-support/**
+    # SDK harness scenarios (.sdkharness/README.md) run against a local B2
+    # simulator with fake credentials.
+    - .sdkharness/tests/**

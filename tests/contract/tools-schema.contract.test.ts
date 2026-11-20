@@ -17,6 +17,7 @@
 import { createServer, getRegisteredTools } from "../../src/server";
 import type { McpServer } from "../../src/mcp";
 import { readJson } from "./support";
+import { testConfig } from "../support/deterministic-fakes";
 
 const contract = readJson<{
   profiles: {
@@ -205,6 +206,57 @@ describe("S3 object tools require bucket and key where expected", () => {
     expect(required).toContain("bucket");
     expect(required).toContain("key");
   });
+
+  it("accepts omitted, empty, and nonempty multipart copy version selectors", () => {
+    const schema = tools["s3_upload_part_copy"].inputSchema;
+    const input = {
+      bucket: "destination",
+      key: "assembled.bin",
+      uploadId: "upload-1",
+      partNumber: 1,
+      copySource: "source/file.bin",
+    };
+
+    expect(schema.safeParse({ ...input, copySourceVersionId: "" }).success).toBe(true);
+    expect(schema.safeParse(input).success).toBe(true);
+    expect(schema.safeParse({ ...input, copySourceVersionId: "version-1" }).success).toBe(true);
+  });
+
+  it("documents multipart copy source version syntax, encoding, and conflicts", () => {
+    const shape = getShape(tools["s3_upload_part_copy"]?.inputSchema);
+    const sourceDescription = shape.copySource.description;
+    expect(sourceDescription).toContain("?versionId=<URL-encoded-version>");
+    expect(sourceDescription).toContain("source/file?versionId=v%2B1");
+    expect(sourceDescription).toContain("v+1");
+    expect(sourceDescription).toMatch(/URL-encode.*key/);
+    expect(sourceDescription).toMatch(/URL-encode.*version ID.*separately/);
+    expect(sourceDescription).toMatch(/copySourceVersionId.*must match after decoding/);
+    expect(sourceDescription).toMatch(/conflicting versions are rejected/i);
+
+    const versionDescription = shape.copySourceVersionId.description;
+    expect(versionDescription).toMatch(/raw.*not URL-encoded/i);
+    expect(versionDescription).toMatch(/empty.*treated as omitted/);
+    expect(versionDescription).toMatch(/must match.*decoded.*copySource/);
+    expect(versionDescription).toMatch(/omit both.*current version/i);
+  });
+
+  it.each([undefined, ["writeFiles"]])(
+    "advertises the required PutObject Content-Type header for capabilities %s",
+    (capabilities) => {
+      const tool = getRegisteredTools(createServer(testConfig, capabilities))?.s3_get_presigned_url;
+      expect(tool).toBeDefined();
+      expect(tool?.description).toMatch(
+        /(?:PutObject|Uploads).*must send Content-Type exactly matching contentType/,
+      );
+      expect(tool?.description).toMatch(/signature validation fails/);
+      expect(tool?.description).toMatch(/only PutObject (?:includes|returns) requiredHeaders/);
+      expect(tool?.description).toMatch(/GetObject omits (?:it|requiredHeaders)/);
+      expect(tool?.description).toMatch(/\bexpiresIn\b/);
+      expect(tool?.description).toMatch(/\bexpiresAt\b/);
+      const contentType = getShape(tool?.inputSchema).contentType;
+      expect(contentType.description).toMatch(/must send Content-Type exactly matching this value/);
+    },
+  );
 
   it("documents s3_copy_object acl as a no-op compatibility hint", () => {
     const acl = getShape(tools["s3_copy_object"]?.inputSchema).acl;
