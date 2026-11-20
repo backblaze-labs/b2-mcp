@@ -17,7 +17,7 @@ import { currentMcpRequestSignal } from "../request-context.js";
 import { withS3Circuit, withS3LongCircuit } from "../utils/circuit-breaker.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
 import { badRequestError, codedError, toolError, toolJson, toolSuccess } from "../utils/errors.js";
-import { FileAccessError, isInsideFileRoot, resolveLocalPath } from "../utils/fs-guard.js";
+import { isInsideFileRoot, resolveLocalPath } from "../utils/fs-guard.js";
 import { logger } from "../utils/logger.js";
 import { timeoutError } from "../utils/named-error.js";
 import type { B2Config, B2S3FileVersionBinding, B2S3VersionGuard } from "../utils/types.js";
@@ -447,7 +447,6 @@ async function downloadToPath(
       target.existing ? target.existing.mode & 0o700 : 0o666,
     );
   } catch (err) {
-    if (err instanceof FileAccessError) throw badRequestError(err.message);
     throw notWritableError(err, `directory '${dir}'`);
   }
 
@@ -519,7 +518,6 @@ async function downloadToPath(
   } catch (err) {
     // Omit the reason to avoid an unhandled error on an unconsumed Node body.
     if (body) await cancelBody(body);
-    if (err instanceof FileAccessError) throw badRequestError(err.message);
     throw err;
   } finally {
     // Keep the temp inode open until unlink.

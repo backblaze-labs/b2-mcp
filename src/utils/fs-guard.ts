@@ -13,6 +13,11 @@ import { B2Config } from "./types.js";
  * because the path escapes the configured sandbox root.
  */
 export class FileAccessError extends Error {
+  /** HTTP status for a refused request. */
+  readonly status = 400;
+  /** Stable machine-readable refusal code. */
+  readonly code = "bad_request";
+
   /**
    * Create a local filesystem policy error.
    *

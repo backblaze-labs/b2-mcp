@@ -34,6 +34,40 @@ describe("error classification policy", () => {
     expect(offenders).toEqual([]);
   });
 
+  it("declares a status and code on custom Error subclasses", () => {
+    // Raised only on the CLI, startup, and HTTP OAuth paths, never inside a tool handler.
+    const notToolErrors = [
+      "CliUsageError",
+      "OAuthDependencyError",
+      "PortUsageError",
+      "StdioCapabilityDeadlineError",
+    ];
+    const errorClass =
+      /class\s+(\w+)\s+extends\s+(?:Aggregate|Eval|Range|Reference|Syntax|Type|URI)?Error\b[^{]*\{(?:\s*\}|([\s\S]*?)\n\})/g;
+    const declares = (body: string, field: string) =>
+      new RegExp(
+        `^\\s*(?:(?:public|protected|private|readonly)\\s+)*${field}[!?]?\\s*[:=]`,
+        "m",
+      ).test(body);
+
+    const classes = sourceFiles.flatMap((file) =>
+      [...readFileSync(file, "utf8").matchAll(errorClass)].map(([, name, body = ""]) => ({
+        file,
+        name,
+        body,
+      })),
+    );
+    const offenders = classes
+      .filter(({ name }) => !notToolErrors.includes(name))
+      .filter(({ body }) => !(declares(body, "status") && declares(body, "code")))
+      .map(({ file, name }) => `${relative(root, file)}: ${name}`);
+
+    expect(classes.map(({ name }) => name)).toEqual(
+      expect.arrayContaining([...notToolErrors, "FileAccessError"]),
+    );
+    expect(offenders).toEqual([]);
+  });
+
   it("classifies coded refusals by their own status and code", () => {
     expect(parseB2Error(codedError(403, "forbidden", "nope"))).toMatchObject({
       status: 403,
