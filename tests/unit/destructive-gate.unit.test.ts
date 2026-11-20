@@ -487,5 +487,38 @@ describe("destructive-gate", () => {
         ).ok,
       ).toBe(true);
     });
+
+    it.each([
+      {
+        toolName: "s3_put_bucket_lifecycle",
+        args: {
+          bucket: "b",
+          rules: [
+            {
+              id: "abort-uploads",
+              status: "Enabled",
+              abortIncompleteMultipartUpload: { daysAfterInitiation: 7 },
+            },
+            {
+              id: "expire-versions",
+              status: "Enabled",
+              noncurrentVersionExpiration: { noncurrentDays: 1 },
+            },
+          ],
+        },
+      },
+      {
+        toolName: "b2_update_bucket",
+        args: {
+          bucketId: "b",
+          lifecycleRules: [
+            { fileNamePrefix: "tmp/", daysFromUploadingToHiding: 1 },
+            { fileNamePrefix: "archive/", daysFromHidingToDeleting: 1 },
+          ],
+        },
+      },
+    ])("gates $toolName when any lifecycle rule schedules deletion", ({ toolName, args }) => {
+      expect(checkDestructive(toolName, args, cfg()).ok).toBe(false);
+    });
   });
 });
