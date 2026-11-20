@@ -160,13 +160,6 @@ describe("resolveLocalPath — sandbox names that begin with two dots (case C22)
           expect(resolveLocalPath(cfg, file, "read"), "read path resolves").toBe(
             fs.realpathSync(file),
           );
-          expect(
-            resolveLocalPath(cfg, path.join(dir, "new.bin"), "write"),
-            "write path resolves",
-          ).toBe(path.join(fs.realpathSync(dir), "new.bin"));
-          expect(isInsideFileRoot(cfg, fs.realpathSync(file)), "file is inside the root").toBe(
-            true,
-          );
         },
         {
           match: (error) =>
@@ -175,6 +168,11 @@ describe("resolveLocalPath — sandbox names that begin with two dots (case C22)
             (error as Error)?.name === "AssertionError",
         },
       );
+      // Checked once the marker above is removed.
+      expect(resolveLocalPath(cfg, path.join(dir, "new.bin"), "write"), "write path resolves").toBe(
+        path.join(fs.realpathSync(dir), "new.bin"),
+      );
+      expect(isInsideFileRoot(cfg, fs.realpathSync(file)), "file is inside the root").toBe(true);
     },
   );
 

@@ -1457,11 +1457,13 @@ describe("buildHttpServer — getAuthInfo failure (Finding C24)", () => {
 
         expect(fetch, "MCP handler not reached").not.toHaveBeenCalled();
         await new Promise((resolve) => setImmediate(resolve));
+        // The defect: the request hangs (res is a timeout Error) instead of getting a response.
         await expectDefect(() => {
           expect(res, "request completed with a response").not.toBeInstanceOf(Error);
-          expect((res as { status: number }).status, "error status").toBeGreaterThanOrEqual(400);
-          expect(unhandled, "unhandled rejections").toEqual([]);
         });
+        // Checked once the marker above is removed.
+        expect((res as { status: number }).status, "error status").toBeGreaterThanOrEqual(400);
+        expect(unhandled, "unhandled rejections").toEqual([]);
       } finally {
         process.off("unhandledRejection", onUnhandled);
         await closeHttpServer(handle);

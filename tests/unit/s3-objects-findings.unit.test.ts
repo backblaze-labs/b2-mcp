@@ -216,8 +216,9 @@ describe("Finding C7: inline upload input handling", () => {
       // Ambiguous input must be refused, not resolved by quietly ignoring one source.
       await expectDefect(() => {
         expect(result.isError, "filePath plus content is refused").toBe(true);
-        expect(s3.requestsFor("putObject"), "no put sent").toHaveLength(0);
       });
+      // Checked once the marker above is removed.
+      expect(s3.requestsFor("putObject"), "no put sent").toHaveLength(0);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -346,9 +347,10 @@ describe("Finding C2: inline s3_get_object checks the received length", () => {
 
     await expectDefect(() => {
       expect(result.isError, "truncated body is an error").toBe(true);
-      expect(parseErrorText(parseResult(result) as string), "error code").toMatchObject({
-        code: "incomplete_download",
-      });
+    });
+    // Checked once the marker above is removed.
+    expect(parseErrorText(parseResult(result) as string), "error code").toMatchObject({
+      code: "incomplete_download",
     });
   });
 });

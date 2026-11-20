@@ -111,11 +111,12 @@ describe("createAuthorizedS3Client fallback client lifecycle (Finding C1)", () =
       // return would cut the transfer.
       await expectDefect(() => {
         expect(readError, "body readable while the fallback client is alive").toBeUndefined();
-        expect(peer.pulledAfterDestroy, "body pulled after the client was destroyed").toBe(false);
-        expect(Buffer.concat(received).toString(), "bytes read from the body").toBe(
-          Buffer.from(BODY_BYTES).toString(),
-        );
       });
+      // Checked once the marker above is removed.
+      expect(peer.pulledAfterDestroy, "body pulled after the client was destroyed").toBe(false);
+      expect(Buffer.concat(received).toString(), "bytes read from the body").toBe(
+        Buffer.from(BODY_BYTES).toString(),
+      );
 
       // Once the body is consumed and the facade is closed, the fallback client is released.
       object.body.cancel?.().catch(() => undefined);

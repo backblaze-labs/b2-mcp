@@ -157,9 +157,10 @@ describe("b2_report_usage_growth findings", () => {
       );
       await expectDefect(() => {
         expect(result.note, "no insufficient-history note").toBeUndefined();
-        expect(result.to_date, "latest snapshot date").toBe("2026-01-30");
-        expect(result.from_date, "previous snapshot date").toBe("2026-01-29");
       });
+      // Checked once the marker above is removed.
+      expect(result.to_date, "latest snapshot date").toBe("2026-01-30");
+      expect(result.from_date, "previous snapshot date").toBe("2026-01-29");
     },
   );
 });

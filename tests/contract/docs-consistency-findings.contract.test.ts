@@ -76,8 +76,9 @@ describe.skipIf(!fullCheckout)(
         expect(section, "SECURITY.md supported-versions text").not.toMatch(
           /no supported installable npm version/i,
         );
-        expect(section, "SECURITY.md supported-versions text").not.toMatch(/Before that publish/i);
       });
+      // Same stale paragraph; checked once the marker above is removed.
+      expect(section, "SECURITY.md supported-versions text").not.toMatch(/Before that publish/i);
     });
   },
 );
