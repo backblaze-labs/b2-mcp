@@ -372,6 +372,8 @@ export class B2ReportClient implements ReportObjectClient {
     if (this.s3Client) return this.s3Client;
     const config = this.auth.getConfig();
     const auth = await this.auth.getAuth();
+    // Another caller may have initialized the client while authorization was pending.
+    if (this.s3Client) return this.s3Client;
     this.s3Client = createReportS3Client(config, auth);
     return this.s3Client;
   }
