@@ -84,4 +84,63 @@ describe("usage growth snapshot selection", () => {
       vi.useRealTimers();
     }
   });
+
+  it("stops comparison snapshot discovery when the shared page budget is exhausted", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-31T12:00:00Z"));
+    try {
+      let comparisonPages = 0;
+      const download = vi.fn(async () => {
+        throw new Error("No report body should be downloaded without a comparison snapshot");
+      });
+      const client: ReportObjectClient = {
+        async listReportObjectKeys(_bucket, options = {}) {
+          if (options.startAfter === "2026-01-21") {
+            return {
+              keys: ["2026-01-30/usage.account.csv"],
+              isTruncated: false,
+              nextContinuationToken: undefined,
+            };
+          }
+          if (options.startAfter !== "2026-01-01") throw new Error("Unexpected listing window");
+          comparisonPages++;
+          // Short pages exercise the page limit; bound a broken guard instead of hanging.
+          if (comparisonPages > 99) throw new Error("Comparison exceeded the page budget");
+          return {
+            keys: [`2026-01-02/notes-${String(comparisonPages).padStart(3, "0")}.txt`],
+            isTruncated: true,
+            nextContinuationToken: String(comparisonPages),
+          };
+        },
+        downloadReportObjectText: download,
+      };
+      const tools = new ToolHarness();
+      registerInsightTools(
+        tools,
+        {} as Parameters<typeof registerInsightTools>[1],
+        { getAuth: async () => ({ accountId: "acct" }) } as Parameters<
+          typeof registerInsightTools
+        >[2],
+        client,
+      );
+      const result = parseResult(
+        await tools.call("b2_report_usage_growth", {
+          days: 30,
+          period: "month",
+          order: "most_grown",
+          limit: 50,
+        }),
+      );
+      expect(comparisonPages).toBe(99);
+      expect(result).toMatchObject({
+        reports_enabled: true,
+        truncated: true,
+        partial: true,
+        report_scan: { pages: 100, stop_reasons: ["max_pages"] },
+      });
+      expect(download).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
