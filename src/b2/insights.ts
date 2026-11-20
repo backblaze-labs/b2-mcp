@@ -261,7 +261,7 @@ export function computeEgressLeaders(
   return [...g.values()].sort((a, b) => b.egress - a.egress);
 }
 
-// ── Report-bucket access ────────────────────────────────────────────────────
+// Report-bucket access
 
 const NOT_ENABLED = {
   reports_enabled: false,
@@ -678,12 +678,10 @@ function startOfMonthUTC(): string {
 const gb = (bytes: number | null) =>
   bytes == null ? null : Math.round((bytes / GB) * 1000) / 1000;
 
-// ── Snapshot growth (point-in-time stored_gb at two dates) ──────────────────
-// Per Backblaze's Usage Report spec, stored_gb is "bytes stored in gigabytes
-// (at the end of the day)" — a point-in-time snapshot — so growth is the
-// difference between the latest snapshot and the snapshot one period earlier.
-// We fetch ONLY those two boundary days (Prefix/StartAfter-scoped listings),
-// never the whole report bucket.
+// Snapshot growth (point-in-time stored_gb at two dates)
+// Usage Reports define stored_gb as an end-of-day snapshot. Growth compares
+// the latest snapshot with one period earlier; only those days are fetched.
+// Prefix/StartAfter scopes listings to avoid scanning the whole report bucket.
 
 /** Snapshot comparison period accepted by usage-growth helpers. */
 export type Period = "month" | "quarter" | "year";
@@ -748,8 +746,8 @@ async function nearestSnapshotDate(
       });
       budget.stats.pages++;
       budget.stats.listed_keys += page.keys.length;
-      const key = page.keys.find((candidate) => REPORT_DAY_CSV_RE.test(candidate));
-      if (key) return { date: snapshotDateOf(key), bucketMissing: false };
+      const date = page.keys.find((key) => REPORT_DAY_CSV_RE.test(key))?.slice(0, 10);
+      if (date) return { date, bucketMissing: false };
       token = page.isTruncated ? page.nextContinuationToken : undefined;
     } while (token);
     return { date: null, bucketMissing: false };
@@ -1114,7 +1112,7 @@ async function withNativeInsightDeadline<T>(
   }
 }
 
-// ── Tool registration ───────────────────────────────────────────────────────
+// Tool registration
 
 /**
  * Register read-only storage-activity insight tools.
@@ -1140,7 +1138,7 @@ export function registerInsightTools(
   auth: B2AuthManager,
   reportClient: ReportObjectClient = new B2ReportClient(auth),
 ): void {
-  // ── b2_report_usage_growth ─────────────────────────────────────────────────
+  // b2_report_usage_growth
   server.registerTool(
     "b2_report_usage_growth",
     {
