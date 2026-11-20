@@ -1,7 +1,8 @@
-import { B2AuthManager } from "../../src/auth";
+import { B2AuthManager, SDK_RETRY_OPTIONS } from "../../src/auth";
 import { B2Client, setB2PartnerClientFactoryForTests } from "../../src/b2/client";
 import { resetCircuitBreakersForTests } from "../../src/utils/circuit-breaker";
 import { parseB2Error } from "../../src/utils/errors";
+import { timeoutError } from "../../src/utils/named-error";
 import { _resetRetryBudget } from "../../src/utils/retry";
 import type { B2Config } from "../../src/utils/types";
 import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
@@ -45,6 +46,7 @@ const writes: { endpoint: string; invoke: (client: B2Client) => Promise<unknown>
 // Exercise both retry transports and the MCP auth boundary, substituting only HTTP I/O.
 describe("Finding C29: non-idempotent native writes are never replayed", () => {
   afterEach(() => {
+    vi.useRealTimers();
     setB2SdkClientFactoryForTests(null);
     setB2PartnerClientFactoryForTests(null);
     resetCircuitBreakersForTests();
@@ -82,6 +84,44 @@ describe("Finding C29: non-idempotent native writes are never replayed", () => {
       const attempts = transport.requests.filter((request) => b2EndpointName(request) === endpoint);
       expect(attempts[0]?.retry?.maxRetries).toBe(0);
       expect(attempts).toHaveLength(1);
+      expect(
+        transport.requests.filter((request) => b2EndpointName(request) === "b2_authorize_account"),
+      ).toHaveLength(1);
+    });
+
+    it.each([
+      ["socket reset", () => Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" })],
+      ["timeout", () => timeoutError("HTTP request timed out after 30000 ms")],
+    ])("sends once after %s with production retry settings", async (_name, failure) => {
+      vi.useFakeTimers();
+      const transport = new RecordingTransport((request) => {
+        if (b2EndpointName(request) === "b2_authorize_account") {
+          return new StaticHttpResponse(
+            200,
+            authorizeResponse(["writeBuckets", "deleteBuckets", "writeKeys", "deleteKeys"]),
+          );
+        }
+        expect(b2EndpointName(request)).toBe(endpoint);
+        throw failure();
+      });
+      installSdkTransport(transport, SDK_RETRY_OPTIONS);
+      const client = new B2Client(new B2AuthManager(config));
+      const result = invoke(client).then(
+        () => {
+          throw new Error("Expected an unknown write outcome");
+        },
+        (error: unknown) => error,
+      );
+      await vi.advanceTimersByTimeAsync(20_000);
+      const error = await result;
+
+      const attempts = transport.requests.filter((request) => b2EndpointName(request) === endpoint);
+      expect.soft(attempts).toHaveLength(1);
+      expect.soft(parseB2Error(error)).toMatchObject({
+        status: 409,
+        code: "operation_status_unknown",
+        message: expect.stringContaining("verify the resource state before retrying"),
+      });
       expect(
         transport.requests.filter((request) => b2EndpointName(request) === "b2_authorize_account"),
       ).toHaveLength(1);
