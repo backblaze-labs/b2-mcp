@@ -154,7 +154,7 @@ describe("resolveLocalPath — sandbox names that begin with two dots (case C22)
       const cfg = { ...baseConfig, fileRoot: root };
 
       // The defect is the sandbox wrongly refusing the path (FileAccessError) or reporting it
-      // outside the root; any other error (for example a TypeError) is not the defect.
+      // outside the root; any other error (a TypeError, or a FileAccessError for another reason) is not the defect.
       await expectDefect(
         () => {
           expect(resolveLocalPath(cfg, file, "read"), "read path resolves").toBe(
@@ -170,7 +170,9 @@ describe("resolveLocalPath — sandbox names that begin with two dots (case C22)
         },
         {
           match: (error) =>
-            error instanceof FileAccessError || (error as Error)?.name === "AssertionError",
+            (error instanceof FileAccessError &&
+              error.message.includes("outside the allowed directory")) ||
+            (error as Error)?.name === "AssertionError",
         },
       );
     },
