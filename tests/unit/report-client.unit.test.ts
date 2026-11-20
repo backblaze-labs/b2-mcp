@@ -237,3 +237,50 @@ describe("B2ReportClient", () => {
     expect(iterator.return).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("B2ReportClient concurrency", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("Finding C23: concurrent first reads share one client and release it", async () => {
+    let authorize!: (auth: ReturnType<typeof reportAuth>) => void;
+    const authorization = new Promise<ReturnType<typeof reportAuth>>((resolve) => {
+      authorize = resolve;
+    });
+    const created: DeterministicS3ClientFake[] = [];
+    vi.mocked(createReportS3Client).mockImplementation(() => {
+      const peer = new DeterministicS3ClientFake()
+        .allowDefault("listReportObjectKeys")
+        .respond("downloadReportObject", {
+          body: { transformToByteArray: async () => Buffer.from("usage") },
+        });
+      created.push(peer);
+      return peer.asPeerClient() as ReturnType<typeof createReportS3Client>;
+    });
+    const client = new B2ReportClient({
+      getConfig: () => testConfig,
+      getAuth: () => authorization,
+    } as never);
+
+    try {
+      const listing = client.listReportObjectKeys("b2-reports-test");
+      const download = client.downloadReportObjectText("b2-reports-test", "usage.csv");
+      expect(created).toHaveLength(0);
+      authorize(reportAuth());
+      const results = await Promise.all([listing, download]);
+      expect(results).toEqual([
+        { keys: [], isTruncated: false },
+        { text: "usage", bytes: 5, truncated: false },
+      ]);
+      await client.listReportObjectKeys("b2-reports-test");
+    } finally {
+      client.destroy();
+    }
+
+    expect(created.filter((peer) => !peer.destroyed)).toHaveLength(0);
+    expect(created).toHaveLength(1);
+    expect(created[0].requestsFor("listReportObjectKeys")).toHaveLength(2);
+    expect(created[0].requestsFor("downloadReportObject")).toHaveLength(1);
+  });
+});
