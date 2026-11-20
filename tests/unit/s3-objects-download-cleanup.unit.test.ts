@@ -11,8 +11,14 @@ import {
   s3CircuitBreaker,
   s3TransferCircuitBreaker,
 } from "../../src/utils/circuit-breaker";
+import { parseErrorText } from "../../src/utils/errors";
 import type { B2S3VersionGuard } from "../../src/utils/types";
-import { DeterministicS3ClientFake, ToolHarness, testConfig } from "../support/deterministic-fakes";
+import {
+  DeterministicS3ClientFake,
+  ToolHarness,
+  parseResult,
+  testConfig,
+} from "../support/deterministic-fakes";
 
 const versions: B2S3VersionGuard = {
   async resolveS3FileVersion() {
@@ -128,6 +134,101 @@ it("preserves a replacement directory if finalization fails after creating paren
     fs.readdirSync(root, { recursive: true }).filter((entry) => String(entry).endsWith(".part")),
   ).toEqual([]);
 });
+
+it.skipIf(process.platform !== "linux").each(["before", "after"] as const)(
+  "refuses a newly created destination moved outside the root %s its pin is checked",
+  async (when) => {
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "b2-final-pin-out-"));
+    const moved = path.join(outside, "moved");
+    let swapped = false;
+    const swap = () => {
+      fs.renameSync(dir, moved);
+      fs.symlinkSync(outside, dir);
+      swapped = true;
+    };
+    if (when === "before") {
+      const open = fs.promises.open.bind(fs.promises);
+      vi.spyOn(fs.promises, "open").mockImplementation(async (...args) => {
+        const handle = await open(...args);
+        if (String(args[0]) === dir) swap();
+        return handle;
+      });
+    } else {
+      const readlink = fs.promises.readlink.bind(fs.promises);
+      vi.spyOn(fs.promises, "readlink").mockImplementation(async (...args) => {
+        const location = await readlink(...args);
+        // Return the pre-swap location once; the pre-commit recheck must see the move.
+        if (location === dir && !swapped) swap();
+        return location;
+      });
+    }
+    queueBody();
+    try {
+      const result = await download();
+      expect(result.isError).toBe(true);
+      const error = parseResult(result) as string;
+      expect(parseErrorText(error)).toMatchObject({ code: "bad_request", status: 400 });
+      expect(error).toMatch(/outside the allowed directory/i);
+      expect(error).toContain(
+        when === "before"
+          ? "changed while the download was being prepared"
+          : "was moved while the download was in flight",
+      );
+      expect(swapped).toBe(true);
+      expect(s3.requestsFor("getObject")).toHaveLength(1);
+      expect(fs.existsSync(target)).toBe(false);
+      expect(fs.readdirSync(outside, { recursive: true })).toEqual(["moved"]);
+      expect(fs.readdirSync(root)).toEqual(["new-parent"]);
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  },
+);
+
+it.skipIf(process.platform === "win32")(
+  "rechecks the file root after mkdir follows a link changed during the GET",
+  async () => {
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "b2-final-link-out-"));
+    const escaped = path.join(outside, "escaped");
+    const link = path.join(root, "link");
+    fs.symlinkSync(path.join(root, "missing"), link);
+    dir = path.join(link, "sub");
+    target = path.join(dir, "out.bin");
+    const body = Readable.from([Buffer.from("downloaded bytes")]);
+    s3.respond("getObject", () => {
+      fs.unlinkSync(link);
+      fs.symlinkSync(escaped, link);
+      return { key: "object", metadata: {}, contentLength: 16, body };
+    });
+    const mkdir = fs.promises.mkdir.bind(fs.promises);
+    let finalized = false;
+    vi.spyOn(fs.promises, "mkdir").mockImplementation(async (...args) => {
+      if (String(args[0]) === dir) {
+        // Make the dangling outside link live after the pre-mkdir path check.
+        fs.mkdirSync(escaped);
+        finalized = true;
+      }
+      return mkdir(...args);
+    });
+    try {
+      const result = await download();
+      expect(result.isError).toBe(true);
+      expect(parseResult(result)).toBe(
+        `B2 Error [bad_request] (HTTP 400): Path is outside the allowed directory (${root}).`,
+      );
+      expect(finalized).toBe(true);
+      expect(s3.requestsFor("getObject")).toHaveLength(1);
+      expect(fs.readdirSync(outside, { recursive: true })).toEqual([
+        "escaped",
+        path.join("escaped", "sub"),
+      ]);
+      expect(fs.readdirSync(root)).toEqual(["link"]);
+      expect(fs.existsSync(target)).toBe(false);
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  },
+);
 
 it("atomically renames the complete temporary file into its final destination", async () => {
   queueBody();
