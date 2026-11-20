@@ -17,7 +17,7 @@ import { currentMcpRequestSignal } from "../request-context.js";
 import { withS3Circuit, withS3LongCircuit } from "../utils/circuit-breaker.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
 import { badRequestError, codedError, toolError, toolJson, toolSuccess } from "../utils/errors.js";
-import { isInsideFileRoot, resolveLocalPath } from "../utils/fs-guard.js";
+import { isInsideFileRoot, isPathRefusal, resolveLocalPath } from "../utils/fs-guard.js";
 import { logger } from "../utils/logger.js";
 import { timeoutError } from "../utils/named-error.js";
 import type { B2Config, B2S3FileVersionBinding, B2S3VersionGuard } from "../utils/types.js";
@@ -371,7 +371,7 @@ async function pinParentDir(
       refusal = outsideRootError(sandbox);
     }
   } catch (err) {
-    if (!NOT_WRITABLE_CODES.has((err as NodeJS.ErrnoException | null)?.code ?? "")) {
+    if (!isPathRefusal(err)) {
       await dirHandle.close().catch(ignoreError);
       throw err;
     }

@@ -129,7 +129,9 @@ describe("filesystem guard expected path refusals", () => {
   });
 });
 
-it.skipIf(process.platform !== "linux" || !fs.existsSync("/proc/self/fd")).each(["EIO", "EMFILE"])(
+it
+  .skipIf(process.platform !== "linux" || !fs.existsSync("/proc/self/fd"))
+  .each(["EIO", "EMFILE", "EBUSY", "EROFS", "EISDIR", "ENOTEMPTY", "EXDEV"])(
   "returns 500 and closes the directory if pinning encounters %s",
   async (code) => {
     const s3 = new DeterministicS3ClientFake();

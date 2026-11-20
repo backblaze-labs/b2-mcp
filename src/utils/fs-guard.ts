@@ -31,8 +31,19 @@ export class FileAccessError extends Error {
 
 const PATH_ERRORS = new Set("ENOENT ENOTDIR ELOOP ENAMETOOLONG EACCES EPERM".split(" "));
 
+/**
+ * Recognize expected path refusals.
+ *
+ * @param err - Error to check.
+ *
+ * @returns Whether it is a path refusal.
+ */
+export function isPathRefusal(err: unknown): boolean {
+  return PATH_ERRORS.has((err as NodeJS.ErrnoException | null)?.code ?? "");
+}
+
 function checkPathError(err: unknown): void {
-  if (!PATH_ERRORS.has((err as NodeJS.ErrnoException | null)?.code ?? "")) throw err;
+  if (!isPathRefusal(err)) throw err;
 }
 
 /** True if `target` is `root` itself or lives somewhere beneath it. */
