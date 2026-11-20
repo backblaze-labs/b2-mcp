@@ -119,6 +119,8 @@ export function resolveLocalPath(
     );
   }
 
+  if (userPath.includes("\0")) throw new FileAccessError("Local path contains a NUL byte.");
+
   const resolved = path.resolve(userPath);
 
   // Unrestricted mode (trusted local stdio): no root to enforce.
