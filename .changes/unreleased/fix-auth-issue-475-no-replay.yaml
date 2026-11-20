@@ -1,0 +1,3 @@
+kind: Fixed
+body: Native B2 writes no longer replay after a 401 response when retries are disabled; stale authorization is cleared for the next call, while reads retain safe reauthorization retries. (#475)
+time: 2026-11-20T18:00:00Z
