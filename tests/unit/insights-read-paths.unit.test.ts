@@ -254,6 +254,43 @@ describe("insight usage-report read paths", () => {
     expect(result.note).toContain("Not enough report history");
   });
 
+  it("Finding C21: order=shrinking with limit below the shrinker count returns the biggest shrinkers", async () => {
+    const thenDay = daysAgo(30);
+    const latest = daysAgo(1);
+    const report = createPagedReportClient({
+      [`${thenDay}/usage.account-then.csv`]: csv([
+        `small-shrink,${thenDay},bucket-a,bucket-a,100,0,0,0\n`,
+        `big-shrink,${thenDay},bucket-b,bucket-b,100,0,0,0\n`,
+        `medium-shrink,${thenDay},bucket-c,bucket-c,100,0,0,0\n`,
+        `flat,${thenDay},bucket-d,bucket-d,100,0,0,0\n`,
+        `grow,${thenDay},bucket-e,bucket-e,100,0,0,0\n`,
+      ]),
+      [`${latest}/usage.account-now.csv`]: csv([
+        `small-shrink,${latest},bucket-a,bucket-a,99,0,0,0\n`,
+        `big-shrink,${latest},bucket-b,bucket-b,10,0,0,0\n`,
+        `medium-shrink,${latest},bucket-c,bucket-c,70,0,0,0\n`,
+        `flat,${latest},bucket-d,bucket-d,100,0,0,0\n`,
+        `grow,${latest},bucket-e,bucket-e,110,0,0,0\n`,
+      ]),
+    });
+    const tools = registerTools(report.client);
+
+    const result = parseResult(
+      await tools.call("b2_report_usage_growth", {
+        days: 30,
+        period: "month",
+        order: "shrinking",
+        limit: 2,
+      }),
+    );
+
+    expect(result.account_count).toBe(2);
+    expect(result.accounts).toEqual([
+      expect.objectContaining({ account: "big-shrink", growth_gb: -90 }),
+      expect.objectContaining({ account: "medium-shrink", growth_gb: -30 }),
+    ]);
+  });
+
   it("applies b2_report_usage_growth ranking modes and limits across two snapshots", async () => {
     const thenDay = daysAgo(30);
     const latest = daysAgo(1);

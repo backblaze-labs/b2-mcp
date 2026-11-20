@@ -1212,7 +1212,8 @@ export function registerInsightTools(
 
         let accounts = computeSnapshotGrowth(thenRows.rows, nowRows.rows);
         if (args.order === "least_grown") accounts = [...accounts].reverse();
-        else if (args.order === "shrinking") accounts = accounts.filter((a) => a.growthBytes < 0);
+        else if (args.order === "shrinking")
+          accounts = accounts.filter((a) => a.growthBytes < 0).reverse();
         accounts = accounts.slice(0, args.limit);
 
         return toolJson({
