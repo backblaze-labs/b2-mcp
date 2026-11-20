@@ -1504,7 +1504,7 @@
     },
     {
       "name": "s3_get_object",
-      "descriptionSha256": "90cc9e6f4d6fb0a7fbbbf15ae1bf0e0d55052b043b1068453f85a6f0ca717691",
+      "descriptionSha256": "c0d417954437d7995c006a3af05bb5119a1ba85723a0f41a4e63813eac8b4600",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -1521,7 +1521,7 @@
             "type": "string"
           },
           "saveToPath": {
-            "description": "If provided, save the file to this local path.",
+            "description": "Stage a .part file in the nearest existing ancestor, creating parent directories only after a complete download. Rename atomically on success; transfer errors preserve the target. SIGKILL may leave a .part there; finalization errors may leave parents.",
             "type": "string"
           },
           "versionId": {
@@ -2060,5 +2060,5 @@
     "toolsListCacheHint": null,
     "discover": null
   },
-  "hash": "e0faefee839836faea365b7eb9ea203ddc482672ec158f7b9654c4f23ce6dad9"
+  "hash": "a63a701cf67ba4cd37327e8062469d9f07ca71f88932abe66c98fbb046c91fea"
 }
