@@ -1,0 +1,5 @@
+kind: Fixed
+body: |-
+  Reject malformed base64 and conflicting input sources in `s3_put_object`, and
+  read local uploads through EOF within the inline size limit. (#553)
+time: 2026-11-20T18:49:00Z
