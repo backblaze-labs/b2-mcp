@@ -223,7 +223,10 @@ function unknownStatusLogFields(err: unknown): Record<string, string> {
 }
 
 function raiseUnknownStatusWrite(endpoint: string, err: unknown): never {
-  const error = operationStatusUnknownError(endpoint, err);
+  // Every SDK retry layer treats B2Error as terminal. A plain coded Error
+  // would be wrapped as a network failure and could replay this write.
+  const error = new B2Error(operationStatusUnknownError(endpoint, err));
+  Object.defineProperty(error, "cause", { value: err, configurable: true });
   logger.warn(
     {
       endpoint,

@@ -1508,7 +1508,7 @@ export class B2Client {
    * @returns Normalized bucket list.
    */
   async listBuckets(options: BucketFilters = {}): Promise<ListBucketsResult> {
-    const buckets = await this.withNativeCircuit(async (client, auth) => {
+    const buckets = await this.withNativeReadCircuit(async (client, auth) => {
       const requests = toBucketFilters(auth, options);
       const results = await listBucketsBounded(client, auth, requests, currentMcpRequestSignal());
       return filterBucketsToAuthorizedScope(auth, results);
@@ -1571,7 +1571,7 @@ export class B2Client {
    */
   async getBucketNotificationRules(bucketIdValue: string): Promise<NotificationRulesResult> {
     return toNotificationRulesResult(
-      await this.withNativeCircuit((client, auth) =>
+      await this.withNativeReadCircuit((client, auth) =>
         client.raw.getBucketNotificationRules(auth.apiUrl, auth.authorizationToken, {
           bucketId: bucketId(bucketIdValue),
         }),
@@ -1624,7 +1624,7 @@ export class B2Client {
    * @returns Normalized application-key page.
    */
   async listKeys(options: ListKeysOptions): Promise<ListKeysResult> {
-    const result = await this.withNativeCircuit((client) =>
+    const result = await this.withNativeReadCircuit((client) =>
       client.listKeys({
         pageSize: options.maxKeyCount,
         startApplicationKeyId: maybeApplicationKeyId(options.startApplicationKeyId),
@@ -1651,7 +1651,7 @@ export class B2Client {
     key: string;
     versionId: string;
   }): Promise<B2S3FileVersionBinding> {
-    return this.withNativeCircuit(async (client, auth) => {
+    return this.withNativeReadCircuit(async (client, auth) => {
       const expectedBucketId = await resolveTrustedBucketId(client, auth, options.bucket);
       const version = await client.raw.getFileInfo(auth.apiUrl, auth.authorizationToken, {
         fileId: fileId(options.versionId),
@@ -1680,7 +1680,7 @@ export class B2Client {
       return options.objects.map((object) => ({ object, version: null }));
     }
 
-    return this.withNativeCircuit(async (client, auth) => {
+    return this.withNativeReadCircuit(async (client, auth) => {
       let expectedBucketId: string;
       try {
         expectedBucketId = await resolveTrustedBucketId(client, auth, options.bucket);
@@ -1731,7 +1731,7 @@ export class B2Client {
     bucket: string;
     key: string;
   }): Promise<B2S3FileVersionBinding | null> {
-    return this.withNativeCircuit(async (client, auth) => {
+    return this.withNativeReadCircuit(async (client, auth) => {
       const bucket = await client.getBucket(options.bucket);
       if (!bucket) throw b2NotFound(`Bucket '${options.bucket}' not found.`);
       const result = await client.raw.listFileVersions(auth.apiUrl, auth.authorizationToken, {
@@ -1804,7 +1804,7 @@ export class B2Client {
    */
   async listFileNames(options: ListFileNamesOptions): Promise<ListFileNamesResult> {
     const request = { ...options, bucketId: bucketId(options.bucketId) };
-    const result = await this.withNativeCircuit((client, auth) =>
+    const result = await this.withNativeReadCircuit((client, auth) =>
       client.raw.listFileNames(auth.apiUrl, auth.authorizationToken, request, {
         signal: currentMcpRequestSignal(),
       }),
@@ -1830,7 +1830,7 @@ export class B2Client {
       bucketId: bucketId(options.bucketId),
       startFileId: options.startFileId ? largeFileId(options.startFileId) : undefined,
     };
-    const result = await this.withNativeCircuit((client, auth) =>
+    const result = await this.withNativeReadCircuit((client, auth) =>
       client.raw.listUnfinishedLargeFiles(auth.apiUrl, auth.authorizationToken, request, {
         signal: currentMcpRequestSignal(),
       }),
@@ -1850,7 +1850,7 @@ export class B2Client {
    */
   async listParts(options: ListPartsOptions): Promise<ListPartsResult> {
     const request = { ...options, fileId: largeFileId(options.fileId) };
-    const result = await this.withNativeCircuit((client, auth) =>
+    const result = await this.withNativeReadCircuit((client, auth) =>
       client.raw.listParts(auth.apiUrl, auth.authorizationToken, request, {
         signal: currentMcpRequestSignal(),
       }),
@@ -2109,8 +2109,15 @@ export class B2Client {
     });
   }
 
+  private withNativeReadCircuit<T>(
+    operation: (client: SdkB2Client, auth: B2AuthResponse) => Promise<T>,
+  ): Promise<T> {
+    return this.withNativeCircuit(operation, { retryOnUnauthorized: true });
+  }
+
   private async withNativeCircuit<T>(
     operation: (client: SdkB2Client, auth: B2AuthResponse) => Promise<T>,
+    options: { retryOnUnauthorized: boolean } = { retryOnUnauthorized: false },
   ): Promise<T> {
     let lastError: unknown;
     const callerSignal = currentMcpRequestSignal();
@@ -2131,7 +2138,8 @@ export class B2Client {
         lastError = err;
         if (attempt === 0 && isUnauthorized(err) && callerSignal?.aborted !== true) {
           this.auth.invalidate();
-          continue;
+          // Never replay a write; the next independent call will authorize afresh.
+          if (options.retryOnUnauthorized) continue;
         }
         throw err;
       }
