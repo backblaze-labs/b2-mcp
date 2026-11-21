@@ -11,6 +11,8 @@
  */
 
 import type { AccountInfo } from "@backblaze-labs/b2-sdk";
+import { finished, Readable } from "stream";
+import type { SdkStreamMixin } from "@smithy/types";
 import { createS3ClientConfig } from "@backblaze-labs/b2-sdk/s3";
 import type { B2AuthResponse, B2Config } from "../utils/types.js";
 import { runWithMcpRequestSignal } from "../request-context.js";
@@ -324,14 +326,8 @@ export function createS3ObjectClient(config: B2Config, surface: string): B2S3Pee
  * Create a lazy S3 facade that authorizes B2 before first use.
  *
  * @remarks
- * B2 authorize returns the account's S3 API URL. This facade builds the real S3
- * client from that endpoint on first operation, shares the in-flight authorize
- * call, and falls back to the configured region for an authorize outage such as
- * invalid credentials or a timeout. That fallback is a compatibility path, not a
- * fail-closed check; the first S3 operation then surfaces any credential failure
- * from the S3 API itself. An authorized endpoint outside the trusted B2 host set
- * is the exception: it is a deliberate `untrusted_endpoint`/502 refusal and is
- * re-thrown rather than masked by the fallback.
+ * Shares auth; uses authorized URL or configured region on outage. S3 reports
+ * credential errors; untrusted URLs return `untrusted_endpoint`/502.
  *
  * @param auth - Provider of B2 runtime config and authorize responses.
  * @param options - Optional key and user-agent overrides.
@@ -345,6 +341,7 @@ export function createAuthorizedS3Client(
   let client: B2S3PeerClient | null = null;
   let inflight: Promise<B2S3PeerClient> | null = null;
   let closed = false;
+  const active = new Set<B2S3PeerClient>();
   const buildClient = (config: B2Config, authorizedS3ApiUrl?: string): B2S3PeerClient =>
     createS3Client(config, {
       applicationKeyId: options.applicationKeyId ?? config.applicationKeyId,
@@ -379,9 +376,6 @@ export function createAuthorizedS3Client(
       return { client: await inflight, cached: true };
     } catch (err) {
       if (closed) throw err;
-      // A rejected authorized endpoint is a deliberate untrusted_endpoint/502
-      // refusal, not an authorization outage. Surface it instead of proceeding
-      // with the configured-region fallback, which would ignore the rejection.
       if (isUntrustedEndpointError(err)) throw err;
       const config = auth.getConfig();
       logger.warn(
@@ -392,22 +386,85 @@ export function createAuthorizedS3Client(
         },
         "s3.authorize.fallback",
       );
-      const fallbackClient = buildClient(config);
-      return { client: fallbackClient, cached: false };
+      const fallback = buildClient(config);
+      active.add(fallback);
+      return { client: fallback, cached: false };
     }
   };
 
   const releaseClient = (lease: { client: B2S3PeerClient; cached: boolean }): void => {
-    if (lease.cached) return;
-    lease.client.destroy();
+    if (active.delete(lease.client)) lease.client.destroy();
   };
 
-  const withClient = async <T>(operation: (client: B2S3PeerClient) => Promise<T>): Promise<T> => {
+  const withClient = async <T>(
+    operation: (client: B2S3PeerClient) => Promise<T>,
+    stream: boolean,
+  ): Promise<T> => {
     const lease = await getClient();
+    let deferred = false;
     try {
-      return await operation(lease.client);
+      const result = await operation(lease.client);
+      if (stream && !lease.cached && result && typeof result === "object" && "body" in result) {
+        const body = result.body;
+        const release = () => releaseClient(lease);
+        if (body instanceof Readable) {
+          finished(body, release);
+          deferred = true;
+        } else if (
+          body &&
+          typeof body === "object" &&
+          "getReader" in body &&
+          typeof body.getReader === "function"
+        ) {
+          const web = body as ReadableStream<Uint8Array> & SdkStreamMixin;
+          let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+          const wrapped = new ReadableStream<Uint8Array>(
+            {
+              async pull(controller) {
+                try {
+                  reader ??= web.getReader();
+                  const next = await reader.read();
+                  if (next.done) {
+                    release();
+                    controller.close();
+                  } else controller.enqueue(next.value);
+                } catch (err) {
+                  release();
+                  controller.error(err);
+                } finally {
+                  reader?.releaseLock();
+                  reader = undefined;
+                }
+              },
+              cancel: (reason) =>
+                (reader ? reader.cancel(reason) : web.cancel(reason)).finally(release),
+            },
+            { highWaterMark: 0 },
+          );
+          const transform = <T>(fn: () => Promise<T>): Promise<T> => {
+            if (wrapped.locked) return Promise.reject(new TypeError("Stream is locked"));
+            const lock = wrapped.getReader();
+            return fn().finally(() => {
+              lock.releaseLock();
+              release();
+            });
+          };
+          Object.assign(wrapped, {
+            transformToByteArray: () => transform(() => web.transformToByteArray()),
+            transformToString: (encoding?: string) =>
+              transform(() => web.transformToString(encoding)),
+            transformToWebStream: () => {
+              web.transformToWebStream();
+              return wrapped;
+            },
+          });
+          Object.assign(result, { body: wrapped });
+          deferred = true;
+        }
+      }
+      return result;
     } finally {
-      releaseClient(lease);
+      if (!deferred) releaseClient(lease);
     }
   };
 
@@ -417,9 +474,8 @@ export function createAuthorizedS3Client(
       const current = client;
       client = null;
       current?.destroy();
-      // If destroy races an authorization, buildAuthorizedClient either closes
-      // the newly-created peer itself or returns it here for teardown. Rejections
-      // are logged so shutdown diagnostics keep the original failure visible.
+      for (const peer of active) peer.destroy();
+      active.clear();
       inflight
         ?.then((pending) => pending.destroy())
         .catch((err) =>
@@ -443,7 +499,7 @@ export function createAuthorizedS3Client(
             throw new Error(`B2 S3 client method ${prop} is unavailable.`);
           }
           return (await fn.apply(s3, args)) as unknown;
-        });
+        }, prop === "getObject");
     },
   }) as B2S3ClientFacade;
 }
