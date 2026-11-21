@@ -317,7 +317,7 @@ async function assertOpenedInsideFileRoot(
       if (!isPathRefusal(err)) throw err;
       realPath = undefined;
     }
-    const onDisk = realPath ? await fs.promises.stat(realPath).catch(ignoreError) : undefined;
+    const onDisk = realPath ? await fs.promises.stat(realPath).catch(ignorePathError) : undefined;
     // A second link could name the same file outside the root.
     if (onDisk?.dev === opened.dev && onDisk.ino === opened.ino && opened.nlink === 1)
       openedPath = realPath;

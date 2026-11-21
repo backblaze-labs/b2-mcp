@@ -302,3 +302,54 @@ it
     }
   },
 );
+
+it.each(["EIO", "EBUSY"])(
+  "preserves %s from the opened-file fallback stat and closes the handle",
+  async (code) => {
+    const s3 = new DeterministicS3ClientFake();
+    const tools = new ToolHarness();
+    registerS3ObjectTools(tools, s3.asPeerClient(), versions, { ...testConfig, fileRoot: root });
+    const open = fs.promises.open.bind(fs.promises);
+    const stat = fs.promises.stat.bind(fs.promises);
+    const readlink = fs.promises.readlink.bind(fs.promises);
+    let opened: fs.promises.FileHandle | undefined;
+    let tempPath = "";
+    const openSpy = vi.spyOn(fs.promises, "open").mockImplementation(async (...args) => {
+      const handle = await open(...(args as Parameters<typeof open>));
+      if (String(args[0]).endsWith(".part")) {
+        opened = handle;
+        tempPath = fs.realpathSync(String(args[0]));
+      }
+      return handle;
+    });
+    const readlinkSpy = vi.spyOn(fs.promises, "readlink").mockImplementation(async (...args) => {
+      if (opened && String(args[0]) === `/proc/self/fd/${opened.fd}`) {
+        throw Object.assign(new Error("proc unavailable"), { code: "ENOENT" });
+      }
+      return readlink(...(args as Parameters<typeof readlink>));
+    });
+    const statSpy = vi.spyOn(fs.promises, "stat").mockImplementation(async (...args) => {
+      if (tempPath && String(args[0]) === tempPath) {
+        throw Object.assign(new Error(`simulated ${code}`), { code });
+      }
+      return stat(...(args as Parameters<typeof stat>));
+    });
+    try {
+      const result = await tools.call("s3_get_object", {
+        bucket: "b",
+        key: "k",
+        saveToPath: path.join(parent, "out"),
+      });
+      expect(opened).toBeDefined();
+      expect(result.isError).toBe(true);
+      expect(parseErrorText(parseResult(result) as string)).toMatchObject({ status: 500, code });
+      expect(s3.requests).toEqual([]);
+      expect(opened?.fd).toBe(-1);
+      expect(fs.readdirSync(parent)).toEqual([]);
+    } finally {
+      openSpy.mockRestore();
+      readlinkSpy.mockRestore();
+      statSpy.mockRestore();
+    }
+  },
+);
