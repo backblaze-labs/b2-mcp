@@ -181,6 +181,22 @@ describe("S3 object tools with deterministic handler fake", () => {
     throw new Error("Expected inline object upload body to be bytes.");
   }
 
+  it.each([
+    ["short", "hello", 8],
+    ["long", "hello world", 5],
+  ])("returns incomplete_download for an inline %s body", async (_label, contents, declared) => {
+    queueGetObject({
+      contentLength: declared,
+      body: streamFrom([new TextEncoder().encode(contents)]),
+    });
+    const result = await tools.call("s3_get_object", { bucket: "b", key: "k" });
+    expect(result.isError).toBe(true);
+    expect(parseErrorText(parseResult(result) as string)).toMatchObject({
+      status: 502,
+      code: "incomplete_download",
+    });
+  });
+
   it("uploads base64 content without touching the filesystem", async () => {
     const result = await tools.call("s3_put_object", {
       bucket: "b",

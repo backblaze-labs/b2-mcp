@@ -902,7 +902,7 @@ export function registerS3ObjectTools(
           return toolError(badRequestError("Provide either filePath or content, not both."));
         }
 
-        assertSafeObjectContentType(args.contentType, "s3_put_object");
+        if (args.contentType) assertSafeObjectContentType(args.contentType, "s3_put_object");
 
         const safePath = args.filePath
           ? resolveLocalPath(config, args.filePath, "read")
@@ -1026,6 +1026,14 @@ export function registerS3ObjectTools(
           await cancelBody(result.body);
           throw err;
         });
+
+        if (buffer.byteLength !== result.contentLength) {
+          throw codedError(
+            502,
+            "incomplete_download",
+            `Object body contained ${buffer.byteLength} bytes; expected ${result.contentLength}.`,
+          );
+        }
 
         return toolJson({
           key: args.key,

@@ -1251,7 +1251,6 @@ export class B2S3PeerClient {
         Key: input.key,
         ContentType: input.contentType,
         Metadata: input.metadata,
-        ACL: input.acl,
         ServerSideEncryption: input.serverSideEncryption,
       }),
     );

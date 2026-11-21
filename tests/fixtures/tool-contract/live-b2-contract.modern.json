@@ -1251,14 +1251,16 @@
                 },
                 "partNumber": {
                   "description": "Provider-valid multipart part number from 1-10000 for this ETag; provide each uploaded part once.",
-                  "maximum": 9007199254740991,
-                  "minimum": -9007199254740991,
+                  "maximum": 10000,
+                  "minimum": 1,
                   "type": "integer"
                 }
               },
               "required": ["etag", "partNumber"],
               "type": "object"
             },
+            "maxItems": 10000,
+            "minItems": 1,
             "type": "array"
           },
           "uploadId": {
@@ -2071,5 +2073,5 @@
       "resultType": "complete"
     }
   },
-  "hash": "2a0e25c8cec8224aa9fcd00ca40291cfa4fbbad4dea10050951dc2bfe72f8f31"
+  "hash": "f5ca90dad1e38d0b5ada0e40792dc073f26e9fac934b27e1e87537ea47b28f9a"
 }
