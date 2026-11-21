@@ -140,13 +140,63 @@ Stryker 10.0.0, 2453 mutants across the six modules. **Overall score: 64.49%**
 
 Reproduce with `pnpm run test:mutation`; the score moves as tests are added.
 
+## Capability-policy follow-up (2026-11-21)
+
+The focused `tool-capabilities.ts` campaign now has **233 killed, 4 survived,
+0 no-coverage, 0 timeouts, and 0 errors out of 237 mutants: 98.31%**. Before
+the test changes, the same module reproduced the historical result exactly:
+80 killed, 156 survived, and 1 no-coverage (33.76%). These are module results,
+not a new baseline for the other five modules.
+
+[`tool-capabilities-policy.unit.test.ts`](../../tests/unit/tool-capabilities-policy.unit.test.ts)
+adds 42 cases covering independent single-capability allow/deny profiles,
+OAuth tool tiers and operation inheritance, unknown-tool fallback, mixed
+read/write requirements, Partner classification, and the published annotation
+fixture. Real server registration also checks the full surface, unavailable
+durable-secret stubs, and fail-closed discovery. Expected grants are not derived
+from the production policy tables.
+
+The tests reload policy data inside each case after `vi.resetModules()`. This
+matters for mutation activation: a controlled two-mutant experiment on the
+`b2_list_buckets` capability entry ignored both mutants with a module-scope
+import, while the same tests with per-case imports killed both. Both variants
+had passing baselines without mutations. The existing `ignoreStatic: true` setting is
+unchanged; policy data must actually be exercised during a test to be scored.
+
+Reproduce the focused campaign with:
+
+```bash
+pnpm run test:mutation -- --mutate=src/utils/tool-capabilities.ts --concurrency=2 --reporters=json,clear-text
+```
+
+The initial before/after comparison on Node 26.13.1 measured 80 then 227 kills.
+The CI-pinned Node 22.23.1 runtime reproduced 227 kills with those 41 cases,
+then 233 kills with the final 42-case suite. All runs used pnpm 11.20.0 and
+Stryker 10.0.0 with the same options. Production code,
+operator set, thresholds, and exclusions were not changed.
+
+### Four retained survivors
+
+The raw score still includes these mutants. No suppressions were added.
+
+| Scoped mutant ID | Location | Why current shipped behavior is preserved |
+| --- | --- | --- |
+| `106`, `107` | `hasReadOnlyToolCapabilities`: replace the positive length check with `true` / `>= 0` | Every current mapped capability array is nonempty; the guard does not distinguish any current mapped tool. |
+| `212` | `isToolEnabled`: replace `required.length === 0` with `false` | Current mappings are all nonempty. Unmapped tools still return through `!required`. |
+| `219` | `isToolAllowedByOAuthScopes`: remove the `scopes === null` early return | The following admin-operation check calls `oauthScopesAllowOperation(null, "admin")`, which already returns `true`. |
+
+These are bounded equivalence observations, not universal claims about mutable
+policy tables or future changes. Revisit the length-check classifications if
+an empty mapping is introduced, and the OAuth classification if null-scope
+operation semantics change. The policy matrix must be reviewed alongside new
+tools and grants.
+
 ## Highest-value surviving mutants to fix
 
-Ranked by security impact, not by count. Many survivors in
-`tool-capabilities.ts` are low value (it is largely a static capability-name
-data map; mutating one string in an array rarely breaks a behavioral test).
-The behavioral logic below is where surviving mutants signal real assertion
-gaps:
+Ranked by security impact, not by count, from the historical baseline above.
+Capability-name data controls authorization and tool visibility; do not dismiss
+its mutants solely because they change table values. The focused follow-up
+above addresses that module. The remaining modules still need targeted work:
 
 1. **`destructive-gate.ts` lifecycle-deletion detection** (`L88`, `L100`–`L106`).
    Surviving `MethodExpression`/`ConditionalExpression` mutants on the
@@ -176,7 +226,5 @@ gaps:
    mean the shape of the elicitation request/response is asserted loosely.
    Assert the specific refused/required/approved outcome codes and messages.
 
-`tool-capabilities.ts` (score 33.76%) is dominated by data-map string/array
-mutants; the highest-value fix there is a contract test that asserts the
-capability map for a representative read-only and write key, rather than chasing
-each string mutant.
+For `tool-capabilities.ts`, retain the independent positive and negative policy
+matrix and the per-case module loading described above when extending tests.
