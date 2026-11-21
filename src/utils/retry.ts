@@ -1,6 +1,6 @@
 /**
  * Exponential backoff retry for B2 API calls.
- * Retries on 429 (rate limit), 408, 503, 504 (transient).
+ * Retries on 429 (rate limit), 408, 500, 502, 503, 504 (transient).
  *
  * A global retry budget caps the total retry rate across all concurrent
  * callers. Without it, N concurrent failing calls would each retry up to
@@ -164,14 +164,14 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     throwIfAborted(signal);
-    const timer = setTimeout(resolve, ms);
-    signal?.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(timer);
-        reject(signal.reason ?? abortError());
-      },
-      { once: true },
-    );
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    function onAbort() {
+      clearTimeout(timer);
+      reject(signal?.reason ?? abortError());
+    }
+    signal?.addEventListener("abort", onAbort, { once: true });
   });
 }

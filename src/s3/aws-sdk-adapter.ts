@@ -1318,7 +1318,7 @@ export class B2S3PeerClient {
    * @param input - Multipart upload target.
    */
   async abortMultipartUpload(input: B2S3AbortMultipartUploadOptions): Promise<void> {
-    await this.sendWithCircuit(
+    await this.sendUnsafeMutationWithCircuit(
       new AbortMultipartUploadCommand({
         Bucket: input.bucket,
         Key: input.key,

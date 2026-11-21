@@ -269,6 +269,11 @@ describe("B2S3PeerClient object data-plane behavior", () => {
       (s3: B2S3PeerClient) => s3.createMultipartUpload({ bucket: "b", key: "k" }),
     ],
     [
+      "abortMultipartUpload",
+      (s3: B2S3PeerClient) =>
+        s3.abortMultipartUpload({ bucket: "b", key: "k", uploadId: "upload-id" }),
+    ],
+    [
       "completeMultipartUpload",
       (s3: B2S3PeerClient) =>
         s3.completeMultipartUpload({
