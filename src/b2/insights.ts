@@ -1180,9 +1180,6 @@ export function registerInsightTools(
         const bucket = await reportsBucketName(auth);
         const reportBudget = createReportScanBudget();
         const today = new Date();
-        const targetThen =
-          args.days != null ? daysAgo(args.days) : periodStartDate(args.period, today);
-
         const latest = await latestSnapshotDate(reportClient, bucket, today, reportBudget);
         if (latest.bucketMissing) return toolJson(NOT_ENABLED);
         if (!hasUsageReportSnapshots(latest))
@@ -1195,6 +1192,11 @@ export function registerInsightTools(
             ),
           );
 
+        const anchor = new Date(`${latest.date}T00:00:00Z`);
+        const targetThen =
+          args.days != null
+            ? new Date(anchor.getTime() - args.days * 86400_000).toISOString().slice(0, 10)
+            : periodStartDate(args.period, anchor);
         const then = await nearestSnapshotDate(reportClient, bucket, targetThen, reportBudget);
         if (then.bucketMissing) return toolJson(NOT_ENABLED);
         if (!then.date || then.date >= latest.date)

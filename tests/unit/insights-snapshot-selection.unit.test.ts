@@ -63,7 +63,7 @@ describe("usage growth snapshot selection", () => {
       expect(result.accounts).toEqual([
         expect.objectContaining({ account: "acct", start_gb: 10, current_gb: 20, growth_gb: 10 }),
       ]);
-      expect(pages.filter((page) => page.startAfter === "2026-01-01")).toEqual([
+      expect(pages.filter((page) => page.startAfter === "2025-12-31")).toEqual([
         expect.objectContaining({
           maxKeys: 1,
           continuationToken: undefined,
@@ -102,7 +102,7 @@ describe("usage growth snapshot selection", () => {
               nextContinuationToken: undefined,
             };
           }
-          if (options.startAfter !== "2026-01-01") throw new Error("Unexpected listing window");
+          if (options.startAfter !== "2025-12-31") throw new Error("Unexpected listing window");
           comparisonPages++;
           // Short pages exercise the page limit; bound a broken guard instead of hanging.
           if (comparisonPages > 99) throw new Error("Comparison exceeded the page budget");
