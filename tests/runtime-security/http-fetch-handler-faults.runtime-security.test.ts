@@ -158,6 +158,25 @@ describe(`HTTP fetch handler fault paths (#400)`, () => {
     expect(requestBody).toMatchObject({ params: { arguments: { content } } });
   });
 
+  it.each([false, true])(
+    "accepts a body exactly at the 2 MiB cap (declared length: %s)",
+    async (declaredLength) => {
+      const prefix = modernBody("tools/list");
+      const body = prefix + " ".repeat(2 * 1024 * 1024 - Buffer.byteLength(prefix));
+      const mcpHandler = okMcpHandler();
+      const h = build({ credentialProvider: fixedProvider(), mcpHandler });
+      const headers = {
+        ...modernHeaders("tools/list"),
+        ...(declaredLength ? { "content-length": String(Buffer.byteLength(body)) } : {}),
+      };
+
+      const res = await h.fetch(post(body, headers));
+
+      expect(res.status).toBe(200);
+      expect(mcpHandler.fetch).toHaveBeenCalledOnce();
+    },
+  );
+
   it("returns 413 when the POST body exceeds the cap", async () => {
     const h = build({ credentialProvider: fixedProvider() });
     const res = await h.fetch(
