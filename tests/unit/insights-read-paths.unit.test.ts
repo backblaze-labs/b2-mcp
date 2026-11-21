@@ -233,6 +233,49 @@ describe("insight usage-report read paths", () => {
     expect(result.report_scan.pages).toBeGreaterThan(0);
   });
 
+  it("compares the prior day when the latest snapshot is yesterday", async () => {
+    const latest = "2026-01-30";
+    const prior = "2026-01-29";
+    const report = createPagedReportClient({
+      [`${prior}/usage.account.csv`]: csv([`account-a,${prior},bucket-a,bucket-a,10,0,0,0\n`]),
+      [`${latest}/usage.account.csv`]: csv([`account-a,${latest},bucket-a,bucket-a,15,0,0,0\n`]),
+    });
+    const tools = registerTools(report.client);
+    const result = parseResult(
+      await tools.call("b2_report_usage_growth", {
+        days: 1,
+        period: "month",
+        order: "most_grown",
+        limit: 10,
+      }),
+    );
+    expect(result.from_date).toBe(prior);
+    expect(result.to_date).toBe(latest);
+    expect(result.accounts).toEqual([
+      expect.objectContaining({ account: "account-a", start_gb: 10, current_gb: 15, growth_gb: 5 }),
+    ]);
+  });
+
+  it("anchors the monthly window to the latest snapshot", async () => {
+    const report = createPagedReportClient({
+      "2025-12-30/usage.account.csv": csv(["account-a,2025-12-30,bucket-a,bucket-a,10,0,0,0\n"]),
+      "2025-12-31/usage.account.csv": csv(["account-a,2025-12-31,bucket-a,bucket-a,11,0,0,0\n"]),
+      "2026-01-30/usage.account.csv": csv(["account-a,2026-01-30,bucket-a,bucket-a,15,0,0,0\n"]),
+    });
+    const result = parseResult(
+      await registerTools(report.client).call("b2_report_usage_growth", {
+        period: "month",
+        order: "most_grown",
+        limit: 10,
+      }),
+    );
+    expect(result.from_date).toBe("2025-12-30");
+    expect(result.to_date).toBe("2026-01-30");
+    expect(result.accounts).toEqual([
+      expect.objectContaining({ account: "account-a", start_gb: 10, current_gb: 15, growth_gb: 5 }),
+    ]);
+  });
+
   it("reports insufficient history when only the latest snapshot exists", async () => {
     const latest = daysAgo(1);
     const report = createPagedReportClient({
