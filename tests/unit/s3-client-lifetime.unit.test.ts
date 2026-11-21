@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { B2S3VersionGuard } from "../../src/utils/types";
+import { s3CircuitBreaker } from "../../src/utils/circuit-breaker";
 import { ToolHarness, parseResult, testConfig } from "../support/deterministic-fakes";
 
 const peers = vi.hoisted(() => [] as Array<{ destroy: ReturnType<typeof vi.fn> }>);
@@ -19,6 +20,7 @@ const settings = vi.hoisted(() => ({
     | "rejected",
   sdk: false,
   gate: undefined as Promise<void> | undefined,
+  afterHeaders: undefined as (() => void) | undefined,
 }));
 vi.mock("../../src/s3/aws-sdk-adapter.js", async (importOriginal) => {
   const original = await importOriginal<typeof import("../../src/s3/aws-sdk-adapter.js")>();
@@ -80,6 +82,7 @@ vi.mock("../../src/s3/aws-sdk-adapter.js", async (importOriginal) => {
                     }),
           };
           if (settings.sdk && result.body) result.body = mixin(result.body) as typeof result.body;
+          settings.afterHeaders?.();
           return result;
         }),
       };
@@ -110,6 +113,7 @@ describe("fallback S3 download client lifetime", () => {
     settings.body = "node";
     settings.sdk = false;
     settings.gate = undefined;
+    settings.afterHeaders = undefined;
   });
   it.each(["inline", "saveToPath"])(
     "reads the complete %s body before destroying the fallback client",
@@ -362,4 +366,31 @@ describe("fallback S3 download client lifetime", () => {
       facade.destroy();
     }
   });
+  it.each(["node", "web"] as const)(
+    "releases the fallback %s body when the circuit opens after headers",
+    async (mode) => {
+      settings.body = mode;
+      settings.afterHeaders = () => s3CircuitBreaker.open();
+      const facade = createAuthorizedS3Client({
+        getConfig: () => testConfig,
+        getAuth: async () => {
+          throw new Error("authorize unavailable");
+        },
+      });
+      const tools = new ToolHarness();
+      registerS3ObjectTools(tools, facade, versions, testConfig);
+      try {
+        const result = await tools.call("s3_get_object", { bucket: "bucket", key: "key" });
+        expect(result.isError).toBe(true);
+        expect(String(parseResult(result))).toMatch(/breaker|open/i);
+        expect(peers).toHaveLength(1);
+        await vi.waitFor(() => expect(peers[0]?.destroy).toHaveBeenCalledTimes(1), {
+          timeout: 300,
+        });
+      } finally {
+        s3CircuitBreaker.close();
+        facade.destroy();
+      }
+    },
+  );
 });
