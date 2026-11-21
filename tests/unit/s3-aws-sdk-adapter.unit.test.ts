@@ -56,6 +56,19 @@ describe("B2S3PeerClient object data-plane behavior", () => {
     },
   );
 
+  it.each(["private", "public-read"] as const)("does not forward multipart ACL %s", async (acl) => {
+    const s3 = clientWithHandler(vi.fn());
+    const send = vi.spyOn(s3 as any, "sendUnsafeMutationWithCircuit").mockResolvedValue({});
+    try {
+      await s3.createMultipartUpload({ bucket: "b", key: "k", acl });
+      expect(send).toHaveBeenCalledTimes(1);
+      const command = send.mock.calls[0][0] as { input: Record<string, unknown> };
+      expect(command.input).not.toHaveProperty("ACL");
+    } finally {
+      s3.destroy();
+    }
+  });
+
   it.each(["text/html", "image/svg+xml", "application/xhtml+xml", "Text/HTML; charset=utf-8"])(
     "rejects direct createMultipartUpload content type %s before sending",
     async (contentType) => {

@@ -452,17 +452,43 @@ describe("s3_put_object and s3_get_object", () => {
     expect(sendSpy).not.toHaveBeenCalled();
   });
 
-  it("rejects inline uploads without a safe content type", async () => {
+  it("uploads when the optional content type is omitted", async () => {
     const result = await callTool(server, "s3_put_object", {
       bucket: "b",
       key: "k",
       content: Buffer.from("hello").toString("base64"),
     });
 
-    expect(result.isError).toBe(true);
-    expectBadRequestToolError(result, /contentType/i);
-    expect(sendSpy).not.toHaveBeenCalled();
+    expect(result.isError).toBeFalsy();
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(sendSpy.mock.calls[0][0].input.ContentType).toBeUndefined();
   });
+
+  it("uploads when contentType is an empty string", async () => {
+    const result = await callTool(server, "s3_put_object", {
+      bucket: "b",
+      key: "k",
+      content: "aGVsbG8=",
+      contentType: "",
+    });
+    expect(result.isError).toBeFalsy();
+    expect(sendSpy.mock.calls[0][0].input.ContentType).toBe("");
+  });
+
+  it.each(["text/html", "image/svg+xml"])(
+    "rejects an unsafe upload content type %s",
+    async (contentType) => {
+      const result = await callTool(server, "s3_put_object", {
+        bucket: "b",
+        key: "k",
+        content: "aGVsbG8=",
+        contentType,
+      });
+      expect(result.isError).toBe(true);
+      expectBadRequestToolError(result, /browser-executable content type/i);
+      expect(sendSpy).not.toHaveBeenCalled();
+    },
+  );
 
   it("rejects local filePath uploads that are not regular files", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "b2-mcp-s3-put-"));
@@ -1516,5 +1542,25 @@ describe("s3_get_presigned_upload_part_url", () => {
     expect(parsed.parts.map((p: any) => p.partNumber)).toEqual([1, 2, 3]);
     expect(parsed.parts[0].url).toMatch(/^https?:\/\//);
     expect(sendSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("s3_complete_multipart_upload input bounds", () => {
+  it.each([
+    ["empty parts", []],
+    ["zero part number", [{ partNumber: 0, etag: '"e"' }]],
+    ["part number above 10000", [{ partNumber: 10001, etag: '"e"' }]],
+    ["too many parts", Array.from({ length: 10001 }, () => ({ partNumber: 1, etag: '"e"' }))],
+  ])("rejects %s in the registered schema", (_label, parts) => {
+    const schema = getRegisteredTools(server)?.s3_complete_multipart_upload?.inputSchema;
+    expect(schema).toBeDefined();
+    expect(schema?.safeParse({ bucket: "b", key: "k", uploadId: "u", parts }).success).toBe(false);
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+
+  it("accepts part numbers 1 and 10000 and a 10000-part manifest", () => {
+    const schema = getRegisteredTools(server)?.s3_complete_multipart_upload?.inputSchema;
+    const parts = Array.from({ length: 10000 }, (_, i) => ({ partNumber: i + 1, etag: '"e"' }));
+    expect(schema?.safeParse({ bucket: "b", key: "k", uploadId: "u", parts }).success).toBe(true);
   });
 });

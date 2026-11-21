@@ -202,12 +202,9 @@ export function registerS3MultipartTools(
         parts: z
           .array(
             z.object({
-              partNumber: z
-                .number()
-                .int()
-                .describe(
-                  "Provider-valid multipart part number from 1-10000 for this ETag; provide each uploaded part once.",
-                ),
+              partNumber: multipartPartNumberSchema(
+                "Provider-valid multipart part number from 1-10000 for this ETag; provide each uploaded part once.",
+              ),
               etag: z
                 .string()
                 .describe(
@@ -215,6 +212,8 @@ export function registerS3MultipartTools(
                 ),
             }),
           )
+          .min(1)
+          .max(10000)
           .describe(
             "Complete ordered part manifest. Include every part in ascending partNumber order (part numbers are 1-10000); missing or stale ETags fail the completion call.",
           ),
