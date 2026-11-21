@@ -986,7 +986,7 @@ export function registerS3ObjectTools(
             versionId: args.versionId,
           });
 
-        // Stream straight to disk for saveToPath — no full-object buffering.
+        // Stream to disk.
         if (saveTarget) {
           const bytes = await downloadToPath(saveTarget, getObject, sandbox);
           return toolSuccess(`Object saved to ${saveTarget.path} (${bytes} bytes)`);
@@ -994,7 +994,7 @@ export function registerS3ObjectTools(
 
         const result = await getObject();
 
-        // Inline reads are buffered and base64-encoded; use presigned URLs or saveToPath for bulk.
+        // Larger reads use presigned URLs or saveToPath.
         if (
           typeof result.contentLength !== "number" ||
           !Number.isFinite(result.contentLength) ||
@@ -1022,7 +1022,10 @@ export function registerS3ObjectTools(
         }
         const buffer = await withS3Circuit(() =>
           withBodyReadAbort(result.body, () => bodyToBuffer(result.body, MAX_INLINE_OBJECT_BYTES)),
-        );
+        ).catch(async (err) => {
+          await cancelBody(result.body);
+          throw err;
+        });
 
         return toolJson({
           key: args.key,
