@@ -271,7 +271,8 @@ function keyIdSecretValuesFromEnv(env: NodeJS.ProcessEnv = process.env): string[
 /** Add configured key-ID env values to options for log/bootstrap sanitization. */
 function withKeyIdLogSecrets(options: SanitizerOptions): SanitizerOptions {
   const keyIds = keyIdSecretValuesFromEnv(options.env);
-  if (keyIds.length === 0) return options;
+  // Materialize even without key IDs: a one-shot iterable must remain usable
+  // across Error core fields and every nested log value.
   return {
     ...options,
     secrets: [...(options.secrets ? [...options.secrets] : []), ...keyIds],
@@ -409,7 +410,13 @@ export function bootstrapErrorMessage(err: unknown): string {
  * @returns Sanitized clone suitable for MCP output.
  */
 export function sanitizeForMcpOutput(value: unknown, options: SanitizerOptions = {}): unknown {
-  return sanitizeValue(value, [], new WeakSet<object>(), options, "mcp");
+  // A caller may supply a one-shot iterable. Reuse its values for every string
+  // in the traversal rather than exhausting it on the first field.
+  const reusableOptions = {
+    ...options,
+    secrets: options.secrets ? [...options.secrets] : [],
+  };
+  return sanitizeValue(value, [], new WeakSet<object>(), reusableOptions, "mcp");
 }
 
 /**
