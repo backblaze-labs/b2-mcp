@@ -718,15 +718,17 @@ async function readSmallRegularFile(filePath: string): Promise<Buffer> {
   try {
     const stat = await handle.stat();
     if (!stat.isFile()) throw badRequestError("s3_put_object filePath must be a regular file.");
-    if (stat.size > MAX_INLINE_OBJECT_BYTES) throw inlineUploadLimitError(stat.size);
-    const output = new Uint8Array(stat.size);
+    const chunks: Buffer[] = [];
     let total = 0;
-    while (total < output.byteLength) {
-      const { bytesRead } = await handle.read(output, total, output.byteLength - total, total);
+    while (true) {
+      const chunk = Buffer.allocUnsafe(Math.min(64 * 1024, MAX_INLINE_OBJECT_BYTES + 1 - total));
+      const { bytesRead } = await handle.read(chunk, 0, chunk.length, total);
       if (bytesRead === 0) break;
       total += bytesRead;
+      if (total > MAX_INLINE_OBJECT_BYTES) throw inlineUploadLimitError(total);
+      chunks.push(chunk.subarray(0, bytesRead));
     }
-    return Buffer.from(output.subarray(0, total));
+    return Buffer.concat(chunks, total);
   } finally {
     await handle.close();
   }
@@ -896,15 +898,30 @@ export function registerS3ObjectTools(
           return toolError(badRequestError("Either filePath or content must be provided."));
         }
 
+        if (args.filePath !== undefined && args.content !== undefined) {
+          return toolError(badRequestError("Provide either filePath or content, not both."));
+        }
+
         assertSafeObjectContentType(args.contentType, "s3_put_object");
 
         const safePath = args.filePath
           ? resolveLocalPath(config, args.filePath, "read")
           : undefined;
 
-        const body = safePath
-          ? await readSmallRegularFile(safePath)
-          : Buffer.from(args.content ?? "", "base64");
+        let body: Buffer;
+        if (safePath) {
+          body = await readSmallRegularFile(safePath);
+        } else {
+          const content = args.content ?? "";
+          if (content.length > Math.ceil(MAX_INLINE_OBJECT_BYTES / 3) * 4) {
+            return toolError(inlineUploadLimitError());
+          }
+          body = Buffer.from(content, "base64");
+          const encoded = body.toString("base64");
+          if (content !== encoded && content !== encoded.replace(/=+$/, "")) {
+            return toolError(badRequestError("content must be valid base64."));
+          }
+        }
         const size = body.byteLength;
         if (size > MAX_INLINE_OBJECT_BYTES) {
           return toolError(inlineUploadLimitError(size));
