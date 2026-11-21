@@ -49,7 +49,7 @@ function checkPathError(err: unknown): void {
 /** True if `target` is `root` itself or lives somewhere beneath it. */
 function isInside(root: string, target: string): boolean {
   const rel = path.relative(root, target);
-  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+  return rel === "" || (rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel));
 }
 
 /**
