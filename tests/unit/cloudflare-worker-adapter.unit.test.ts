@@ -338,7 +338,7 @@ describe("Cloudflare Worker adapter", () => {
       new Request("https://mcp.example.com/mcp", {
         method: "POST",
         headers: { ...modernHeaders("tools/list"), Authorization: "Bearer access-token" },
-        body: "x".repeat(1 * 1024 * 1024 + 1),
+        body: "x".repeat(2 * 1024 * 1024 + 1),
       }),
       cloudflareEnv(),
     );

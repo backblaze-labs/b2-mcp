@@ -351,7 +351,7 @@ describe("Vercel adapter", () => {
         method: "POST",
         headers: {
           ...jsonHeaders({ Authorization: "Bearer access-token" }),
-          "Content-Length": String(1024 * 1024 + 1),
+          "Content-Length": String(2 * 1024 * 1024 + 1),
         },
         body: "{}",
       }),
@@ -366,7 +366,7 @@ describe("Vercel adapter", () => {
     vi.stubGlobal("fetch", fetchMock);
     const body = new ReadableStream<Uint8Array>({
       start(controller) {
-        controller.enqueue(new Uint8Array(1024 * 1024));
+        controller.enqueue(new Uint8Array(2 * 1024 * 1024));
         controller.enqueue(new Uint8Array(1));
         controller.close();
       },

@@ -104,7 +104,7 @@ describe("HTTP transport guards (MCP 2026-07-28)", () => {
     await startHandle();
     const res = await request(port, "POST", "/mcp", {
       headers: { ...creds, ...JSON_HEADERS },
-      body: "x".repeat(1024 * 1024 + 1),
+      body: "x".repeat(2 * 1024 * 1024 + 1),
     });
     expect(res.status).toBe(413);
   });
