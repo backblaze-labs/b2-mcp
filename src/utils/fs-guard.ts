@@ -29,6 +29,23 @@ export class FileAccessError extends Error {
   }
 }
 
+const PATH_ERRORS = new Set("ENOENT ENOTDIR ELOOP ENAMETOOLONG EACCES EPERM".split(" "));
+
+/**
+ * Recognize expected path refusals.
+ *
+ * @param err - Error to check.
+ *
+ * @returns Whether it is a path refusal.
+ */
+export function isPathRefusal(err: unknown): boolean {
+  return PATH_ERRORS.has((err as NodeJS.ErrnoException | null)?.code ?? "");
+}
+
+function checkPathError(err: unknown): void {
+  if (!isPathRefusal(err)) throw err;
+}
+
 /** True if `target` is `root` itself or lives somewhere beneath it. */
 function isInside(root: string, target: string): boolean {
   const rel = path.relative(root, target);
@@ -51,7 +68,8 @@ export function isInsideFileRoot(config: B2Config, realPath: string): boolean {
   let realRoot: string;
   try {
     realRoot = fs.realpathSync(path.resolve(config.fileRoot));
-  } catch {
+  } catch (err) {
+    checkPathError(err);
     throw new FileAccessError(`Configured sandbox root does not exist: ${config.fileRoot}`);
   }
   return isInside(realRoot, realPath);
@@ -65,7 +83,13 @@ export function isInsideFileRoot(config: B2Config, realPath: string): boolean {
  */
 function realTargetForWrite(resolved: string): string {
   let dir = resolved;
-  while (!fs.existsSync(dir)) {
+  while (true) {
+    try {
+      fs.statSync(dir);
+      break;
+    } catch (err) {
+      checkPathError(err);
+    }
     const parent = path.dirname(dir);
     if (parent === dir) break; // reached the filesystem root
     dir = parent;
@@ -73,7 +97,8 @@ function realTargetForWrite(resolved: string): string {
   let realDir: string;
   try {
     realDir = fs.realpathSync(dir);
-  } catch {
+  } catch (err) {
+    checkPathError(err);
     realDir = dir;
   }
   const tail = path.relative(dir, resolved);
@@ -111,6 +136,8 @@ export function resolveLocalPath(
     );
   }
 
+  if (userPath.includes("\0")) throw new FileAccessError("Local path contains a NUL byte.");
+
   const resolved = path.resolve(userPath);
 
   // Unrestricted mode (trusted local stdio): no root to enforce.
@@ -119,7 +146,8 @@ export function resolveLocalPath(
   let realRoot: string;
   try {
     realRoot = fs.realpathSync(path.resolve(config.fileRoot));
-  } catch {
+  } catch (err) {
+    checkPathError(err);
     throw new FileAccessError(`Configured sandbox root does not exist: ${config.fileRoot}`);
   }
 
@@ -127,7 +155,8 @@ export function resolveLocalPath(
     let real: string;
     try {
       real = fs.realpathSync(resolved);
-    } catch {
+    } catch (err) {
+      checkPathError(err);
       throw new FileAccessError(`Path not found or inaccessible: ${userPath}`);
     }
     if (!isInside(realRoot, real)) {

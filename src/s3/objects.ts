@@ -17,7 +17,7 @@ import { currentMcpRequestSignal } from "../request-context.js";
 import { withS3Circuit, withS3LongCircuit } from "../utils/circuit-breaker.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
 import { badRequestError, codedError, toolError, toolJson, toolSuccess } from "../utils/errors.js";
-import { isInsideFileRoot, resolveLocalPath } from "../utils/fs-guard.js";
+import { isInsideFileRoot, isPathRefusal, resolveLocalPath } from "../utils/fs-guard.js";
 import { logger } from "../utils/logger.js";
 import { timeoutError } from "../utils/named-error.js";
 import type { B2Config, B2S3FileVersionBinding, B2S3VersionGuard } from "../utils/types.js";
@@ -277,7 +277,7 @@ async function preserveOwnership(
 // A lost owner or group can move a user into another class, so carry only shared bits.
 function modeCarriedSafely(mode: number, kept: { uid: boolean; gid: boolean }): number {
   if (kept.uid && kept.gid) return mode;
-  // Owner bits pass through; capping them to the server's old access needs group lookups.
+  // Capping owner bits requires group lookups.
   const owner = (mode >> 6) & 0o7;
   const group = (mode >> 3) & 0o7;
   const other = mode & 0o7;
@@ -292,6 +292,11 @@ function outsideRootError(config?: B2Config, inFlight = false) {
   );
 }
 
+function ignorePathError(err: unknown): undefined {
+  if (!isPathRefusal(err)) throw err;
+  return undefined;
+}
+
 // Node has no openat, so confirm where the opened temp file actually is.
 async function assertOpenedInsideFileRoot(
   handle: FileHandle,
@@ -300,18 +305,19 @@ async function assertOpenedInsideFileRoot(
 ): Promise<void> {
   let openedPath: string | undefined;
   if (process.platform === "linux") {
-    openedPath = await fs.promises.readlink(`/proc/self/fd/${handle.fd}`).catch(ignoreError);
+    openedPath = await fs.promises.readlink(`/proc/self/fd/${handle.fd}`).catch(ignorePathError);
   }
   if (openedPath === undefined) {
     const opened = await handle.stat();
-    // fs-guard's resolver: the native one can spell paths differently (macOS case, SUBST).
+    // Use fs-guard's resolver to preserve platform path spelling.
     let realPath: string | undefined;
     try {
       realPath = fs.realpathSync(tempPath);
-    } catch {
+    } catch (err) {
+      if (!isPathRefusal(err)) throw err;
       realPath = undefined;
     }
-    const onDisk = realPath ? await fs.promises.stat(realPath).catch(ignoreError) : undefined;
+    const onDisk = realPath ? await fs.promises.stat(realPath).catch(ignorePathError) : undefined;
     // A second link could name the same file outside the root.
     if (onDisk?.dev === opened.dev && onDisk.ino === opened.ino && opened.nlink === 1)
       openedPath = realPath;
@@ -328,7 +334,7 @@ function atDir(dir: FileHandle | undefined, file: string): string {
 // Recheck: pinned directories can move out of the root.
 async function pinnedDirInsideRoot(dirFd: number, sandbox?: B2Config): Promise<boolean> {
   if (!sandbox) return true;
-  const realDir = await fs.promises.readlink(`/proc/self/fd/${dirFd}`).catch(ignoreError);
+  const realDir = await fs.promises.readlink(`/proc/self/fd/${dirFd}`).catch(ignorePathError);
   return realDir !== undefined && isInsideFileRoot(sandbox, realDir);
 }
 
@@ -341,8 +347,10 @@ async function pinParentDir(
   sandbox?: B2Config,
 ): Promise<FileHandle | undefined> {
   if (process.platform !== "linux") return undefined;
-  if ((await fs.promises.readlink(`/proc/self/fd/${handle.fd}`).catch(ignoreError)) === undefined) {
-    // A sandboxed request fails rather than falling back to path-based operations.
+  if (
+    (await fs.promises.readlink(`/proc/self/fd/${handle.fd}`).catch(ignorePathError)) === undefined
+  ) {
+    // Sandboxed requests cannot fall back to paths.
     if (!sandbox) return undefined;
     throw badRequestError(
       `saveToPath cannot be completed safely under ${sandbox.fileRoot} on this host: /proc is unavailable.`,
@@ -370,8 +378,11 @@ async function pinParentDir(
       if (await pinnedDirInsideRoot(dirHandle.fd, sandbox)) return dirHandle;
       refusal = outsideRootError(sandbox);
     }
-  } catch {
-    // Fail closed.
+  } catch (err) {
+    if (!isPathRefusal(err)) {
+      await dirHandle.close().catch(ignoreError);
+      throw err;
+    }
   }
   await dirHandle.close().catch(ignoreError);
   throw refusal;
@@ -469,7 +480,7 @@ async function downloadToPath(
     const object = await fetchObject();
     body = object.body;
     const bytes = await withS3LongCircuit(async () => {
-      // Not createWriteStream, whose destroy() closes the handle: it stays open until cleanup.
+      // Keep the handle open until cleanup.
       const stream = new Writable({
         write(chunk: Buffer, _encoding, callback) {
           writeFully(handle, chunk).then(() => callback(), callback);
@@ -782,13 +793,8 @@ async function validateDeleteObjectVersions(
   };
 }
 
-// Inline object content moves bytes *through* the server — and, for base64,
-// through the model's context window. Keep that path for small control-plane
-// payloads only (manifests, sidecars, tiny configs the agent must inspect or
-// write) and steer real object data to a presigned URL (s3_get_presigned_url),
-// so bytes flow client/worker↔B2 directly and never touch the server. On the
-// internet-facing HTTP transport, local-file access is off by default, so this
-// cap is what keeps the data plane off the server: anything larger must presign.
+// Inline content crosses the server and model context; use presigned URLs for larger transfers.
+// The cap keeps hosted transports without local files control-plane only.
 const MAX_INLINE_OBJECT_BYTES = 1024 * 1024; // 1 MiB
 
 /**
@@ -971,10 +977,7 @@ export function registerS3ObjectTools(
 
         const result = await getObject();
 
-        // Bound the inline path: without saveToPath the whole object is buffered
-        // and base64-copied into the response (and the model context), so this is
-        // a control-plane convenience for small payloads only. Reject before
-        // buffering and steer bulk reads to a presigned URL or saveToPath.
+        // Inline reads are buffered and base64-encoded; use presigned URLs or saveToPath for bulk.
         if (
           typeof result.contentLength !== "number" ||
           !Number.isFinite(result.contentLength) ||

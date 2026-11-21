@@ -1,0 +1,355 @@
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { registerS3ObjectTools } from "../../src/s3/objects";
+import { parseB2Error, parseErrorText } from "../../src/utils/errors";
+import { isInsideFileRoot, resolveLocalPath } from "../../src/utils/fs-guard";
+import type { B2S3VersionGuard } from "../../src/utils/types";
+import {
+  DeterministicS3ClientFake,
+  ToolHarness,
+  parseResult,
+  testConfig,
+} from "../support/deterministic-fakes";
+
+const fault = vi.hoisted(() => ({
+  path: "",
+  statPath: "",
+  statError: undefined as NodeJS.ErrnoException | undefined,
+  error: undefined as NodeJS.ErrnoException | undefined,
+}));
+
+vi.mock("fs", async (importOriginal) => {
+  const original = await importOriginal<typeof import("fs")>();
+  const realpathSync = Object.assign(
+    (name: fs.PathLike, ...options: unknown[]) => {
+      if (fault.error && String(name) === fault.path) throw fault.error;
+      return Reflect.apply(original.realpathSync, undefined, [name, ...options]);
+    },
+    { native: original.realpathSync.native },
+  );
+  const statSync = (...args: Parameters<typeof original.statSync>) => {
+    if (fault.statError && String(args[0]) === fault.statPath) throw fault.statError;
+    return Reflect.apply(original.statSync, undefined, args);
+  };
+  return { ...original, realpathSync, statSync };
+});
+
+const versions: B2S3VersionGuard = {
+  async resolveS3FileVersion() {
+    throw new Error("Unexpected version lookup");
+  },
+  async resolveS3FileVersions() {
+    return [];
+  },
+  async getCurrentS3FileVersion() {
+    return null;
+  },
+};
+
+let root: string;
+let input: string;
+let parent: string;
+
+beforeEach(() => {
+  root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "b2-fs-fault-")));
+  input = path.join(root, "input.txt");
+  parent = path.join(root, "parent");
+  fs.writeFileSync(input, "data");
+  fs.mkdirSync(parent);
+});
+
+afterEach(() => {
+  fault.path = "";
+  fault.statPath = "";
+  fault.statError = undefined;
+  fault.error = undefined;
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+describe("filesystem guard unexpected failures", () => {
+  for (const code of ["EIO", "EMFILE"]) {
+    it.each(["sandbox root", "read path", "write ancestor", "pinned root"])(
+      `preserves ${code} while resolving the %s as a server error`,
+      (where) => {
+        const config = { ...testConfig, fileRoot: root };
+        fault.path = where === "read path" ? input : where === "write ancestor" ? parent : root;
+        fault.error = Object.assign(new Error(`simulated ${code}`), { code });
+        let caught: unknown;
+        try {
+          if (where === "pinned root") isInsideFileRoot(config, input);
+          else
+            resolveLocalPath(
+              config,
+              where === "write ancestor" ? path.join(parent, "out") : input,
+              where === "write ancestor" ? "write" : "read",
+            );
+        } catch (err) {
+          caught = err;
+        }
+        expect(caught).toBe(fault.error);
+        expect(parseB2Error(caught)).toMatchObject({ status: 500, code });
+      },
+    );
+
+    it.each(["s3_put_object", "s3_get_object"])(
+      `returns a server error from %s when sandbox root resolution fails with ${code}`,
+      async (tool) => {
+        const s3 = new DeterministicS3ClientFake();
+        const tools = new ToolHarness();
+        registerS3ObjectTools(tools, s3.asPeerClient(), versions, {
+          ...testConfig,
+          fileRoot: root,
+        });
+        fault.path = root;
+        fault.error = Object.assign(new Error(`simulated ${code}`), { code });
+        const result = await tools.call(
+          tool,
+          tool === "s3_put_object"
+            ? { bucket: "b", key: "k", filePath: input, contentType: "text/plain" }
+            : { bucket: "b", key: "k", saveToPath: path.join(parent, "out") },
+        );
+        expect(result.isError).toBe(true);
+        expect(parseErrorText(parseResult(result) as string)).toMatchObject({ status: 500, code });
+        expect(s3.requests).toEqual([]);
+      },
+    );
+  }
+});
+
+it.each(["EIO", "EMFILE"])("preserves %s during write ancestor discovery", (code) => {
+  fault.statPath = parent;
+  fault.statError = Object.assign(new Error(`simulated ${code}`), { code });
+  let caught: unknown;
+  try {
+    resolveLocalPath({ ...testConfig, fileRoot: root }, path.join(parent, "out"), "write");
+  } catch (err) {
+    caught = err;
+  }
+  expect(caught).toBe(fault.statError);
+  expect(parseB2Error(caught)).toMatchObject({ status: 500, code });
+});
+
+describe("filesystem guard expected path refusals", () => {
+  it.each(
+    ["ENOENT", "ENOTDIR", "ELOOP", "ENAMETOOLONG", "EACCES", "EPERM"].flatMap((code) =>
+      ["sandbox root", "read path", "pinned root"].map((where) => ({ code, where })),
+    ),
+  )("classifies $code at the $where as bad_request", ({ code, where }) => {
+    const config = { ...testConfig, fileRoot: root };
+    fault.path = where === "read path" ? input : root;
+    fault.error = Object.assign(new Error(`simulated ${code}`), { code });
+    let caught: unknown;
+    try {
+      if (where === "pinned root") isInsideFileRoot(config, input);
+      else resolveLocalPath(config, input, "read");
+    } catch (err) {
+      caught = err;
+    }
+    expect(parseB2Error(caught)).toMatchObject({ status: 400, code: "bad_request" });
+  });
+});
+
+it
+  .skipIf(process.platform !== "linux" || !fs.existsSync("/proc/self/fd"))
+  .each(["EIO", "EMFILE", "EBUSY", "EROFS", "EISDIR", "ENOTEMPTY", "EXDEV"])(
+  "returns 500 and closes the directory if pinning encounters %s",
+  async (code) => {
+    const s3 = new DeterministicS3ClientFake();
+    const tools = new ToolHarness();
+    registerS3ObjectTools(tools, s3.asPeerClient(), versions, { ...testConfig, fileRoot: root });
+    const open = fs.promises.open.bind(fs.promises);
+    let pin: fs.promises.FileHandle | undefined;
+    const spy = vi.spyOn(fs.promises, "open").mockImplementation(async (...args) => {
+      const handle = await open(...(args as Parameters<typeof open>));
+      if (String(args[0]) === parent && typeof args[1] === "number") {
+        pin = handle;
+        fault.path = root;
+        fault.error = Object.assign(new Error(`simulated ${code}`), { code });
+      }
+      return handle;
+    });
+    try {
+      const result = await tools.call("s3_get_object", {
+        bucket: "b",
+        key: "k",
+        saveToPath: path.join(parent, "out"),
+      });
+      expect(pin).toBeDefined();
+      expect(result.isError).toBe(true);
+      expect(parseErrorText(parseResult(result) as string)).toMatchObject({ status: 500, code });
+      expect(s3.requests).toEqual([]);
+      expect(pin?.fd).toBe(-1);
+      expect(fs.readdirSync(parent)).toEqual([]);
+    } finally {
+      spy.mockRestore();
+    }
+  },
+);
+
+it.each([
+  ["EIO", 500],
+  ["EMFILE", 500],
+  ["EBUSY", 500],
+  ["EROFS", 500],
+  ["EISDIR", 500],
+  ["ENOTEMPTY", 500],
+  ["EXDEV", 500],
+  ["ENOENT", 400],
+  ["ENOTDIR", 400],
+  ["ELOOP", 400],
+  ["ENAMETOOLONG", 400],
+  ["EACCES", 400],
+  ["EPERM", 400],
+])("classifies %s during the opened-file fallback and closes its handle", async (code, status) => {
+  const s3 = new DeterministicS3ClientFake();
+  const tools = new ToolHarness();
+  registerS3ObjectTools(tools, s3.asPeerClient(), versions, { ...testConfig, fileRoot: root });
+  const open = fs.promises.open.bind(fs.promises);
+  const readlink = fs.promises.readlink.bind(fs.promises);
+  let opened: fs.promises.FileHandle | undefined;
+  const openSpy = vi.spyOn(fs.promises, "open").mockImplementation(async (...args) => {
+    const handle = await open(...(args as Parameters<typeof open>));
+    if (String(args[0]).endsWith(".part")) {
+      opened = handle;
+      fault.path = String(args[0]);
+      fault.error = Object.assign(new Error(`simulated ${code}`), { code });
+    }
+    return handle;
+  });
+  const readlinkSpy = vi.spyOn(fs.promises, "readlink").mockImplementation(async (...args) => {
+    if (String(args[0]).startsWith("/proc/self/fd/")) {
+      throw Object.assign(new Error("proc unavailable"), { code: "ENOENT" });
+    }
+    return readlink(...(args as Parameters<typeof readlink>));
+  });
+  try {
+    const result = await tools.call("s3_get_object", {
+      bucket: "b",
+      key: "k",
+      saveToPath: path.join(parent, "out"),
+    });
+    expect(opened).toBeDefined();
+    expect(result.isError).toBe(true);
+    expect(parseErrorText(parseResult(result) as string)).toMatchObject({
+      status,
+      code: status === 400 ? "bad_request" : code,
+    });
+    expect(s3.requests).toEqual([]);
+    expect(opened?.fd).toBe(-1);
+    expect(fs.readdirSync(parent)).toEqual([]);
+  } finally {
+    openSpy.mockRestore();
+    readlinkSpy.mockRestore();
+  }
+});
+
+it
+  .skipIf(process.platform !== "linux" || !fs.existsSync("/proc/self/fd"))
+  .each(["opened file", "pin preflight", "pinned directory"])(
+  "preserves EIO from %s readlink and closes handles",
+  async (where) => {
+    const s3 = new DeterministicS3ClientFake();
+    const tools = new ToolHarness();
+    registerS3ObjectTools(tools, s3.asPeerClient(), versions, { ...testConfig, fileRoot: root });
+    const open = fs.promises.open.bind(fs.promises);
+    const readlink = fs.promises.readlink.bind(fs.promises);
+    let opened: fs.promises.FileHandle | undefined;
+    let pin: fs.promises.FileHandle | undefined;
+    let fileReads = 0;
+    const openSpy = vi.spyOn(fs.promises, "open").mockImplementation(async (...args) => {
+      const handle = await open(...(args as Parameters<typeof open>));
+      if (String(args[0]).endsWith(".part")) opened = handle;
+      if (String(args[0]) === parent && typeof args[1] === "number") pin = handle;
+      return handle;
+    });
+    const readlinkSpy = vi.spyOn(fs.promises, "readlink").mockImplementation(async (...args) => {
+      const name = String(args[0]);
+      if (opened && name === `/proc/self/fd/${opened.fd}`) {
+        fileReads++;
+        if (
+          (where === "opened file" && fileReads === 1) ||
+          (where === "pin preflight" && fileReads === 2)
+        ) {
+          throw Object.assign(new Error("simulated EIO"), { code: "EIO" });
+        }
+      }
+      if (where === "pinned directory" && pin && name === `/proc/self/fd/${pin.fd}`) {
+        throw Object.assign(new Error("simulated EIO"), { code: "EIO" });
+      }
+      return readlink(...(args as Parameters<typeof readlink>));
+    });
+    try {
+      const result = await tools.call("s3_get_object", {
+        bucket: "b",
+        key: "k",
+        saveToPath: path.join(parent, "out"),
+      });
+      expect(opened).toBeDefined();
+      if (where === "pinned directory") expect(pin).toBeDefined();
+      expect(result.isError).toBe(true);
+      expect(parseErrorText(parseResult(result) as string)).toMatchObject({
+        status: 500,
+        code: "EIO",
+      });
+      expect(s3.requests).toEqual([]);
+      expect(opened?.fd).toBe(-1);
+      if (pin) expect(pin.fd).toBe(-1);
+      expect(fs.readdirSync(parent)).toEqual([]);
+    } finally {
+      openSpy.mockRestore();
+      readlinkSpy.mockRestore();
+    }
+  },
+);
+
+it.each(["EIO", "EBUSY"])(
+  "preserves %s from the opened-file fallback stat and closes the handle",
+  async (code) => {
+    const s3 = new DeterministicS3ClientFake();
+    const tools = new ToolHarness();
+    registerS3ObjectTools(tools, s3.asPeerClient(), versions, { ...testConfig, fileRoot: root });
+    const open = fs.promises.open.bind(fs.promises);
+    const stat = fs.promises.stat.bind(fs.promises);
+    const readlink = fs.promises.readlink.bind(fs.promises);
+    let opened: fs.promises.FileHandle | undefined;
+    let tempPath = "";
+    const openSpy = vi.spyOn(fs.promises, "open").mockImplementation(async (...args) => {
+      const handle = await open(...(args as Parameters<typeof open>));
+      if (String(args[0]).endsWith(".part")) {
+        opened = handle;
+        tempPath = fs.realpathSync(String(args[0]));
+      }
+      return handle;
+    });
+    const readlinkSpy = vi.spyOn(fs.promises, "readlink").mockImplementation(async (...args) => {
+      if (opened && String(args[0]) === `/proc/self/fd/${opened.fd}`) {
+        throw Object.assign(new Error("proc unavailable"), { code: "ENOENT" });
+      }
+      return readlink(...(args as Parameters<typeof readlink>));
+    });
+    const statSpy = vi.spyOn(fs.promises, "stat").mockImplementation(async (...args) => {
+      if (tempPath && String(args[0]) === tempPath) {
+        throw Object.assign(new Error(`simulated ${code}`), { code });
+      }
+      return stat(...(args as Parameters<typeof stat>));
+    });
+    try {
+      const result = await tools.call("s3_get_object", {
+        bucket: "b",
+        key: "k",
+        saveToPath: path.join(parent, "out"),
+      });
+      expect(opened).toBeDefined();
+      expect(result.isError).toBe(true);
+      expect(parseErrorText(parseResult(result) as string)).toMatchObject({ status: 500, code });
+      expect(s3.requests).toEqual([]);
+      expect(opened?.fd).toBe(-1);
+      expect(fs.readdirSync(parent)).toEqual([]);
+    } finally {
+      openSpy.mockRestore();
+      readlinkSpy.mockRestore();
+      statSpy.mockRestore();
+    }
+  },
+);
