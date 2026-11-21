@@ -1,0 +1,5 @@
+kind: Fixed
+body: |-
+  Allow files and directories whose names begin with two dots inside a local
+  filesystem sandbox while continuing to reject paths outside it. (Refs #582)
+time: 2026-11-21T12:00:00Z

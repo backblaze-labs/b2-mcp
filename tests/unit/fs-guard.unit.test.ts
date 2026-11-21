@@ -119,6 +119,23 @@ describe("resolveLocalPath — sandbox root", () => {
 });
 
 describe("isInsideFileRoot", () => {
+  it("allows paths whose component begins with two dots", () => {
+    const realRoot = fs.realpathSync(root);
+    const cfg = { ...baseConfig, fileRoot: root };
+    const file = path.join(realRoot, "..cache");
+    fs.writeFileSync(file, "cache");
+    expect(isInsideFileRoot(cfg, file)).toBe(true);
+    expect(resolveLocalPath(cfg, file, "read")).toBe(file);
+    expect(resolveLocalPath(cfg, file, "write")).toBe(file);
+  });
+
+  it("rejects the parent and paths under the parent", () => {
+    const realRoot = fs.realpathSync(root);
+    const cfg = { ...baseConfig, fileRoot: root };
+    expect(isInsideFileRoot(cfg, path.dirname(realRoot))).toBe(false);
+    expect(isInsideFileRoot(cfg, path.join(realRoot, "..", "outside.txt"))).toBe(false);
+  });
+
   it("accepts any path when no sandbox root is configured", () => {
     expect(isInsideFileRoot(baseConfig, outside)).toBe(true);
   });
