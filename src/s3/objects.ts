@@ -277,7 +277,7 @@ async function preserveOwnership(
 // A lost owner or group can move a user into another class, so carry only shared bits.
 function modeCarriedSafely(mode: number, kept: { uid: boolean; gid: boolean }): number {
   if (kept.uid && kept.gid) return mode;
-  // Owner bits pass through; capping them to the server's old access needs group lookups.
+  // Capping owner bits requires group lookups.
   const owner = (mode >> 6) & 0o7;
   const group = (mode >> 3) & 0o7;
   const other = mode & 0o7;
@@ -292,6 +292,11 @@ function outsideRootError(config?: B2Config, inFlight = false) {
   );
 }
 
+function ignorePathError(err: unknown): undefined {
+  if (!isPathRefusal(err)) throw err;
+  return undefined;
+}
+
 // Node has no openat, so confirm where the opened temp file actually is.
 async function assertOpenedInsideFileRoot(
   handle: FileHandle,
@@ -300,11 +305,11 @@ async function assertOpenedInsideFileRoot(
 ): Promise<void> {
   let openedPath: string | undefined;
   if (process.platform === "linux") {
-    openedPath = await fs.promises.readlink(`/proc/self/fd/${handle.fd}`).catch(ignoreError);
+    openedPath = await fs.promises.readlink(`/proc/self/fd/${handle.fd}`).catch(ignorePathError);
   }
   if (openedPath === undefined) {
     const opened = await handle.stat();
-    // fs-guard's resolver: the native one can spell paths differently (macOS case, SUBST).
+    // Use fs-guard's resolver to preserve platform path spelling.
     let realPath: string | undefined;
     try {
       realPath = fs.realpathSync(tempPath);
@@ -329,7 +334,7 @@ function atDir(dir: FileHandle | undefined, file: string): string {
 // Recheck: pinned directories can move out of the root.
 async function pinnedDirInsideRoot(dirFd: number, sandbox?: B2Config): Promise<boolean> {
   if (!sandbox) return true;
-  const realDir = await fs.promises.readlink(`/proc/self/fd/${dirFd}`).catch(ignoreError);
+  const realDir = await fs.promises.readlink(`/proc/self/fd/${dirFd}`).catch(ignorePathError);
   return realDir !== undefined && isInsideFileRoot(sandbox, realDir);
 }
 
@@ -342,8 +347,10 @@ async function pinParentDir(
   sandbox?: B2Config,
 ): Promise<FileHandle | undefined> {
   if (process.platform !== "linux") return undefined;
-  if ((await fs.promises.readlink(`/proc/self/fd/${handle.fd}`).catch(ignoreError)) === undefined) {
-    // A sandboxed request fails rather than falling back to path-based operations.
+  if (
+    (await fs.promises.readlink(`/proc/self/fd/${handle.fd}`).catch(ignorePathError)) === undefined
+  ) {
+    // Sandboxed requests cannot fall back to paths.
     if (!sandbox) return undefined;
     throw badRequestError(
       `saveToPath cannot be completed safely under ${sandbox.fileRoot} on this host: /proc is unavailable.`,
@@ -473,7 +480,7 @@ async function downloadToPath(
     const object = await fetchObject();
     body = object.body;
     const bytes = await withS3LongCircuit(async () => {
-      // Not createWriteStream, whose destroy() closes the handle: it stays open until cleanup.
+      // Keep the handle open until cleanup.
       const stream = new Writable({
         write(chunk: Buffer, _encoding, callback) {
           writeFully(handle, chunk).then(() => callback(), callback);

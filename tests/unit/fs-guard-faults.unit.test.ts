@@ -14,6 +14,8 @@ import {
 
 const fault = vi.hoisted(() => ({
   path: "",
+  statPath: "",
+  statError: undefined as NodeJS.ErrnoException | undefined,
   error: undefined as NodeJS.ErrnoException | undefined,
 }));
 
@@ -26,7 +28,11 @@ vi.mock("fs", async (importOriginal) => {
     },
     { native: original.realpathSync.native },
   );
-  return { ...original, realpathSync };
+  const statSync = (...args: Parameters<typeof original.statSync>) => {
+    if (fault.statError && String(args[0]) === fault.statPath) throw fault.statError;
+    return Reflect.apply(original.statSync, undefined, args);
+  };
+  return { ...original, realpathSync, statSync };
 });
 
 const versions: B2S3VersionGuard = {
@@ -55,6 +61,8 @@ beforeEach(() => {
 
 afterEach(() => {
   fault.path = "";
+  fault.statPath = "";
+  fault.statError = undefined;
   fault.error = undefined;
   fs.rmSync(root, { recursive: true, force: true });
 });
@@ -107,6 +115,19 @@ describe("filesystem guard unexpected failures", () => {
       },
     );
   }
+});
+
+it.each(["EIO", "EMFILE"])("preserves %s during write ancestor discovery", (code) => {
+  fault.statPath = parent;
+  fault.statError = Object.assign(new Error(`simulated ${code}`), { code });
+  let caught: unknown;
+  try {
+    resolveLocalPath({ ...testConfig, fileRoot: root }, path.join(parent, "out"), "write");
+  } catch (err) {
+    caught = err;
+  }
+  expect(caught).toBe(fault.statError);
+  expect(parseB2Error(caught)).toMatchObject({ status: 500, code });
 });
 
 describe("filesystem guard expected path refusals", () => {
@@ -222,3 +243,62 @@ it.each([
     readlinkSpy.mockRestore();
   }
 });
+
+it
+  .skipIf(process.platform !== "linux" || !fs.existsSync("/proc/self/fd"))
+  .each(["opened file", "pin preflight", "pinned directory"])(
+  "preserves EIO from %s readlink and closes handles",
+  async (where) => {
+    const s3 = new DeterministicS3ClientFake();
+    const tools = new ToolHarness();
+    registerS3ObjectTools(tools, s3.asPeerClient(), versions, { ...testConfig, fileRoot: root });
+    const open = fs.promises.open.bind(fs.promises);
+    const readlink = fs.promises.readlink.bind(fs.promises);
+    let opened: fs.promises.FileHandle | undefined;
+    let pin: fs.promises.FileHandle | undefined;
+    let fileReads = 0;
+    const openSpy = vi.spyOn(fs.promises, "open").mockImplementation(async (...args) => {
+      const handle = await open(...(args as Parameters<typeof open>));
+      if (String(args[0]).endsWith(".part")) opened = handle;
+      if (String(args[0]) === parent && typeof args[1] === "number") pin = handle;
+      return handle;
+    });
+    const readlinkSpy = vi.spyOn(fs.promises, "readlink").mockImplementation(async (...args) => {
+      const name = String(args[0]);
+      if (opened && name === `/proc/self/fd/${opened.fd}`) {
+        fileReads++;
+        if (
+          (where === "opened file" && fileReads === 1) ||
+          (where === "pin preflight" && fileReads === 2)
+        ) {
+          throw Object.assign(new Error("simulated EIO"), { code: "EIO" });
+        }
+      }
+      if (where === "pinned directory" && pin && name === `/proc/self/fd/${pin.fd}`) {
+        throw Object.assign(new Error("simulated EIO"), { code: "EIO" });
+      }
+      return readlink(...(args as Parameters<typeof readlink>));
+    });
+    try {
+      const result = await tools.call("s3_get_object", {
+        bucket: "b",
+        key: "k",
+        saveToPath: path.join(parent, "out"),
+      });
+      expect(opened).toBeDefined();
+      if (where === "pinned directory") expect(pin).toBeDefined();
+      expect(result.isError).toBe(true);
+      expect(parseErrorText(parseResult(result) as string)).toMatchObject({
+        status: 500,
+        code: "EIO",
+      });
+      expect(s3.requests).toEqual([]);
+      expect(opened?.fd).toBe(-1);
+      if (pin) expect(pin.fd).toBe(-1);
+      expect(fs.readdirSync(parent)).toEqual([]);
+    } finally {
+      openSpy.mockRestore();
+      readlinkSpy.mockRestore();
+    }
+  },
+);

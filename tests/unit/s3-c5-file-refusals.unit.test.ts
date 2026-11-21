@@ -32,7 +32,9 @@ it.each([
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "b2-c5-root-"));
   const outside = fs.mkdtempSync(path.join(os.tmpdir(), "b2-c5-out-"));
   try {
-    const input = path.join(outside, "input.txt");
+    const directory = refusal === "disabled" ? root : outside;
+    const input = path.join(directory, "input.txt");
+    const output = path.join(directory, "out.txt");
     fs.writeFileSync(input, "data");
     const s3 = new DeterministicS3ClientFake();
     const tools = new ToolHarness();
@@ -45,7 +47,7 @@ it.each([
       tool,
       tool === "s3_put_object"
         ? { bucket: "b", key: "k", filePath: input, contentType: "text/plain" }
-        : { bucket: "b", key: "k", saveToPath: path.join(outside, "out.txt") },
+        : { bucket: "b", key: "k", saveToPath: output },
     );
     expect(result.isError).toBe(true);
     expect(parseErrorText(parseResult(result) as string)).toMatchObject({
@@ -53,7 +55,7 @@ it.each([
       code: "bad_request",
     });
     expect(s3.requests).toEqual([]);
-    expect(fs.existsSync(path.join(outside, "out.txt"))).toBe(false);
+    expect(fs.existsSync(output)).toBe(false);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(outside, { recursive: true, force: true });

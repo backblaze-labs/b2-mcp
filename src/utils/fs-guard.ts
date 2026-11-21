@@ -83,7 +83,13 @@ export function isInsideFileRoot(config: B2Config, realPath: string): boolean {
  */
 function realTargetForWrite(resolved: string): string {
   let dir = resolved;
-  while (!fs.existsSync(dir)) {
+  while (true) {
+    try {
+      fs.statSync(dir);
+      break;
+    } catch (err) {
+      checkPathError(err);
+    }
     const parent = path.dirname(dir);
     if (parent === dir) break; // reached the filesystem root
     dir = parent;
