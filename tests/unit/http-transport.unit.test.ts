@@ -76,7 +76,7 @@ function postChunkedLargeBody(port: number, pathname: string): Promise<number> {
     });
     req.on("error", () => finish(413));
     const chunk = Buffer.alloc(64 * 1024, 0x78);
-    for (let sent = 0; sent < 2 * 1024 * 1024; sent += chunk.length) req.write(chunk);
+    for (let sent = 0; sent <= 2 * 1024 * 1024; sent += chunk.length) req.write(chunk);
     req.end();
   });
 }
@@ -85,7 +85,7 @@ function postDeclaredLargeBody(port: number, pathname: string): Promise<Resp> {
   return request(port, "POST", pathname, {
     headers: {
       "content-type": "application/json",
-      "content-length": String(1024 * 1024 + 1),
+      "content-length": String(2 * 1024 * 1024 + 1),
     },
     body: "{}",
   });

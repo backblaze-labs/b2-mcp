@@ -236,7 +236,7 @@ from a separate deploy. Promote only commits where this gate passed.
 
 ## Runtime limits
 
-This adapter keeps the application-level MCP body limit at one MiB regardless
+This adapter keeps the application-level MCP body limit at two MiB regardless
 of Vercel's current platform limit. Do not proxy large object bodies through
 the function. Use bounded inline payloads or short-lived B2 presigned URLs so
 bytes move directly between the client and B2.

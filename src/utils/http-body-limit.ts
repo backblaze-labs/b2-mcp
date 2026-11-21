@@ -8,7 +8,8 @@
  * should flow through presigned B2 URLs instead of the MCP server.
  */
 /** Maximum accepted MCP POST body size in bytes. */
-export const MAX_MCP_BODY_BYTES = 1 * 1024 * 1024;
+// Allow a base64-encoded 1 MiB inline object plus its JSON-RPC envelope.
+export const MAX_MCP_BODY_BYTES = 2 * 1024 * 1024;
 
 /**
  * Check a request Content-Length header against the MCP body cap.

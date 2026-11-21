@@ -271,7 +271,7 @@ describe("HTTP runtime security regression suite (#197)", () => {
     });
     const oversized = await request(port, "POST", "/mcp", {
       headers: { ...creds, ...JSON_HEADERS },
-      body: "x".repeat(1024 * 1024 + 1),
+      body: "x".repeat(2 * 1024 * 1024 + 1),
     });
 
     expect(

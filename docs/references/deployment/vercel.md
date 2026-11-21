@@ -151,7 +151,7 @@ delete custom domains if unused, and revoke the B2 key.
 ## Limitations
 
 Do not proxy large object bodies through Functions. This server enforces a
-one-MiB MCP body cap; use short-lived B2 presigned URLs for large transfers.
+two-MiB MCP body cap; use short-lived B2 presigned URLs for large transfers.
 Review current Vercel function duration, payload, bundle, region, concurrency,
 and Fluid Compute limits before each production verification.
 
