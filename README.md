@@ -186,13 +186,13 @@ pnpm run validate:skills
 | `B2_CAPABILITY_CACHE_TTL_MS` / `B2_CAPABILITY_CACHE_MAX_ENTRIES` | `300000` / `10000` | Bounded capability-discovery cache TTL and size; cache identity is secret-bound, log labels are non-secret fingerprints    |
 | `B2_S3_SAVE_TO_PATH_IDLE_TIMEOUT_MS`                             | `60000`            | Idle timeout while streaming `s3_get_object` results to `saveToPath`                                                      |
 
-A ready-to-copy [`.env.example`](.env.example) lists the local variables, and [`deploy/customer-hosted/b2-mcp.env.example`](deploy/customer-hosted/b2-mcp.env.example) lists the hosted container baseline. HTTP-only file-access vars (`B2_ALLOW_LOCAL_FILES`, `B2_FILE_ROOT`) are covered in [`docs/DEPLOY.md`](docs/DEPLOY.md); the capability/cache tuning knobs above are documented inline here.
+A ready-to-copy [`.env.example`](.env.example) lists the local variables, and [`deploy/customer-hosted/b2-mcp.env.example`](deploy/customer-hosted/b2-mcp.env.example) lists the hosted container baseline. File-access vars (`B2_ALLOW_LOCAL_FILES`, `B2_FILE_ROOT`) are covered in [`docs/DEPLOY.md`](docs/DEPLOY.md); the capability/cache tuning knobs above are documented inline here.
 
 ---
 
 ## Tools
 
-The server exposes **40 tools** (registration is capability-aware, so a given key sees only the subset it can use). **40 total — 17 Native B2 SDK + 19 AWS S3 SDK + 4 Neither SDK/custom MCP tools.** Prefix counts remain 21 native `b2_*` names + 19 data-plane `s3_*` names. Under stdio's default `confirm` policy, fifteen destructive, durable-secret-producing, or protection-weakening tools require confirmation before execution; HTTP defaults to `block`. The per-profile, availability-annotated tool lists (per capability set) live in the generated [`docs/generated/tool-profiles.md`](docs/generated/tool-profiles.md); the destructive-gate policy and durable-secret handling (secret sinks, idempotency keys, POSIX vs. Windows behavior) are documented in [`docs/AUTHENTICATION.md`](docs/AUTHENTICATION.md).
+The server exposes **40 tools** (registration is capability-aware, so a given key sees only the subset it can use). **40 total — 17 Native B2 SDK + 19 AWS S3 SDK + 4 Neither SDK/custom MCP tools.** Prefix counts remain 21 native `b2_*` names + 19 data-plane `s3_*` names. Under stdio's default `confirm` policy, fifteen destructive, durable-secret-producing, or protection-weakening tools require confirmation before execution; HTTP defaults to `block`. The per-profile, availability-annotated tool lists (per capability set) live in the generated [`docs/generated/tool-profiles.md`](docs/generated/tool-profiles.md); the destructive-gate policy and durable-secret handling are documented in [`docs/AUTHENTICATION.md`](docs/AUTHENTICATION.md).
 
 **Native B2 SDK (17):**
 
