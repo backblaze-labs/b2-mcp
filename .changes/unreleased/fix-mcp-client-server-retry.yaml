@@ -1,0 +1,3 @@
+kind: Fixed
+body: Preserve cancellation for batch version checks, contain HTTP auth hook failures, avoid retrying multipart aborts, and release retry listeners. (#587)
+time: 2026-11-21T22:49:42Z

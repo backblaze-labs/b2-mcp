@@ -284,6 +284,21 @@ describe("withRetry — abort signal", () => {
     expect(fn).not.toHaveBeenCalled();
   });
 
+  it("C13 removes the abort listener after a completed retry delay", async () => {
+    const controller = new AbortController();
+    const add = vi.spyOn(controller.signal, "addEventListener");
+    const remove = vi.spyOn(controller.signal, "removeEventListener");
+    const fn = vi.fn().mockRejectedValueOnce(httpError(503)).mockResolvedValueOnce("ok");
+    const promise = withRetry(fn, 1, controller.signal);
+    await waitForCallCount(fn, 1);
+    await vi.advanceTimersByTimeAsync(1000);
+
+    await expect(promise).resolves.toBe("ok");
+    const abortListener = add.mock.calls.find(([event]) => event === "abort")?.[1];
+    expect(abortListener).toBeDefined();
+    expect(remove).toHaveBeenCalledWith("abort", abortListener);
+  });
+
   it("cancels retry backoff when the caller aborts", async () => {
     const abort = new AbortController();
     const reason = new Error("caller stopped");

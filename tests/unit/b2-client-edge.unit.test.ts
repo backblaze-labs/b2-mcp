@@ -968,6 +968,33 @@ describe("B2Client native edge branches", () => {
       expect(sdk.raw.getFileInfo).not.toHaveBeenCalled();
     });
 
+    it("C22 rejects an aborted bulk version lookup instead of returning partial results", async () => {
+      const controller = new AbortController();
+      const reason = Object.assign(new Error("bulk lookup stopped"), { name: "AbortError" });
+      const getFileInfo = vi.fn(async () => {
+        controller.abort(reason);
+        return fileVersion({ fileId: "version-a", fileName: "a.txt" });
+      });
+      const { client } = clientWithMockedNativeSdk({
+        getBucket: async () => ({ id: "bucket-1" }),
+        raw: { getFileInfo },
+      });
+
+      await expect(
+        runWithMcpRequestSignal(controller.signal, () =>
+          client.resolveS3FileVersions({
+            bucket: "bucket",
+            maxConcurrency: 1,
+            objects: [
+              { key: "a.txt", versionId: "version-a" },
+              { key: "b.txt", versionId: "version-b" },
+            ],
+          }),
+        ),
+      ).rejects.toBe(reason);
+      expect(getFileInfo).toHaveBeenCalledTimes(1);
+    });
+
     it("records per-object bulk S3 version binding errors", async () => {
       const sdk = {
         getBucket: vi.fn(async () => ({ id: "bucket-1" })),

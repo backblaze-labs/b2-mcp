@@ -1694,7 +1694,7 @@ export class B2Client {
 
       const signal = currentMcpRequestSignal();
       const results: Array<B2S3FileVersionResolution | undefined> = [];
-      await forEachBounded(
+      const { aborted } = await forEachBounded(
         options.objects,
         { maxConcurrency: options.maxConcurrency, signal },
         async (object, index) => {
@@ -1716,6 +1716,7 @@ export class B2Client {
         },
       );
 
+      if (aborted) throw signal?.reason ?? abortError();
       return results.flatMap((result) => (result ? [result] : []));
     });
   }

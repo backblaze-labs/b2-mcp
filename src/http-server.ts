@@ -179,12 +179,11 @@ function createNodeServer(pipeline: B2McpFetchHandler, options: HttpServerOption
     });
     if (res.destroyed) abortController.abort();
 
-    const authedReq = req as AuthenticatedIncomingMessage;
-    const authInfo = options.getAuthInfo?.(authedReq);
-    if (authInfo) authedReq.auth = authInfo;
-
     let response: Response;
     try {
+      const authedReq = req as AuthenticatedIncomingMessage;
+      const authInfo = options.getAuthInfo?.(authedReq);
+      if (authInfo) authedReq.auth = authInfo;
       response = await pipeline.fetch(nodeRequestToWeb(req, abortController.signal), {
         authInfo,
         remoteAddress: req.socket.remoteAddress,
