@@ -165,3 +165,60 @@ it
     }
   },
 );
+
+it.each([
+  ["EIO", 500],
+  ["EMFILE", 500],
+  ["EBUSY", 500],
+  ["EROFS", 500],
+  ["EISDIR", 500],
+  ["ENOTEMPTY", 500],
+  ["EXDEV", 500],
+  ["ENOENT", 400],
+  ["ENOTDIR", 400],
+  ["ELOOP", 400],
+  ["ENAMETOOLONG", 400],
+  ["EACCES", 400],
+  ["EPERM", 400],
+])("classifies %s during the opened-file fallback and closes its handle", async (code, status) => {
+  const s3 = new DeterministicS3ClientFake();
+  const tools = new ToolHarness();
+  registerS3ObjectTools(tools, s3.asPeerClient(), versions, { ...testConfig, fileRoot: root });
+  const open = fs.promises.open.bind(fs.promises);
+  const readlink = fs.promises.readlink.bind(fs.promises);
+  let opened: fs.promises.FileHandle | undefined;
+  const openSpy = vi.spyOn(fs.promises, "open").mockImplementation(async (...args) => {
+    const handle = await open(...(args as Parameters<typeof open>));
+    if (String(args[0]).endsWith(".part")) {
+      opened = handle;
+      fault.path = String(args[0]);
+      fault.error = Object.assign(new Error(`simulated ${code}`), { code });
+    }
+    return handle;
+  });
+  const readlinkSpy = vi.spyOn(fs.promises, "readlink").mockImplementation(async (...args) => {
+    if (String(args[0]).startsWith("/proc/self/fd/")) {
+      throw Object.assign(new Error("proc unavailable"), { code: "ENOENT" });
+    }
+    return readlink(...(args as Parameters<typeof readlink>));
+  });
+  try {
+    const result = await tools.call("s3_get_object", {
+      bucket: "b",
+      key: "k",
+      saveToPath: path.join(parent, "out"),
+    });
+    expect(opened).toBeDefined();
+    expect(result.isError).toBe(true);
+    expect(parseErrorText(parseResult(result) as string)).toMatchObject({
+      status,
+      code: status === 400 ? "bad_request" : code,
+    });
+    expect(s3.requests).toEqual([]);
+    expect(opened?.fd).toBe(-1);
+    expect(fs.readdirSync(parent)).toEqual([]);
+  } finally {
+    openSpy.mockRestore();
+    readlinkSpy.mockRestore();
+  }
+});

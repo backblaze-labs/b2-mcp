@@ -308,7 +308,8 @@ async function assertOpenedInsideFileRoot(
     let realPath: string | undefined;
     try {
       realPath = fs.realpathSync(tempPath);
-    } catch {
+    } catch (err) {
+      if (!isPathRefusal(err)) throw err;
       realPath = undefined;
     }
     const onDisk = realPath ? await fs.promises.stat(realPath).catch(ignoreError) : undefined;
@@ -969,10 +970,7 @@ export function registerS3ObjectTools(
 
         const result = await getObject();
 
-        // Bound the inline path: without saveToPath the whole object is buffered
-        // and base64-copied into the response (and the model context), so this is
-        // a control-plane convenience for small payloads only. Reject before
-        // buffering and steer bulk reads to a presigned URL or saveToPath.
+        // Inline reads are buffered and base64-encoded; use presigned URLs or saveToPath for bulk.
         if (
           typeof result.contentLength !== "number" ||
           !Number.isFinite(result.contentLength) ||
