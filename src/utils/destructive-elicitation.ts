@@ -657,7 +657,10 @@ function lifecycleDeletionRuleCount(value: unknown): number | null {
     (rule) =>
       rule &&
       typeof rule === "object" &&
-      ("expiration" in rule || "noncurrentVersionExpiration" in rule),
+      ("expiration" in rule ||
+        "Expiration" in rule ||
+        "noncurrentVersionExpiration" in rule ||
+        "NoncurrentVersionExpiration" in rule),
   ).length;
 }
 

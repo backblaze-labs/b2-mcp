@@ -1,0 +1,3 @@
+kind: Fixed
+body: 'Count supported lifecycle field aliases consistently in destructive-approval prompts, including each deletion rule only once. Related to #469.'
+time: 2026-11-21T23:55:40.283194-03:00
