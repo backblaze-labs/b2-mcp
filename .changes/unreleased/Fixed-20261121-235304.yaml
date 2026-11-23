@@ -1,0 +1,3 @@
+kind: Fixed
+body: Avoid a sanitizer RangeError when a proxied array reports a length above the native array-length limit. Preserve intact redaction markers when configured secrets match their contents, while continuing to redact real secrets outside or across marker boundaries (#469).
+time: 2026-11-21T23:53:04.134838-03:00

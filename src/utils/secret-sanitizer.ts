@@ -342,6 +342,9 @@ export function sanitizeText(text: unknown, options: SanitizerOptions = {}): str
 /**
  * Redact exact secret values from text, including overlapping matches.
  *
+ * Existing literal redaction markers are preserved for matches wholly inside
+ * them. Matches crossing a marker boundary are still redacted.
+ *
  * @param text - Text to redact.
  * @param secrets - Exact secret values to replace.
  *
@@ -351,11 +354,20 @@ export function redactExactTextSecrets(text: string, secrets: readonly string[])
   const spans: TextSpan[] = [];
   for (const secret of new Set(secrets)) {
     if (!secret.trim() || secret === REDACTED) continue;
+    // The marker is constant-width. Precompute every matching offset so even a
+    // repeated character is checked without searching backwards through text.
+    const markerOffsets: number[] = [];
+    for (let offset = 0; offset <= REDACTED.length - secret.length; offset++) {
+      if (REDACTED.startsWith(secret, offset)) markerOffsets.push(offset);
+    }
     let start = 0;
     while (start < text.length) {
       const index = text.indexOf(secret, start);
       if (index === -1) break;
-      spans.push({ start: index, end: index + secret.length });
+      const insideMarker = markerOffsets.some(
+        (offset) => index >= offset && text.startsWith(REDACTED, index - offset),
+      );
+      if (!insideMarker) spans.push({ start: index, end: index + secret.length });
       start = index + 1;
     }
   }
@@ -492,7 +504,9 @@ function safeArrayLength(value: unknown[]): number {
   const descriptor = Object.getOwnPropertyDescriptor(value, "length");
   if (!descriptor || !("value" in descriptor)) return 0;
   const length = descriptor.value;
-  return Number.isSafeInteger(length) && length >= 0 ? length : 0;
+  // A Proxy may report a different value for this writable data property.
+  // Safe integers above the native array-length limit still throw on assignment.
+  return Number.isSafeInteger(length) && length >= 0 && length <= 0xffff_ffff ? length : 0;
 }
 
 function sanitizeDescriptorValue(
