@@ -215,7 +215,13 @@ function stringField(value: unknown, field: string): string | undefined {
 function unknownStatusLogFields(err: unknown): Record<string, string> {
   const reason = findInCauseChain(err, unknownStatusInterruption);
   const reasonName = stringField(reason, "name");
-  const reasonCode = stringField(reason, "code");
+  let reasonCode: string | undefined;
+  try {
+    reasonCode = findInCauseChain(reason, (cause) => stringField(cause, "code"));
+  } catch {
+    // Optional diagnostic access must not replace the already classified write outcome.
+    reasonCode = undefined;
+  }
   return {
     ...(reasonName ? { reasonName } : {}),
     ...(reasonCode ? { reasonCode } : {}),
