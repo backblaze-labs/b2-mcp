@@ -1,0 +1,59 @@
+name: Nightly review of existing code
+# Reviews one area of the repo each night with a read-only agent, then a separate step files
+# a single issue. The agent has no write access; only the last step can create an issue.
+# Finds old bugs early, instead of letting them surface as late findings on unrelated PRs.
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    inputs:
+      area:
+        description: 'Directory to review (default: rotate by day of year)'
+        required: false
+permissions:
+  contents: read
+  issues: write
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm install -g @anthropic-ai/claude-code
+      - name: Pick the area
+        id: area
+        env:
+          INPUT_AREA: ${{ inputs.area }}
+        run: |
+          if [ -n "$INPUT_AREA" ]; then
+            area="$INPUT_AREA"
+            [ -d "$area" ] && [[ "$area" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "bad area: $area"; exit 1; }
+          else
+            areas=$(git ls-tree -d --name-only HEAD | grep -vE '^(\.|node_modules$|vendor$)' | sort)
+            count=$(echo "$areas" | wc -l)
+            idx=$(( $(date +%j | sed 's/^0*//') % count + 1 ))
+            area=$(echo "$areas" | sed -n "${idx}p")
+          fi
+          echo "name=$area" >> "$GITHUB_OUTPUT"
+      - name: Review the area (read-only)
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          AREA: ${{ steps.area.outputs.name }}
+        run: |
+          claude -p "Review the code under $AREA/ for real bugs that exist today. Follow REVIEW.md and CLAUDE.md. For each finding give file and line, one sentence on what breaks, and tag it Important or Nit. Report at most 10 findings. Skip generated files and anything CI already enforces. Start with a count and say plainly if nothing needs fixing. Do not suggest style changes." \
+            --allowedTools "Read,Grep,Glob" \
+            --permission-mode dontAsk \
+            --output-format json > review.json
+          jq -r '.result' review.json > review.md
+      - name: File one issue if there are findings
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AREA: ${{ steps.area.outputs.name }}
+        run: |
+          if grep -qiE 'nothing needs fixing|^0 findings|no findings' review.md; then
+            echo "Nothing to report for $AREA"
+            exit 0
+          fi
+          gh issue create \
+            --title "[Bug] Nightly review of $AREA: findings $(date +%F)" \
+            --label bug \
+            --body-file review.md
