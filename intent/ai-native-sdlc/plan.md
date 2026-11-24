@@ -16,10 +16,11 @@ Issue: #528. Status: draft, for the engineer's review.
 - `evals/agent/`, `.github/workflows/agent-evals.yml` (new).
 - `ops/control-bands/`, `.github/workflows/control-bands.yml`,
   `tests/unit/control-bands.unit.test.ts` (new).
-- `.changie.yaml`, `.changes/`, `scripts/check-changelog.mjs`,
-  `.github/workflows/changelog.yml`, `tests/unit/check-changelog.unit.test.ts`
-  (new); `scripts/cut-changelog.mjs`, `tests/unit/release-scripts.unit.test.ts`,
-  `CHANGELOG.md` (generated), `package.json`, lockfiles.
+- Changie: `main` adopted it in #564 (`.changie.yaml`, `.changes/`,
+  `changie.yml`), so this change keeps that setup and adds only a
+  `.changes/unreleased/` fragment, the `changie` step of `pnpm run ci`, and the
+  empty-section guard in `scripts/extract-release-notes.mjs` with its test in
+  `tests/unit/release-scripts.unit.test.ts`.
 - `ops/review-metrics/`, `.github/workflows/review-metrics.yml`,
   `tests/unit/review-metrics.unit.test.ts` (new).
 - `CONTRIBUTING.md`, `RELEASE.md`, `.github/CODEOWNERS`,
@@ -34,7 +35,7 @@ Issue: #528. Status: draft, for the engineer's review.
 5. `REVIEW.md` and review lessons (R6).
 6. Agent evals with graders validated against real fixes (R7); control bands
    (R8). Independent of each other.
-7. changie: config, history split, fragments, release script, PR check.
+7. changie: rebase onto #564's setup; keep the fragment and the release-notes guard.
 8. Cross-references, `CODEOWNERS`, PR template; full gate (R9).
 
 ## Risks
@@ -62,8 +63,8 @@ Issue: #528. Status: draft, for the engineer's review.
 - R7: `evals/agent/check.sh` passes on each real fix and fails on its parent
   commit (and on the half-fix for the markdown-it eval).
 - R8: `tests/unit/control-bands.unit.test.ts`; detector run on live data.
-- changie: `tests/unit/release-scripts.unit.test.ts`,
-  `tests/unit/check-changelog.unit.test.ts`; `changie merge` reproduces history.
+- changie: `tests/unit/release-scripts.unit.test.ts`; `pnpm run test:changie`
+  (`changie merge` reproduces history).
 - R9: `pnpm run test:package`, `check:package-budget`; required checks unchanged
   in `.github/branch-protection-main.json`.
 - All: `pnpm run ci` passes.

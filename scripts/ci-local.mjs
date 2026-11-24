@@ -2,7 +2,8 @@
 
 /* global console, process */
 
-// Local mirror of the required PR jobs in .github/workflows/test.yml.
+// Local mirror of the required PR jobs in .github/workflows/test.yml, plus the
+// Changie check from .github/workflows/changie.yml.
 // tests/contract/ci-local.contract.test.ts fails when a workflow command is
 // missing here, so keep both files in the same PR.
 
@@ -25,7 +26,7 @@ function zizmorImage() {
 
 /**
  * Ordered local CI steps. `job` is the required check the step mirrors.
- * `requires: "docker"` steps are skipped, and reported, when Docker is unavailable.
+ * Steps with `requires` are skipped, and reported, when that tool is unavailable.
  */
 export const ciLocalSteps = [
   { id: "install", job: "all", commands: [["pnpm", "install", "--frozen-lockfile"]] },
@@ -169,9 +170,10 @@ export const ciLocalSteps = [
     commands: [["pnpm", "run", "test:slow", "--", "--maxWorkers=1"]],
   },
   {
-    id: "changelog",
-    job: "changelog",
-    commands: [["pnpm", "run", "changelog:check"]],
+    id: "changie",
+    job: "changie",
+    requires: "changie",
+    commands: [["pnpm", "run", "test:changie"]],
   },
   {
     id: "cross-platform",
@@ -226,9 +228,11 @@ function parseArgs(argv) {
   return options;
 }
 
-function hasDocker() {
-  const result = spawnSync("docker", ["info"], { stdio: "ignore" });
-  return result.status === 0;
+const toolProbes = { docker: ["docker", ["info"]], changie: ["changie", ["--version"]] };
+
+function hasTool(tool) {
+  const [command, args] = toolProbes[tool];
+  return spawnSync(command, args, { stdio: "ignore" }).status === 0;
 }
 
 /**
@@ -301,11 +305,14 @@ function main() {
   steps = steps.filter((step) => !options.skip.has(step.id));
 
   mkdirSync(logDir, { recursive: true });
-  const docker = steps.some((step) => step.requires === "docker") && hasDocker();
+  const available = new Map();
   const results = [];
   for (const step of steps) {
-    if (step.requires === "docker" && !docker) {
-      console.log(`SKIP ${step.id} (Docker is not available; CI still runs "${step.job}")`);
+    if (step.requires && !available.has(step.requires)) {
+      available.set(step.requires, hasTool(step.requires));
+    }
+    if (step.requires && !available.get(step.requires)) {
+      console.log(`SKIP ${step.id} (${step.requires} is not available; CI still runs "${step.job}")`);
       results.push({ step, outcome: "skip" });
       continue;
     }

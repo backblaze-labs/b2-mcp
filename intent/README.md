@@ -96,7 +96,7 @@ Changes to this posture start as an intent; see
 | Policy, workflow, release and hook files change only with a human in the loop | `PreToolUse` hook [`.claude/hooks/protected-paths.mjs`](../.claude/hooks/protected-paths.mjs), backed by `CODEOWNERS` |
 | Agent configuration keeps working | Agent evals in [`evals/agent/`](../evals/agent/README.md), nightly and on dispatch |
 | CI health regressions become work | Control bands in [`ops/control-bands/`](../ops/control-bands/README.md) open a draft intent on a breach |
-| User-visible changes have a changelog entry | `changelog` PR check (`pnpm run changelog:check`) over changie fragments in `.changes/` |
+| `CHANGELOG.md` stays reproducible from the Changie fragments in `.changes/` | `Changie integration` workflow (`pnpm run test:changie`), also the `changie` step of `pnpm run ci`; the PR template asks for a fragment |
 | Human time per change and review rounds are visible | Weekly [`ops/review-metrics/`](../ops/review-metrics/README.md) job summary |
 | Recurring review findings are not repeated | [`docs/review-lessons.md`](../docs/review-lessons.md), read through `AGENTS.md` and `REVIEW.md` |
 

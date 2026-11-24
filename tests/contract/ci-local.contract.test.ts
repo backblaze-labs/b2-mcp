@@ -78,19 +78,22 @@ describe("pnpm run ci mirrors .github/workflows/test.yml", () => {
     const required = branchProtection.required_status_checks.contexts;
     const mirrored = new Set(ciLocalSteps.map((step) => step.job));
     for (const step of ciLocalSteps) {
-      if (["all", "runtime policy", "changelog"].includes(step.job)) continue;
+      if (["all", "runtime policy", "changie"].includes(step.job)) continue;
       expect(required).toContain(step.job);
     }
     expect(required.filter((check) => !mirrored.has(check))).toEqual(["runtime engine floor"]);
   });
 
-  it("runs the changelog check that the changelog workflow runs", async () => {
+  it("runs the Changie integration test that the changie workflow runs", async () => {
     const { ciLocalSteps } = await loadCiLocal();
-    const changelogWorkflow = readFileSync(join(root, ".github/workflows/changelog.yml"), "utf8");
-    expect(changelogWorkflow).toContain("pnpm run changelog:check");
-    expect(ciLocalSteps.find((step) => step.id === "changelog")?.commands).toEqual([
-      ["pnpm", "run", "changelog:check"],
-    ]);
+    const changieWorkflow = readFileSync(join(root, ".github/workflows/changie.yml"), "utf8");
+    const command = "node --test tests/release/changie.integration.test.mjs";
+    expect(changieWorkflow).toContain(command);
+    expect(packageJson.scripts["test:changie"]).toBe(command);
+    expect(ciLocalSteps.find((step) => step.id === "changie")).toMatchObject({
+      requires: "changie",
+      commands: [["pnpm", "run", "test:changie"]],
+    });
   });
 
   it("restores an existing .vercel directory after the Vercel step, even when it fails", async () => {
