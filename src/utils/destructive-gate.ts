@@ -120,7 +120,7 @@ export const DESTRUCTIVE_TOOL_NAMES = Object.keys(DETECTORS).sort();
  * @returns `true` when the tool may require destructive confirmation.
  */
 export function isDestructiveTool(toolName: string): boolean {
-  return toolName in DETECTORS;
+  return Object.prototype.hasOwnProperty.call(DETECTORS, toolName);
 }
 
 /**
@@ -136,7 +136,7 @@ export function destructiveEffect(
   toolName: string,
   args: Record<string, unknown> = {},
 ): string | null {
-  return DETECTORS[toolName]?.(args) ?? null;
+  return isDestructiveTool(toolName) ? DETECTORS[toolName](args) : null;
 }
 
 interface DestructiveConsent {
