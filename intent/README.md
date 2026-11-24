@@ -16,6 +16,11 @@ Each change gets a folder: `intent/<change-slug>/` (lowercase kebab-case). The
 GitHub issue stays the tracking record: put the issue number in each artifact
 header and link the folder from the issue.
 
+Work enters through the issue forms in
+[`.github/ISSUE_TEMPLATE/`](../.github/ISSUE_TEMPLATE/) (`sdlc-issue-templates`).
+A feature request seeds `intent.md`; a bug report goes straight to a failing
+test; a task needs `plan.md` only when it is not trivial.
+
 | Artifact | Written by | Approved by | Skill |
 | --- | --- | --- | --- |
 | `intent.md` | Originator + agent | Product owner (`@goanpeca`) | `sdlc-intent` |
@@ -59,6 +64,8 @@ scope). A spec that changes one of them updates it in the same PR.
   of work citing requirement numbers, risks, proof). Proof lines name the test
   file or `pnpm` command that covers each requirement.
 - Incident intents: the template in `.claude/skills/sdlc-close-the-loop/SKILL.md`.
+- Incident reviews: `.claude/skills/sdlc-close-the-loop/assets/incident-review.md`,
+  kept in `docs/incident-reviews/` (see [`REVIEW.md`](../REVIEW.md#after-a-missed-bug)).
 
 Unresolved concerns stay in `spec.md` with an owner. Deferred work becomes a new
 `intent.md`, not a tracker row.
@@ -70,8 +77,9 @@ b2-mcp sits at the human-approval end of the playbook's gate dial:
 - Every PR to `main` needs a code-owner approval, the required status checks and
   resolved conversations
   ([`branch-protection-main.json`](../.github/branch-protection-main.json)).
-- The agent that wrote a change never approves or merges it. The person who
-  directed the agent owns the PR.
+- The agent that wrote a change never approves or merges it, and an agent's
+  approval never fills the required human approval. Approvals cover one commit:
+  a new push dismisses them. The person who directed the agent owns the PR.
 - Agents may draft, self-review, fix review comments and push new commits.
   Opening, merging, force-pushing and releasing stay with a human.
 

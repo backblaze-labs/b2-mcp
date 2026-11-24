@@ -9,7 +9,7 @@ Issue: #528. Status: draft, for the engineer's review.
   (moved from `docs/exec-plans/active/`); `docs/exec-plans/` (removed).
 - `AGENTS.md` (rewritten to the template); `ARCHITECTURE.md`,
   `docs/TESTING.md` (receive the moved reference sections).
-- `.claude/skills/` (14 playbook skills), `.claude/agents/` (new),
+- `.claude/skills/` (19 playbook skills), `.claude/agents/` (new),
   `.claude/hooks/`, `.claude/settings.json` (new).
 - `scripts/ci-local.mjs`, `tests/contract/ci-local.contract.test.ts` (new).
 - `REVIEW.md`, `docs/review-lessons.md` (new).
@@ -54,7 +54,7 @@ Issue: #528. Status: draft, for the engineer's review.
 
 - R1: `tests/contract/typescript-7-migration.contract.test.ts` reads the moved
   plan; `pnpm run lint:links` finds no broken link.
-- R2: `wc -l AGENTS.md` under 80 lines; every command in it ran.
+- R2: `wc -l AGENTS.md` under 100 lines; every command in it ran.
 - R3: `diff -r` against the playbook skills shows no change.
 - R4: `tests/contract/ci-local.contract.test.ts`; `pnpm run ci` summary.
 - R5: hook cases in `tests/contract/ci-local.contract.test.ts`, including

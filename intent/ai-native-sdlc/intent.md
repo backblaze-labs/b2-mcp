@@ -15,7 +15,7 @@ agent configuration, and nothing that turns CI health regressions into new work.
 
 The repository follows the AI-native SDLC playbook in full: the `intent/` chain,
 the playbook's `CLAUDE.md` template (kept in `AGENTS.md`, which `CLAUDE.md`
-imports), all fourteen playbook skills, subagents, a local CI mirror, hooks,
+imports), all the playbook skills, subagents, a local CI mirror, hooks,
 `REVIEW.md`, agent evals and control bands. Reviewers spend their attention on
 intent and risk instead of re-flagging the same mistakes.
 

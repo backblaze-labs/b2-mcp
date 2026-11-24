@@ -2,7 +2,10 @@
 
 For human reviewers and review agents. Approval always comes from a code owner
 in [`.github/CODEOWNERS`](.github/CODEOWNERS). An agent's findings never approve
-or block a PR on their own, and the agent that wrote a change never reviews it.
+or block a PR on their own, the agent that wrote a change never reviews it, and
+an agent's approval never fills the required human approval. Approvals belong
+to a commit: a new push dismisses them
+([`branch-protection-main.json`](.github/branch-protection-main.json)).
 
 ## What Failure Looks Like Here
 
@@ -58,7 +61,10 @@ does it break something else? A bug fix must address the root cause; ask for the
 failing test that shows it.
 
 Tag each finding with its pass. Security runs as its own pass, and its open
-Important findings block merge like any other.
+Important findings block merge like any other. Prefer several independent
+passes over one long one, and verify before posting: check each candidate
+finding in a fresh context (the `verifier` subagent in `.claude/agents/`) and
+post only the ones that hold up.
 
 - **Bugs**: logic errors, unhandled rejections, abort and timeout paths,
   circuit-breaker accounting, retry budgets, retries of non-idempotent writes,
@@ -157,6 +163,9 @@ merge.
 ## After A Missed Bug
 
 When a bug ships or a reviewer misses one, ask which layer should have caught it
-and what the agent lacked. Encode the fix in `AGENTS.md`,
-`docs/review-lessons.md`, a skill, a hook, a test, or an agent eval in
-`evals/agent/`.
+and what the agent lacked. Write the review with the playbook template
+(`.claude/skills/sdlc-close-the-loop/assets/incident-review.md`) and keep it in
+`docs/incident-reviews/`; it reviews the system, not a person. Encode the fix in
+`AGENTS.md`, `docs/review-lessons.md`, a skill, a hook, a test, or an agent eval
+in `evals/agent/`, and add the missed bug to the reviewer's eval set
+(`sdlc-review-tuning`). A review with no encoded change is not finished.

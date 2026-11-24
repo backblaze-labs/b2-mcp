@@ -27,7 +27,7 @@ A band is a range around a metric's normal level: the mean of the last 30 days o
    claude -p "Diagnose the breach in breach.json. Write intent.md." \
      --allowedTools "Read,Grep,Bash(gh run view *)" --permission-mode dontAsk
    ```
-5. The agent writes `intent/<slug>/intent.md` in the Stage 1 format (below) and commits or opens a PR. From there the finding flows through the normal stages.
+5. The agent writes `intent/<slug>/intent.md` in the Stage 1 format (below) and commits or opens a PR. If the team triages in the issue tracker, it also files an issue with the repo's bug form (something broken) or feature form (a proposed improvement), linking the `intent.md` (`sdlc-issue-templates`). From there the finding flows through the normal stages.
 6. The service owner or on-call engineer triages the queue: fix now, schedule, or dismiss. Dismissals tune the bands.
 7. When a fix ships, add an eval for the incident (`sdlc-evals`) so the class of issue is guarded against going forward.
 
@@ -62,6 +62,14 @@ Author: monitoring agent (<metric>, <tier>). Status: draft.
 - Log every invocation, finding and triage decision with timestamps.
 - Verify recovery before closing: confirm the metric is back at baseline and say so in the thread or intent.
 - Claims must cite evidence (readings, release SHA, log lines); do not speculate about root cause as fact.
+
+## Incident reviews
+
+After every incident, fill in `assets/incident-review.md`. It is a review of the system, not of a person: a timeline, impact and detection, a table of the seven review layers marked caught, should have, or n/a, whether the risk tier was right, and the encoded change that follows (a rule, lint or hook, skill update, tier or path change, eval, rollback or flag, or a new band), each with an owner and a date. A review with no encoded change is not finished. Keep the files in `docs/incident-reviews/`, and run `sdlc-review-audit` to see which layer was missing.
+
+## A band on review itself: circuit breakers
+
+The same mechanism can watch the review process. Put a band on the revert rate and the incident rate of agent-written changes. On a breach, the pre-approved response is to tighten approval: raise each risk tier by one, or send the affected area to the next tier up, until the metric is back at baseline (`sdlc-risk-tiers`). This is the circuit breaker the Claude Code team says it still lacks (`reference/code-review-at-anthropic.md`). Each breach also asks which review layer should have caught the issue, and produces an `intent.md` or an eval for the gap.
 
 ## Other triggers: chat and tickets
 

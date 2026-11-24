@@ -109,10 +109,8 @@ librsvg
 vccf
 mchw
 changie
-cicd
 srcs
 stdev
-unforgeable
 misroute
 fsmonitor
 pnpmfile

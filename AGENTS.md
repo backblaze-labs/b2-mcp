@@ -4,6 +4,16 @@ Backblaze B2 MCP server (TypeScript, pnpm, Vitest). This is the canonical agent
 guidance: Codex reads it natively and `CLAUDE.md` imports it, so where the
 playbook skills in `.claude/skills/` say `CLAUDE.md`, they mean this file.
 
+## Goals and non-goals
+
+- Goal: a customer-hosted MCP server that gives a possibly prompt-injected
+  model only the B2 access its key and the operator's policy allow, over stdio
+  and Streamable HTTP.
+- Non-goals: a Backblaze-hosted multi-tenant service, moving bulk object data
+  through the HTTP server (presigned URLs carry it), returning durable secrets
+  in default tool results, and legacy HTTP+SSE. Full list:
+  `docs/product-specs/v1-scope.md`.
+
 ## Commands
 
 - Build: `pnpm run build` (tsc to `dist/`; excludes `tests/`)

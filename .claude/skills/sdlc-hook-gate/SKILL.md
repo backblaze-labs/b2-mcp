@@ -40,6 +40,7 @@ Governance is enforced as the AI acts. A hook is a script that runs before (or a
 - **Approvals must be unforgeable by the agent.** The gate reads records (tickets, approvals) the agent has no way to write to. Say so in the script comments and check it.
 - **Non-interactive runs cannot answer an `ask`**, so Claude Code denies it. Where a pipeline legitimately acts (e.g. staging release from `main` after an approved merge), allow it explicitly on a pipeline signal; know that an engineer can fake the signal locally, which only skips a prompt they would have answered themselves.
 - **Build-phase hooks stay fast and file-scoped.** `PostToolUse` hooks that exit 2 return the message to Claude to fix the edit; they cannot undo it, so back them with a required CI check on the PR for changes that bypass `Edit|Write` (a shell command rewriting a file).
+- **Agent approvals never stand in for human approvals.** A gate that requires a person reads a human's recorded approval, and nothing an agent can write satisfies it. Approvals attach to a commit: a later push, especially an agent push or a hand-resolved merge, needs re-approval (`sdlc-risk-tiers`).
 - **Gates that need a person** (asks, approvals) belong at deploy, not mid-build, where they would put a human on the critical path of every parallel session.
 
 ## Testing a hook

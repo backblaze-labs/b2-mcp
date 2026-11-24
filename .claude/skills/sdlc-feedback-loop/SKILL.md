@@ -31,6 +31,17 @@ An agent fixing code must not be able to weaken the check on that code. Either:
 
 When finishing, paste the literal output of the build, test and lint commands (or the screenshot diff). Evidence comes from the toolchain, not from the agent's summary.
 
+## Review before the PR
+
+Layered review starts before the PR exists. Before opening it:
+
+1. Have the session show output (tests, build, screenshot compare), not a claim of success.
+2. Run a bug-hunt pass, a simplify pass and an end-to-end behavior check, as skills if you have them (`/code-review`, `/simplify`, your own).
+3. Have a subagent review the diff in a fresh context (`sdlc-subagents`), so the verdict is not colored by the assumptions that produced the code. For UI changes, check the result against the design guidelines.
+4. When a pass finds the same kind of problem repeatedly, fix it at the source: a rule in `CLAUDE.md`, a lint, a skill. Do not rely on repeating the comment on each PR.
+
+Giving the agent something it can run is the largest single factor in result quality, according to the Claude Code team (`reference/code-review-at-anthropic.md`).
+
 ## Governance
 
 Verification before "done" and the block on editing tests are enforced as hooks where the organization wants them guaranteed. Evidence lives in the session transcript and in the PR's check run; the code owner reviews intent and risk because mechanical evidence is already attached.

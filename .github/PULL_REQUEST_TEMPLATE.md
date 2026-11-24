@@ -20,6 +20,12 @@
 
 -
 
+## Testing
+
+<!-- What was run and what it showed: the `pnpm run ci` summary line, and any live B2 or manual check. -->
+
+-
+
 ## Risk
 
 <!-- What could break, for whom, and the review depth from REVIEW.md (Quick, Standard, Deep). -->

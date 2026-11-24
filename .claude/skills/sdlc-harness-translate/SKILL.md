@@ -48,7 +48,7 @@ The playbook organizes a process (artifacts, approvals, governance). Harness eng
 - Exec plan -> `plan.md`: add steps citing R-numbers and a Proof section. Keep the decision log as a section.
 - `ARCHITECTURE.md` + layer linter -> `CLAUDE.md` Architecture section, plus a `PostToolUse` hook running the linter on the changed file and the same script as a required CI check (see `sdlc-policy-skill`, `sdlc-hook-gate`).
 - Taste lints -> hooks whose stderr message tells Claude how to fix the violation.
-- GC / doc-gardening agents -> a scheduled `claude -p` job whose permitted route is opening a PR (see `sdlc-cicd`, `sdlc-close-the-loop`). Use a drift count as the metric if you want bands.
+- GC / doc-gardening agents -> a scheduled `claude -p` job whose permitted route is opening a PR (see `sdlc-cicd`, `sdlc-close-the-loop`). Use a drift count as the metric if you want bands. A starting point is `sdlc-review-tuning/assets/nightly-review.yml`, which scans one area a night read-only and files an issue; change its last step to open a PR for fixes the owners accept.
 - `QUALITY_SCORE.md` stays. Add leading and lagging indicators per play alongside it.
 
 ## Gaps to flag as stubs

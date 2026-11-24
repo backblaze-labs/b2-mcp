@@ -50,6 +50,23 @@ PR review (`sdlc-pr-review`) and approval hooks (`sdlc-hook-gate`) exist first: 
    Keep `release` off the production allowlist so the hook's `allow` is the only way through; then production fails closed if the hook fails to run. `rollback` stays allowed because it is a runbook approved in advance.
 7. **Rehearse rollback**: a single command the agent can run, exercised regularly in staging. `sdlc-close-the-loop` calls it automatically when a band breaches, so it must be proven first.
 
+## Merge, release and rollback layers
+
+Reversibility is what makes lighter human review acceptable. Put these around the agent's PRs:
+
+- **Merge queue.** Re-run every check against current main with the change applied, so PRs that pass alone cannot combine into a broken main.
+- **Feature flags.** New behavior ships behind a flag, turned on for employees first. Heavy internal use often surfaces regressions before customers see them. Flags can be turned off without a deploy.
+- **Staged release.** Publish to a `latest` channel first and let `stable` trail it.
+- **One-step rollback**, rehearsed (step 7 above).
+- **On-call and incident review.** A rotation with a standing question after every incident: which layer should have caught this? Fix that layer, in a rule, a check, a tier or an eval.
+- **PR template** with Testing, Risk and How to revert, and required checks on every platform you ship.
+- Detection still leans on the author, on-call and revert and incident dashboards. Put a control band on revert and incident rates and use a breach to tighten approval tiers (`sdlc-close-the-loop`, `sdlc-risk-tiers`).
+
+- **Nightly review of existing code**: `sdlc-review-tuning/assets/nightly-review.yml` reviews one area a night with a read-only agent and files one issue, to catch old bugs early.
+- **Check the setup**: run `sdlc-review-audit` to see which of these layers a repo is missing.
+
+Source: `reference/code-review-at-anthropic.md` in the playbook folder.
+
 ## Managed settings interplay
 
 With `allowManagedHooksOnly`, the gate hook must live in managed settings; with `allowManagedMcpServersOnly`, the deployment servers must be on the managed allowlist.

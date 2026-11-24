@@ -12,12 +12,14 @@ Skills applied: `ai-native-sdlc`, `sdlc-claude-md`, `sdlc-policy-skill`,
 - R1. Every larger change lives in `intent/<slug>/` as `intent.md`, `spec.md`
   and `plan.md`; `intent/README.md` says when the chain applies and who accepts
   each artifact. Per-change records in `docs/exec-plans/` move into `intent/`.
-- R2. `AGENTS.md` follows the playbook template (Commands, Conventions,
-  Architecture, Things Claude gets wrong, Verifying your work), fits on one
-  page, and lists only commands that run; `CLAUDE.md` imports it. Reference
-  material moves to `ARCHITECTURE.md` and `docs/TESTING.md` without loss.
-- R3. All fourteen playbook skills ship unmodified in `.claude/skills/`, and the
-  `verifier`, `code-simplifier` and `researcher` subagents in `.claude/agents/`.
+- R2. `AGENTS.md` follows the playbook template (Goals and non-goals,
+  Commands, Conventions, Architecture, Things Claude gets wrong, Verifying your
+  work), fits on one page, and lists only commands that run; `CLAUDE.md`
+  imports it. Reference material moves to `ARCHITECTURE.md` and
+  `docs/TESTING.md` without loss.
+- R3. All the playbook skills (nineteen as of the November 2026 sync) ship
+  unmodified in `.claude/skills/`, and the `verifier`, `code-simplifier` and
+  `researcher` subagents in `.claude/agents/`.
 - R4. `pnpm run ci` runs every required PR job of `test.yml` that can run
   locally, reports skipped Docker steps, and a contract test fails when a
   workflow command is neither mirrored nor listed as CI-only.

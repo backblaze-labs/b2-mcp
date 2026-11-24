@@ -27,8 +27,9 @@ Today:
   catches more or fewer real bugs.
 - PR descriptions drift from the final diff (12 of the 80 PRs), and no check
   notices.
-- Every PR edits `CHANGELOG.md` `[Unreleased]`, so parallel PRs conflict, and no
-  check confirms a user-visible change has an entry.
+- Changie fragments (#564) ended the `CHANGELOG.md` conflicts, but nothing
+  checks that a user-visible change adds a fragment; the PR template asks for
+  one or a reason.
 
 The PR that closes #528 covers what needs no settings change: `REVIEW.md`,
 `docs/review-lessons.md`, Claude Code hooks, agent evals and `pnpm run ci`.
@@ -58,10 +59,9 @@ releases:
 4. **PR-description drift check.** An automated reviewer compares the PR body
    with the final diff before merge (scope, numbers, "no behavior change"
    claims).
-5. **Changelog entries without conflicts.** Either per-PR changelog fragments
-   assembled at release time (the release scripts that parse `CHANGELOG.md`
-   would change), or a required check that user-visible changes touch
-   `[Unreleased]`, with a `skip-changelog` label to opt out.
+5. **Changelog entries that are not forgotten.** Fragments landed in #564; a
+   check could require one for user-visible changes, with the PR description's
+   reason (or a label) as the opt-out.
 6. **Past bugs become reviewer evals.** Build a set from bugs reviewers caught or
    that shipped, confirmed by the code owner, and score the reviewer against it
    whenever `REVIEW.md`, `AGENTS.md` or the review model changes.
@@ -88,6 +88,14 @@ releases:
     (`ops/control-bands/`), tighten the tiers automatically until they recover.
 14. **Staged releases.** Ship risky changes as a prerelease on the `next`
     dist-tag before `latest`, and keep one-step rollback (`RELEASE.md`).
+
+The playbook skills ship starting points for several items, to adapt rather
+than adopt as is: `sdlc-risk-tiers` (`risk-tiers.json`, `classify.py`,
+`review_metrics.py`, `CODEOWNERS.sample`) for items 1, 7 and 8;
+`sdlc-review-tuning` (`score_reviewer.py`, `nightly-review.yml`) for items 6,
+11 and 12; `sdlc-close-the-loop` (incident reviews, circuit breakers) for item
+13; and `sdlc-review-audit` (`audit.sh`) to list which layers the repository
+still lacks.
 
 ## Affected users and systems
 
@@ -117,7 +125,8 @@ releases:
 - Do the tier paths match where the risk is? Which paths always need two people?
 - Keep the current automated reviewer, replace it, or run both during a trial?
   (`@goanpeca`)
-- Changelog fragments or a required changelog check? (`@goanpeca`)
+- Should a check require a Changie fragment for user-visible changes, or is
+  the PR template item enough? (`@goanpeca`)
 - Is a merge queue worth it at the current PR volume? (repository admin)
 - Should the reviewer eval set live in `evals/agent/` next to the configuration
   evals? (`@sophiecarreras`)

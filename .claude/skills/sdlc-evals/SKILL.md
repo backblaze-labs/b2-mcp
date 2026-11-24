@@ -52,6 +52,10 @@ Prefer behavior checks (run the code, inspect logs or output) over text greps, s
 
 A failure should name the eval, the failing check and the first lines of output. A typical true positive: trimming `CLAUDE.md` drops a rule that a skill and a hook only partly backed up, and the behavior eval catches it. Restore the rule before merging.
 
+## Evals for the reviewer itself
+
+The AI reviewer is part of the agent's configuration, so it gets an eval set too. Build it from past PRs that caused incidents, with their fixes and reverts; have engineers who know each area confirm every bug and where it lives. Run the reviewer on that set daily and before any change to its prompts, tools, model or `REVIEW.md`, and drop changes that do not improve the score. Add a set of known-clean PRs to measure false positives. The full method is in `sdlc-review-tuning`.
+
 ## Governance and measures
 
 The pass-rate threshold is a merge check; run logs make results comparable over time; the team that owns the configuration approves changes.

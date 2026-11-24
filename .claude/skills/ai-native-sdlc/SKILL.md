@@ -24,11 +24,13 @@ Each change gets a folder in the repo: `intent/<change-slug>/`.
 
 Look in `intent/<slug>/` and the repo, then route:
 
-1. No folder, only an idea or a ticket: `sdlc-intent`.
+0. First, in any repo you are about to work in: check that `.github/ISSUE_TEMPLATE/` has feature, bug and task forms and that a PR template exists. If not, run `sdlc-issue-templates` before anything else.
+1. No folder, only an idea or a ticket: `sdlc-intent` (a feature issue seeds it; a bug issue goes straight to a failing test via `sdlc-feedback-loop`; a task issue needs a plan only if it is non-trivial).
 2. `intent.md` approved, no `spec.md`: `sdlc-spec`.
 3. `spec.md` approved, no `plan.md`: `sdlc-plan`.
 4. `plan.md` approved: build. Use `sdlc-feedback-loop` so the session verifies its own work, and `sdlc-subagents` to parallelise.
-5. Diff ready: `sdlc-pr-review`.
+5. Diff ready: `sdlc-pr-review`. Deciding how many humans must approve: `sdlc-risk-tiers`. Reviewer too noisy, missing bugs or looping: `sdlc-review-tuning`.
+   About to change a module you do not know, or onboarding someone: `sdlc-explain-module`. Rolling the workflow out to a repo, or after an incident: `sdlc-review-audit`. Team habits behind light review: `reference/working-agreements.md`.
 6. Touching releases, migrations, protected paths: `sdlc-hook-gate`. Wiring any of it into pipelines: `sdlc-cicd`.
 7. Something in production breached a band or an incident arrived: `sdlc-close-the-loop`, which writes a new `intent.md` and restarts at step 1.
 
@@ -51,8 +53,9 @@ If a prerequisite is missing, say so and offer to run that skill first instead o
 
 ## Ground rules for every stage
 
+- Every repo always has issue templates for features or enhancements, bugs and tasks, plus a PR template (`sdlc-issue-templates`). Work enters through them, so a repo without them is not ready for the workflow.
 - Put the artifact in the repo and name its author. Git history is the audit record.
 - One source of truth per artifact. If Jira, ServiceNow or a requirements tool already holds the record, either declare it authoritative and write outcomes back through MCP, or link both ways (record ID in the file, commit SHA in the record).
 - Advisory controls (skills, `CLAUDE.md`) get a deterministic backstop where the rule must always hold: a hook at the edit, a required check at the PR.
-- A human makes each accept or reject decision that moves an artifact to the next stage. Never mark one approved on their behalf.
+- A human makes each accept or reject decision that moves an artifact to the next stage. Never mark one approved on their behalf. An agent's approval never fills a required human slot, and approvals are per commit.
 - Every play has a leading and a lagging indicator. Name them when you set the play up so the team can tell whether it worked.
