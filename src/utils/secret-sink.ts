@@ -1257,12 +1257,8 @@ function durableSecretExactValues(value: unknown): string[] {
     if (node === null || typeof node !== "object") return;
     if (seen.has(node)) return;
     seen.add(node);
-    let descriptors: Array<[string, PropertyDescriptor]>;
-    try {
-      descriptors = Object.entries(Object.getOwnPropertyDescriptors(node));
-    } catch {
-      return;
-    }
+    // Let inspection failure reach the outer fail-closed logging boundary.
+    const descriptors = Object.entries(Object.getOwnPropertyDescriptors(node));
     for (const [key, descriptor] of descriptors) {
       if (!("value" in descriptor)) continue;
       const fieldValue = descriptor.value;
