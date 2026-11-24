@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,9 +14,9 @@ beforeEach(() => {
 
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
-function manifest(targets: unknown) {
+function manifest(targets: unknown, name = "http-oauth") {
   writeFileSync(
-    join(root, "mutation-scopes/http-oauth.json"),
+    join(root, `mutation-scopes/${name}.json`),
     JSON.stringify({ description: "Public request boundary", targets }),
   );
 }
@@ -103,3 +103,20 @@ it.each([
 it("rejects unknown profile names before reading a manifest", () => {
   expect(() => profile("../outside")).toThrow(/Unknown mutation profile/);
 });
+
+it.each(["jwks-cache", "ledger-lock"])(
+  "isolates the %s failure-recovery profile from existing reports",
+  (name) => {
+    writeFileSync(join(root, "src/boundary.ts"), "export function recover() { return true; }\n");
+    manifest([{ file: "src/boundary.ts", declarations: ["recover"] }], name);
+    expect(profile(name)).toMatchObject({
+      mutate: ["src/boundary.ts:1-1"],
+      jsonReporter: { fileName: `reports/mutation/${name}/mutation.json` },
+      htmlReporter: { fileName: `reports/mutation/${name}/mutation.html` },
+      tempDirName: `.stryker-tmp/${name}`,
+      thresholds: { break: null },
+      ignoreStatic: true,
+      timeoutMS: 60_000,
+    });
+  },
+);

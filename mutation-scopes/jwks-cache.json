@@ -1,0 +1,31 @@
+{
+  "description": "JWKS retrieval/retry/circuit, key selection, rotation and shared JWKS/token cache lifecycle through the public JWT verifier. Configuration loading, JOSE decoding, HTTP handlers and introspection transport remain outside this bounded profile. Shared dependency/cache helpers are included.",
+  "targets": [
+    {
+      "file": "src/oauth-resource-server.ts",
+      "declarations": [
+        "logOAuthDependencyFailure",
+        "retryAfterSeconds",
+        "assertOAuthDependencyCircuitClosed",
+        "noteOAuthDependencySuccess",
+        "noteOAuthDependencyFailure",
+        "isRetryableOAuthDependencyError",
+        "oauthDependencyRetryDelay",
+        "runOAuthDependencyWithRetry",
+        "configCacheKey",
+        "cacheKey",
+        "cloneAuthInfo",
+        "cachedAuthInfo",
+        "purgeExpiredUnknownKidEntries",
+        "trimUnknownKidCache",
+        "rememberAuthInfo",
+        "jwksCacheKey",
+        "jwksTtlSeconds",
+        "asJwksDocument",
+        "jwkMatchesHeader",
+        "verifyJwtWithJwk",
+        "OAuthJwtVerifier"
+      ]
+    }
+  ]
+}
