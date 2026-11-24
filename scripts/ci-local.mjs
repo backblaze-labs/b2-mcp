@@ -312,7 +312,9 @@ function main() {
       available.set(step.requires, hasTool(step.requires));
     }
     if (step.requires && !available.get(step.requires)) {
-      console.log(`SKIP ${step.id} (${step.requires} is not available; CI still runs "${step.job}")`);
+      console.log(
+        `SKIP ${step.id} (${step.requires} is not available; CI still runs "${step.job}")`,
+      );
       results.push({ step, outcome: "skip" });
       continue;
     }
