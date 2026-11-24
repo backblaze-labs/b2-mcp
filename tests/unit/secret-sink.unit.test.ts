@@ -1953,31 +1953,23 @@ describe("secret sink file writer", () => {
     const file = join(dir, "secrets.jsonl");
     const appendLock = appendLockPath(file);
     writeFileSync(file, "", { mode: 0o600 });
-    writeFileSync(
-      appendLock,
-      `${JSON.stringify({
-        ts: "2026-08-18T12:00:00Z",
-        tool: "b2_create_key",
-        pid: process.pid,
-        token: "live-lock",
-        status: "appending",
-      })}\n`,
-      { mode: 0o600 },
-    );
+    const ownerBytes = `${JSON.stringify({
+      ts: "2026-08-18T12:00:00Z",
+      tool: "b2_create_key",
+      pid: process.pid,
+      token: "live-lock",
+      status: "appending",
+    })}\n`;
+    writeFileSync(appendLock, ownerBytes, { mode: 0o600 });
     const now = Date.now();
-    const unlink = secretSinkFileOpsForTests.unlinkSync;
-    let firstReclaimAttemptFinished = false;
-    vi.spyOn(secretSinkFileOpsForTests, "unlinkSync").mockImplementation((path) => {
-      if (String(path) === appendReclaimLockPath(file)) {
-        firstReclaimAttemptFinished = true;
-      }
-      return unlink(path);
+    let currentTime = now;
+    let waited = false;
+    vi.spyOn(Date, "now").mockImplementation(() => currentTime);
+    vi.spyOn(Atomics, "wait").mockImplementation(() => {
+      waited = true;
+      currentTime = now + APPEND_LOCK_WAIT_TIMEOUT_MS + APPEND_LOCK_WAIT_TIMEOUT_MARGIN_MS;
+      return "timed-out";
     });
-    vi.spyOn(Date, "now").mockImplementation(() =>
-      firstReclaimAttemptFinished
-        ? now + APPEND_LOCK_WAIT_TIMEOUT_MS + APPEND_LOCK_WAIT_TIMEOUT_MARGIN_MS
-        : now,
-    );
 
     expect(() =>
       appendSecretSinkRecord({ mode: "file", filePath: file }, "b2_create_key", {
@@ -1985,8 +1977,10 @@ describe("secret sink file writer", () => {
       }),
     ).toThrow(/EEXIST|file already exists/i);
 
-    expect(firstReclaimAttemptFinished).toBe(true);
-    expect(existsSync(appendLock)).toBe(true);
+    expect(waited).toBe(true);
+    expect(readFileSync(appendLock, "utf8")).toBe(ownerBytes);
+    expect(readFileSync(file, "utf8")).toBe("");
+    expect(existsSync(appendReclaimLockPath(file))).toBe(false);
   });
 
   it("releases the pending claim when sink failure recovery deletes the provider result", async () => {
