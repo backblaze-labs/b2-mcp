@@ -29,6 +29,9 @@ rules:
       - release-tag.yml
       - smoke.yml
       - test.yml
+      - agent-evals.yml
+      - control-bands.yml
+      - review-metrics.yml
   dangerous-triggers:
     ignore:
       # Publish Package runs on `workflow_run` from the unprivileged "Release
