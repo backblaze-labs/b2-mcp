@@ -124,6 +124,47 @@ prioritized ahead of a repo-wide `src/**` run:
 - `src/auth.ts`
 - `src/utils/tool-capabilities.ts`
 
+## Additional boundary profiles (#2006)
+
+The default command keeps the six-module core scope above. Two separate bounded
+profiles extend HTTP/OAuth and durable-secret recovery coverage:
+
+```sh
+pnpm run test:mutation -- stryker.http-oauth.config.mjs
+pnpm run test:mutation -- stryker.secret-recovery.config.mjs
+```
+
+The [HTTP/OAuth manifest](../../mutation-scopes/http-oauth.json) selects 18
+named declarations for token-claim validation, preverified middleware policy,
+bearer errors, and credential-header handoff. The
+[recovery manifest](../../mutation-scopes/secret-recovery.json) selects ten
+creation-outcome, compensation, claim-ownership, and secret-safe diagnostic
+declarations. These are bounded slices rather than whole-file scores.
+
+The [shared resolver](../../scripts/lib/mutation-profiles.cjs) reads TypeScript
+syntax and resolves current declaration ranges for each run. Missing, ambiguous,
+empty, duplicate, or unbounded selections fail explicitly. Refactors therefore
+cannot silently leave a stale line range selecting unrelated code. New profiles
+inherit the core runner, operators, static policy, and timeouts.
+
+The weekly/manual advisory workflow runs core, http-oauth, and secret-recovery
+in independent matrix jobs, each with the existing 90-minute budget. A failure
+in one profile does not cancel the others. Reports are separate:
+
+| Profile | Local report directory | Hosted artifact |
+| --- | --- | --- |
+| core | reports/mutation | mutation-reports |
+| http-oauth | reports/mutation/http-oauth | mutation-reports-http-oauth |
+| secret-recovery | reports/mutation/secret-recovery | mutation-reports-secret-recovery |
+
+The core artifact name remains compatible with existing consumers. The runner
+accepts each config as the positional Stryker configuration argument. The
+[HTTP/OAuth audit](mutation-http-oauth-extension.md),
+[recovery audit](mutation-secret-recovery-extension.md), and
+[combined extension report](mutation-security-extension.md) disclose before/after
+measurements, retained mutants, and the important paths outside each first slice.
+Tracking: [demand-side-ai #2006](https://github.com/backblaze-labs/demand-side-ai/issues/2006).
+
 ## Baseline (2026-09-07)
 
 Stryker 10.0.0, 2453 mutants across the six modules. **Overall score: 64.49%**
