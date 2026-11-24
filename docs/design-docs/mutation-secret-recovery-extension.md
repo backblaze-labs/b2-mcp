@@ -215,3 +215,12 @@ mutants become assertion kills, and two remain uncovered. Four old changed or
 removed nodes and two changed new nodes are preserved explicitly; both changed
 new function-body nodes are killed. There is no blind ID join or fixed-corpus
 score claim across this source repair.
+
+## Publication context
+
+The publication stack is based on main `69c3f1d`, without importing the earlier
+pending mutation follow-ups. Its selected recovery source and 26 new cases match
+the measured final source/tests; all 96 focused recovery cases pass on that
+publication branch. The native percentages above retain their cumulative-seed
+measurement context. PR #613 depends on #612 for the declaration resolver and
+targets main so the repository's main-only required workflows execute.
