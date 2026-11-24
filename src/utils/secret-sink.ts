@@ -489,6 +489,7 @@ export function appendSecretSinkRecord(
     });
     let committed = false;
     let originalSize: number | undefined;
+    let operationFailed = false;
     let operationError: unknown;
     let closeError: unknown;
     try {
@@ -498,6 +499,7 @@ export function appendSecretSinkRecord(
       secretSinkFileOpsForTests.fsyncSync(fd);
       committed = true;
     } catch (err) {
+      operationFailed = true;
       operationError = err;
       if (originalSize !== undefined) {
         try {
@@ -529,7 +531,7 @@ export function appendSecretSinkRecord(
             { err, tool, secretSink: { type: "file", path: sink.filePath } },
             "secret_sink.close_failed_after_commit",
           );
-        } else if (operationError !== undefined) {
+        } else if (operationFailed) {
           logger.warn(
             { err, tool, secretSink: { type: "file", path: sink.filePath } },
             "secret_sink.close_failed_before_commit",
@@ -537,7 +539,7 @@ export function appendSecretSinkRecord(
         }
       }
     }
-    if (operationError !== undefined) throw operationError;
+    if (operationFailed) throw operationError;
     if (closeError !== undefined && !committed) throw closeError;
   } finally {
     releaseSecretSinkClaimBestEffort(appendLock, {
@@ -634,17 +636,22 @@ function readFileTail(filePath: string, maxBytes: number): { buffer: Buffer; off
 function readBoundedJsonlTailLines(filePath: string): string[] {
   let tail: { buffer: Buffer; offset: number };
   try {
-    tail = readFileTail(filePath, SECRET_SINK_TAIL_READ_BYTES);
+    tail = readFileTail(filePath, SECRET_SINK_TAIL_READ_BYTES + 1);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw err;
   }
   if (tail.buffer.length === 0) return [];
   let buffer = tail.buffer;
-  if (tail.offset > 0) {
-    const firstNewline = buffer.indexOf(0x0a);
-    if (firstNewline === -1) return [];
-    buffer = buffer.subarray(firstNewline + 1);
+  if (buffer.length > SECRET_SINK_TAIL_READ_BYTES) {
+    // The extra byte tells whether the bounded window starts at a record boundary.
+    const precedingByte = buffer[0];
+    buffer = buffer.subarray(1);
+    if (precedingByte !== 0x0a) {
+      const firstNewline = buffer.indexOf(0x0a);
+      if (firstNewline === -1) return [];
+      buffer = buffer.subarray(firstNewline + 1);
+    }
   }
   return buffer
     .toString("utf8")
@@ -1053,14 +1060,26 @@ function acquireReclaimLock(
 ): SecretSinkClaim | null {
   const deadline = Date.now() + 30_000;
   for (;;) {
+    let created = false;
     try {
       createExclusiveLockFile(
         reclaimLockPath(lockPath),
         lockPayload(tool, "reclaiming_append_lock"),
       );
+      created = true;
       fsyncParentDirectory(parent);
       return { lockPath: reclaimLockPath(lockPath), parent };
     } catch (err) {
+      if (created) {
+        releaseSecretSinkClaimBestEffort(
+          { lockPath: reclaimLockPath(lockPath), parent },
+          {
+            tool,
+            secretSink: { type: "file", path: lockPath },
+            lockPath: reclaimLockPath(lockPath),
+          },
+        );
+      }
       if ((err as NodeJS.ErrnoException).code !== "EEXIST") {
         logger.warn(
           { err, tool, lockPath: reclaimLockPath(lockPath) },
@@ -1117,11 +1136,19 @@ function acquireLedgerAppendLock(filePath: string, parent: string, tool: string)
   const lockPath = `${filePath}.append.lock`;
   const deadline = Date.now() + 30_000;
   for (;;) {
+    let created = false;
     try {
       createExclusiveLockFile(lockPath, lockPayload(tool, "appending"));
+      created = true;
       fsyncParentDirectory(parent);
       return { lockPath, parent };
     } catch (err) {
+      if (created) {
+        releaseSecretSinkClaimBestEffort(
+          { lockPath, parent },
+          { tool, secretSink: { type: "file", path: filePath }, lockPath },
+        );
+      }
       if ((err as NodeJS.ErrnoException).code !== "EEXIST" || Date.now() >= deadline) {
         throw err;
       }
