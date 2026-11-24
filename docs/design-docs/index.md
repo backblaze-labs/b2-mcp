@@ -25,6 +25,7 @@ start with [`../README.md`](../README.md).
 | [`mutation-testing.md`](mutation-testing.md) | Sophie / QK | Advisory StrykerJS mutation-testing baseline and survivor triage | active | #397 |
 | [`mutation-jwks-cache-extension.md`](mutation-jwks-cache-extension.md) | Sophie / QK | Bounded JWKS/cache mutation evidence and retained gaps | active | See linked PR |
 | [`mutation-ledger-lock-extension.md`](mutation-ledger-lock-extension.md) | Sophie / QK | Bounded ledger/lock mutation evidence and retained gaps | active | See linked PR |
+| [`mutation-failure-extension.md`](mutation-failure-extension.md) | Sophie / QK | Combined failure-profile scope, measurements and validation limits | active | See linked PR |
 | [`security-review.md`](security-review.md) | Sophie / QK | Pre-public secret scanning, provenance, and legal review checklist | skeleton | #62, #66, #67 |
 | [`supply-chain-security.md`](supply-chain-security.md) | Sophie / QK | npm/GHCR compromise denylist, branch/artifact scan, and incident runbook | active | #89, #106 |
 | [`../SECURITY.md`](../SECURITY.md) | Sophie / QK | Engineering security map for security and supply-chain docs | active | #62, #66, #67, #89, #106 |
