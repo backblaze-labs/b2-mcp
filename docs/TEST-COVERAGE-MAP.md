@@ -3,6 +3,10 @@
 Status: snapshot, as of commit `188efaf7` (2026-09-29). The table is a
 snapshot; regenerate it when tools or tests change.
 
+Capability/OAuth policy coverage and its safety-property entries below were
+refreshed on 2026-11-21. Handler/live grades and layer counts retain the dated
+snapshot above; this follow-up adds no live B2 evidence.
+
 This page maps the existing tests to a shared list of 38 B2 capabilities. The
 same list is used to compare the Python and TypeScript SDKs, the CLI, Blazer,
 the Terraform provider, and this MCP server. The MCP server is compared for
@@ -30,6 +34,16 @@ and "live" under `tests/live/`. Live tests need real credentials and are not par
 of the default gate.
 
 ## Capability table
+
+Cross-cutting authorization coverage is in
+[`tool-capabilities-policy.unit.test.ts`](../tests/unit/tool-capabilities-policy.unit.test.ts):
+42 independent cases cover single-capability allow/deny profiles, OAuth
+read/write/admin tool tiers and operation inheritance, unknown tools, Partner
+classification, published annotations, fail-closed discovery, and unavailable
+durable-secret stubs. Expected values come from operation contracts and the
+existing reviewed tool fixture rather than the live policy tables. The scoped
+mutation results and retained survivors are recorded in
+[`design-docs/mutation-testing.md`](design-docs/mutation-testing.md#capability-policy-follow-up-2026-11-21).
 
 | Capability | MCP tools | Existing tests (category: key files) | Strength |
 | --- | --- | --- | --- |
@@ -128,7 +142,9 @@ tools or tests change.
 | Property | Where it is tested |
 | --- | --- |
 | Destructive-action gates (policy, confirmation, elicitation, blocking) | unit: `destructive-gate`, `destructive-elicitation`, `coverage-destructive-elicitation-400`; protocol: `http.modern`; runtime-security: `http`. |
-| Read-only profile visibility (a read-only key sees only read tools) | unit: `capability-registration`; contract: `tool-profile-contract`, `tools-schema`. |
+| Read-only profile visibility (a read-only key sees only read tools) | unit: `capability-registration`, `tool-capabilities-policy` (independent positive and negative grant matrix); contract: `tool-profile-contract`, `tools-schema`. |
+| OAuth deployment scopes only narrow the B2-capability surface | unit: `oauth-scope-tools`, `tool-capabilities-policy` (explicit tiers, inheritance, empty/unknown scopes, and unmapped tools). |
+| Published tool hints and Partner classifications remain accurate | unit: `tool-annotations`, `tool-capabilities-policy` (reviewed fixture and independent Partner names). |
 | Secret redaction (no credentials, webhook secrets, or tokens returned or logged) | unit: `secret-sanitizer`, `secret-sanitizer.property`, `secret-sink`, `b2-buckets-fixtures` (notification rules); observability: `logging.behavior`. |
 | The 1 MiB inline object cap | unit: `s3-tools` (upload over the cap, read over the cap, streaming body that exceeds its declared size). |
 
