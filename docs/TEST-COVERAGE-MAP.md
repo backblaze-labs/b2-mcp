@@ -141,7 +141,7 @@ tools or tests change.
 
 | Property | Where it is tested |
 | --- | --- |
-| Destructive-action gates (policy, confirmation, elicitation, blocking) | unit: `destructive-gate`, `destructive-elicitation`, `coverage-destructive-elicitation-400`; protocol: `http.modern`; runtime-security: `http`. |
+| Destructive-action gates (policy, confirmation, elicitation, blocking) | unit: `destructive-gate`, `destructive-gate-policy` (complete detectors, mixed lifecycle rules, combined effects, credential-bound consent, and refused handler side effects), `destructive-elicitation`, `coverage-destructive-elicitation-400`; protocol: `http.modern`; runtime-security: `http`. |
 | Read-only profile visibility (a read-only key sees only read tools) | unit: `capability-registration`, `tool-capabilities-policy` (independent positive and negative grant matrix); contract: `tool-profile-contract`, `tools-schema`. |
 | OAuth deployment scopes only narrow the B2-capability surface | unit: `oauth-scope-tools`, `tool-capabilities-policy` (explicit tiers, inheritance, empty/unknown scopes, and unmapped tools). |
 | Published tool hints and Partner classifications remain accurate | unit: `tool-annotations`, `tool-capabilities-policy` (reviewed fixture and independent Partner names). |
@@ -154,4 +154,9 @@ the reason visible in review.
 The secret-redaction safety row was refreshed on 2026-11-21. The older capability
 and layer-count snapshots above were not regenerated. Scoped sanitizer mutation
 evidence and remaining gaps are recorded in
+[`design-docs/mutation-testing.md`](design-docs/mutation-testing.md).
+
+The destructive-action safety row was refreshed on 2026-11-21. The older
+capability and layer-count snapshots above were not regenerated. Scoped
+destructive-gate mutation evidence is recorded in
 [`design-docs/mutation-testing.md`](design-docs/mutation-testing.md).

@@ -353,3 +353,52 @@ path because existing release-script tests do not quote their root path.
 The mutation configuration, thresholds, static-mutant handling, and exclusions
 are unchanged. The native score includes detected timeout mutants; it does not
 mean every mutation was killed by an assertion.
+
+## Destructive gate follow-up (2026-11-21)
+
+The scoped run starts from `61110dac`, independently of the pending capability
+and sanitizer work. It uses Node.js 22.23.1, pnpm 11.20.0, and the locked Stryker
+10.0.0 toolchain:
+
+```bash
+pnpm run test:mutation -- --mutate=src/utils/destructive-gate.ts --concurrency=2 --reporters=json,clear-text,progress
+```
+
+`destructive-gate-policy.unit.test.ts` adds 58 cases without changing production
+code or mutation configuration:
+
+- An independent literal list covers all 15 destructive tools, their effects,
+  refusal codes/statuses, and policy-specific approval behavior. Each case
+  reloads the module so mutations in the import-time detector registry are
+  exercised.
+- Mixed safe/destructive lifecycle rules in both orders distinguish `some`
+  from `every`; benign rules, absent deletion values, and the exported helper's
+  omitted-rules fallback cover the other side of the decision. Tool schemas
+  still require lifecycle rules.
+- Combined Object Lock, lifecycle, visibility, and replication changes must
+  retain every effect in the human-facing refusal. Refusals preserve the
+  instruction to report the decision to the human operator.
+- Independently computed Python HMAC/SHA-256 vectors pin credential binding,
+  domain separation, and canonical nested JSON. Tests distinguish each
+  credential part, object-key order, absent values, array order, primitive
+  types, top-level confirmation, exact tool names, and async consent scope.
+  Empty credential parts between populated keys are important: trailing NUL
+  bytes alone can be hidden by HMAC key padding.
+- The real S3 lifecycle handler runs against a recording client double. Refused
+  mixed expiration and blocked clearing call neither lifecycle write method;
+  confirmed expiration and benign cleanup reach the expected write once.
+
+The new assertions passed against existing behavior; no production change was
+made to manufacture a failing test. Mutation runs test whether damaged variants
+are detected. A mutation score remains evidence about this scoped set of
+generated faults, not proof that the gate or its callers have no other defects.
+
+| Stage | Mutants | Killed | Survived | No coverage | Timeout/errors | Native score |
+| --- | --- | --- | --- | --- | --- | --- |
+| Fresh baseline | 240 | 189 | 49 | 2 | 0 | 78.75% |
+| Final policy cases | 240 | 240 | 0 | 0 | 0 | 100.00% |
+
+The final report retains every existing kill, catches all 49 former survivors
+and both previously uncovered mutants, and contains no ignored, timeout,
+compile-error, or runtime-error results. All 240 detections are assertion kills.
+No thresholds, test skips, or mutation exclusions were changed.
