@@ -1,0 +1,9 @@
+{
+  "default_tier": "medium",
+  "large_diff_lines": 800,
+  "trusted_authors": ["owning-team-member-login"],
+  "low_paths": ["docs/**", "**/*.md", "README*", "LICENSE"],
+  "medium_paths": ["src/**", "app/**", "lib/**", "tests/**"],
+  "high_paths": ["src/auth/**", "src/billing/**", "migrations/**", "infra/**", "installer/**"],
+  "always_human_paths": [".github/workflows/**", "CODEOWNERS", ".github/CODEOWNERS", "src/auth/**", "src/billing/**", "migrations/**", "infra/**", "installer/**"]
+}

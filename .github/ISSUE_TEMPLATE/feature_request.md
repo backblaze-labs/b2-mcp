@@ -19,6 +19,18 @@ labels: enhancement
 <!-- If a tool errored or couldn't do what you needed, paste the error line —
      it carries a requestId we can trace: B2 Error [code] (HTTP nnn): ... (requestId: ...) -->
 
+**Who and what does it affect?**
+
+<!-- Users, MCP clients, transports (stdio / HTTP), B2 APIs, tools. -->
+
+**Constraints**
+
+<!-- Security, credential handling, destructive operations, compatibility, deadlines. -->
+
+**How will we know it worked?**
+
+**Open questions**
+
 **Alternatives considered**
 
 **Additional context**

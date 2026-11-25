@@ -1,0 +1,10 @@
+{
+  "name": "b2-mcp-agent-cli",
+  "version": "0.0.0",
+  "private": true,
+  "packageManager": "pnpm@11.20.0+sha256.34e198cb1e43237517ecedfd31f9ae26a6c0a3e5366ce58a2d05f4b21fb5f19a",
+  "description": "Isolated, checked-in manifest for the Claude Code CLI used by the scheduled agent-eval and control-band workflows (#528). Kept outside the root workspace so the CLI and its per-platform native binaries are pinned with integrity hashes in this directory's own pnpm-lock.yaml (installed --frozen-lockfile --ignore-scripts) but never enter the shipped root lockfile or dependency budget. Run it through node_modules/@anthropic-ai/claude-code/cli-wrapper.cjs, which needs no postinstall.",
+  "dependencies": {
+    "@anthropic-ai/claude-code": "2.1.296"
+  }
+}

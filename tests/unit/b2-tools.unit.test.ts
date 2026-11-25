@@ -1298,7 +1298,7 @@ describe("durable-secret-producing tools", () => {
     );
   });
 
-  it("logs a recovery key ID if cleanup fails after a key sink failure", async () => {
+  it("logs only an allowlisted recovery status if cleanup fails after a key sink failure", async () => {
     const fatalSpy = vi.spyOn(logger, "fatal").mockImplementation(() => undefined as never);
     const secretFile = tempSecretFile();
     writeFileSync(secretFile, "", { mode: 0o600 });
@@ -1333,11 +1333,15 @@ describe("durable-secret-producing tools", () => {
     expect(rawResult.content[0].text).not.toContain("K005");
     const fatalLogs = JSON.stringify(fatalSpy.mock.calls);
     expect(fatalLogs).toContain("secret_sink.write_failed");
-    expect(fatalLogs).toContain("recoveryApplicationKeyId");
-    expect(fatalLogs).toMatch(/"recoveryApplicationKeyId":"sim_key_[^"]+"/);
+    expect(fatalSpy.mock.calls[0]?.[0]).toEqual({
+      tool: "b2_create_key",
+      secretSink: { type: "file", path: secretFile },
+      recovery: { status: "failed" },
+    });
     expect(LOGGER_SECRET_REDACTION_PATHS).toContain("*.applicationKeyId");
     expect(LOGGER_SECRET_REDACTION_PATHS).not.toContain("*.recoveryApplicationKeyId");
-    expect(fatalLogs).toContain("simulated delete failure");
+    expect(fatalLogs).not.toContain("recoveryApplicationKeyId");
+    expect(fatalLogs).not.toContain("simulated delete failure");
     expect(fatalLogs).not.toContain("B2_MCP_CANARY_SECRET");
     expect(transport.requests.some((request) => b2EndpointName(request) === "b2_delete_key")).toBe(
       true,
@@ -2587,10 +2591,8 @@ describe("Partner API tools", () => {
       recovery?: { status?: string; accountIds?: string[] };
     };
     expect(fatalPayload.secretSink).toEqual({ type: "inline" });
-    expect(fatalPayload.recovery).toMatchObject({
-      status: "ejected_group_members",
-      accountIds: [groupMember.accountId],
-    });
+    expect(fatalPayload.recovery).toEqual({ status: "ejected_group_members" });
+    expect(JSON.stringify(fatalSpy.mock.calls)).not.toContain(groupMember.accountId);
     expect(JSON.stringify(rawResult)).not.toContain(secret);
     expect(JSON.stringify(fatalSpy.mock.calls)).not.toContain(secret);
   });
@@ -2840,14 +2842,9 @@ describe("Partner API tools", () => {
     expect(JSON.stringify(rawResult)).not.toContain(secret);
     expect(existsSync(secretFile) ? readFileSync(secretFile, "utf8") : "").not.toContain(secret);
     const fatalPayload = fatalSpy.mock.calls[0]?.[0] as {
-      minted?: { accountIds?: string[] };
-      recovery?: { status?: string; accountIds?: string[] };
+      recovery?: { status?: string };
     };
-    expect(fatalPayload.minted?.accountIds).toEqual([groupMember.accountId]);
-    expect(fatalPayload.recovery).toMatchObject({
-      status: "ejected_group_members",
-      accountIds: [groupMember.accountId],
-    });
+    expect(fatalPayload.recovery).toEqual({ status: "ejected_group_members" });
     expect(pendingSecretClaimNames(secretFile)).toHaveLength(1);
     expect(JSON.stringify(fatalSpy.mock.calls)).not.toContain(secret);
     expect(JSON.stringify(fatalSpy.mock.calls)).toContain("ejected_group_members");
@@ -2940,13 +2937,10 @@ describe("Partner API tools", () => {
       if (expectConfirmation) expect(listGroupMembers).toHaveBeenCalledOnce();
       else expect(listGroupMembers).not.toHaveBeenCalled();
       const fatalPayload = fatalSpy.mock.calls[0]?.[0] as {
-        recovery?: { status?: string; reason?: string; accountIds?: string[] };
+        recovery?: { status?: string };
       };
-      expect(fatalPayload.recovery).toMatchObject({
-        status: "recovery_incomplete",
-        reason: expectedReason,
-        accountIds: [],
-      });
+      expect(fatalPayload.recovery).toEqual({ status: "recovery_incomplete" });
+      expect(JSON.stringify(fatalSpy.mock.calls)).not.toContain(expectedReason);
       expect(JSON.stringify(rawResult)).not.toContain(secret);
       expect(JSON.stringify(fatalSpy.mock.calls)).not.toContain(secret);
     },
@@ -2997,15 +2991,10 @@ describe("Partner API tools", () => {
     expect(ejectGroupMember).not.toHaveBeenCalled();
     expect(pendingSecretClaimNames(secretFile)).toHaveLength(1);
     const fatalPayload = fatalSpy.mock.calls[0]?.[0] as {
-      minted?: { accountIds?: string[] };
-      recovery?: { status?: string; reason?: string; accountIds?: string[] };
+      recovery?: { status?: string };
     };
-    expect(fatalPayload.minted?.accountIds).toEqual([]);
-    expect(fatalPayload.recovery).toEqual({
-      status: "recovery_incomplete",
-      reason: "missing_account_id",
-      accountIds: [],
-    });
+    expect(fatalPayload.recovery).toEqual({ status: "recovery_incomplete" });
+    expect(JSON.stringify(fatalSpy.mock.calls)).not.toContain("missing_account_id");
     expect(JSON.stringify(rawResult)).not.toContain(secret);
     expect(JSON.stringify(fatalSpy.mock.calls)).not.toContain(secret);
     expect(JSON.stringify(fatalSpy.mock.calls)).not.toContain("ejected_group_members");
@@ -3086,17 +3075,11 @@ describe("Partner API tools", () => {
     );
     expect(pendingSecretClaimNames(secretFile)).toHaveLength(1);
     const fatalPayload = fatalSpy.mock.calls[0]?.[0] as {
-      minted?: { accountIds?: string[] };
-      recovery?: { status?: string; reason?: string; accountIds?: string[] };
+      recovery?: { status?: string };
     };
-    expect(fatalPayload.minted?.accountIds).toEqual([
-      groupMember.accountId,
-      secondGroupMember.accountId,
-    ]);
-    expect(fatalPayload.recovery).toMatchObject({
-      status: "ejected_group_members",
-      accountIds: [groupMember.accountId, secondGroupMember.accountId],
-    });
+    expect(fatalPayload.recovery).toEqual({ status: "ejected_group_members" });
+    expect(JSON.stringify(fatalSpy.mock.calls)).not.toContain(groupMember.accountId);
+    expect(JSON.stringify(fatalSpy.mock.calls)).not.toContain(secondGroupMember.accountId);
     expect(JSON.stringify(rawResult)).not.toContain(secret);
     expect(JSON.stringify(fatalSpy.mock.calls)).not.toContain(secret);
   });
@@ -3167,12 +3150,10 @@ describe("Partner API tools", () => {
       expect.anything(),
     );
     const fatalPayload = fatalSpy.mock.calls[0]?.[0] as {
-      recovery?: { status?: string; accountIds?: string[] };
+      recovery?: { status?: string };
     };
-    expect(fatalPayload.recovery).toMatchObject({
-      status: "ejected_group_members",
-      accountIds: [groupMember.accountId],
-    });
+    expect(fatalPayload.recovery).toEqual({ status: "ejected_group_members" });
+    expect(JSON.stringify(fatalSpy.mock.calls)).not.toContain(groupMember.accountId);
     expect(JSON.stringify(rawResult)).not.toContain(secret);
     expect(JSON.stringify(fatalSpy.mock.calls)).not.toContain(secret);
   });
@@ -3237,26 +3218,11 @@ describe("Partner API tools", () => {
     );
     expect(pendingSecretClaimNames(secretFile)).toHaveLength(1);
     const fatalPayload = fatalSpy.mock.calls[0]?.[0] as {
-      recovery?: {
-        status?: string;
-        reason?: string;
-        accountIds?: string[];
-        failedAccountIds?: string[];
-        errors?: Array<{ accountId?: string; error?: string }>;
-      };
+      recovery?: { status?: string };
     };
-    expect(fatalPayload.recovery).toMatchObject({
-      status: "recovery_incomplete",
-      reason: "eject_failed",
-      accountIds: [],
-      failedAccountIds: [failedGroupMember.accountId],
-      errors: [
-        {
-          accountId: failedGroupMember.accountId,
-          error: "simulated ejection failure",
-        },
-      ],
-    });
+    expect(fatalPayload.recovery).toEqual({ status: "recovery_incomplete" });
+    expect(JSON.stringify(fatalSpy.mock.calls)).not.toContain(failedGroupMember.accountId);
+    expect(JSON.stringify(fatalSpy.mock.calls)).not.toContain("simulated ejection failure");
     expect(JSON.stringify(rawResult)).not.toContain(secret);
     expect(JSON.stringify(fatalSpy.mock.calls)).not.toContain(secret);
   });

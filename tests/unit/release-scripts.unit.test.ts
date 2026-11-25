@@ -309,6 +309,30 @@ describe("release scripts", () => {
     });
   });
 
+  it("treats a section holding only Changie's compare link as empty", () => {
+    withFixture((fixtureRoot) => {
+      writeFileSync(
+        join(fixtureRoot, "CHANGELOG.md"),
+        [
+          "# Changelog",
+          "",
+          "## [0.1.1] - 2026-01-02",
+          "",
+          "[0.1.1]: https://github.com/backblaze-labs/b2-mcp/compare/v0.1.0...v0.1.1",
+          "",
+        ].join("\n"),
+      );
+      const result = spawnSync(
+        process.execPath,
+        ["scripts/extract-release-notes.mjs", "--version", "0.1.1"],
+        { cwd: root, env: scriptEnv(fixtureRoot), encoding: "utf8" },
+      );
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("release section [0.1.1] is empty");
+    });
+  });
+
   it("syncs server.json versions from package metadata", () => {
     withFixture((fixtureRoot) => {
       const packagePath = join(fixtureRoot, "package.json");

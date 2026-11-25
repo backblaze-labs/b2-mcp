@@ -1,0 +1,16 @@
+# Always-human paths. Code-owner review is required here whatever the risk tier says
+# (enable "Require review from Code Owners" in branch protection or the ruleset).
+# The last matching pattern wins, so keep the broad rule first and the specific ones after it.
+
+*                           @your-org/engineering
+
+/.github/workflows/         @your-org/platform
+/.github/CODEOWNERS         @your-org/platform
+/src/auth/                  @your-org/security
+/src/billing/               @your-org/payments @your-org/security
+/migrations/                @your-org/data
+/infra/                     @your-org/platform
+/installer/                 @your-org/release
+/REVIEW.md                  @your-org/tech-leads
+/CLAUDE.md                  @your-org/tech-leads
+/.claude/                   @your-org/tech-leads
