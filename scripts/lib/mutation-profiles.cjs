@@ -2,7 +2,7 @@ const { readFileSync } = require("node:fs");
 const { join, resolve } = require("node:path");
 const ts = require("typescript");
 
-const profiles = new Set(["http-oauth", "secret-recovery"]);
+const profiles = new Set(["http-oauth", "secret-recovery", "jwks-cache", "ledger-lock"]);
 
 function mutationProfileConfig(profile, base, root = resolve(__dirname, "../..")) {
   if (!profiles.has(profile)) throw new Error(`Unknown mutation profile: ${profile}`);

@@ -16,6 +16,7 @@ docs/design-docs/supply-chain-security.md @goanpeca @sophiecarreras
 docs/design-docs/mutation-testing.md @goanpeca @sophiecarreras
 docs/design-docs/mutation-http-oauth-extension.md @goanpeca @sophiecarreras
 docs/design-docs/mutation-secret-recovery-extension.md @goanpeca @sophiecarreras
+docs/design-docs/mutation-jwks-cache-extension.md @goanpeca @sophiecarreras
 SECURITY.md @goanpeca @sophiecarreras
 PRIVACY.md @goanpeca @sophiecarreras
 RELEASE.md @goanpeca @sophiecarreras
