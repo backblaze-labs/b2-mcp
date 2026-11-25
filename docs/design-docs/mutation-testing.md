@@ -124,14 +124,16 @@ prioritized ahead of a repo-wide `src/**` run:
 - `src/auth.ts`
 - `src/utils/tool-capabilities.ts`
 
-## Additional boundary profiles (#2006)
+## Additional boundary profiles
 
-The default command keeps the six-module core scope above. Two separate bounded
-profiles extend HTTP/OAuth and durable-secret recovery coverage:
+The default command keeps the six-module core scope above. Four separate bounded
+profiles extend HTTP/OAuth, JWKS/cache, durable-secret recovery and ledger/lock coverage:
 
 ```sh
 pnpm run test:mutation -- stryker.http-oauth.config.mjs
 pnpm run test:mutation -- stryker.secret-recovery.config.mjs
+pnpm run test:mutation -- stryker.jwks-cache.config.mjs
+pnpm run test:mutation -- stryker.ledger-lock.config.mjs
 ```
 
 The [HTTP/OAuth manifest](../../mutation-scopes/http-oauth.json) selects 18
@@ -146,9 +148,15 @@ syntax and resolves current declaration ranges for each run. Missing, ambiguous,
 empty, duplicate, or unbounded selections fail explicitly. Refactors therefore
 cannot silently leave a stale line range selecting unrelated code. New profiles
 inherit the core runner, operators, static policy, and timeouts.
+The new [JWKS/cache manifest](../../mutation-scopes/jwks-cache.json) selects
+key retrieval, cache and dependency-failure handling. The
+[ledger/lock manifest](../../mutation-scopes/ledger-lock.json) selects durable
+append, tail recovery, committed-record replay and lock ownership. Their
+[extension report](mutation-failure-extension.md) records separate measured
+baselines rather than folding these fault sets into the earlier scores.
 
-The weekly/manual advisory workflow runs core, http-oauth, and secret-recovery
-in independent matrix jobs, each with the existing 90-minute budget. A failure
+The weekly/manual advisory workflow runs core, http-oauth, secret-recovery,
+jwks-cache, and ledger-lock in independent matrix jobs, each with the existing 90-minute budget. A failure
 in one profile does not cancel the others. Reports are separate:
 
 | Profile | Local report directory | Hosted artifact |
@@ -156,6 +164,8 @@ in one profile does not cancel the others. Reports are separate:
 | core | reports/mutation | mutation-reports |
 | http-oauth | reports/mutation/http-oauth | mutation-reports-http-oauth |
 | secret-recovery | reports/mutation/secret-recovery | mutation-reports-secret-recovery |
+| jwks-cache | reports/mutation/jwks-cache | mutation-reports-jwks-cache |
+| ledger-lock | reports/mutation/ledger-lock | mutation-reports-ledger-lock |
 
 The core artifact name remains compatible with existing consumers. The runner
 accepts each config as the positional Stryker configuration argument. The
@@ -163,7 +173,6 @@ accepts each config as the positional Stryker configuration argument. The
 [recovery audit](mutation-secret-recovery-extension.md), and
 [combined extension report](mutation-security-extension.md) disclose before/after
 measurements, retained mutants, and the important paths outside each first slice.
-Tracking: [demand-side-ai #2006](https://github.com/backblaze-labs/demand-side-ai/issues/2006).
 
 ## Baseline (2026-09-07)
 

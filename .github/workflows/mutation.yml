@@ -1,6 +1,6 @@
 name: Mutation testing (advisory)
 
-# Advisory StrykerJS core baseline (#397) and boundary profiles (demand-side-ai #2006).
+# Advisory StrykerJS core baseline (#397) and bounded boundary profiles.
 # Each profile has its own job and reports. High line/branch coverage
 # does not prove the tests *assert* the right behavior; mutation testing does.
 # This job is intentionally NON-BLOCKING:
@@ -49,6 +49,14 @@ jobs:
             config: stryker.secret-recovery.config.mjs
             reportPrefix: reports/mutation/secret-recovery/mutation
             artifactName: mutation-reports-secret-recovery
+          - profile: jwks-cache
+            config: stryker.jwks-cache.config.mjs
+            reportPrefix: reports/mutation/jwks-cache/mutation
+            artifactName: mutation-reports-jwks-cache
+          - profile: ledger-lock
+            config: stryker.ledger-lock.config.mjs
+            reportPrefix: reports/mutation/ledger-lock/mutation
+            artifactName: mutation-reports-ledger-lock
     steps:
       # actions/checkout v7, reviewed 2026-08-25.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

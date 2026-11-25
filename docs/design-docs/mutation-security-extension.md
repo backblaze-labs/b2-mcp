@@ -1,6 +1,6 @@
 # HTTP/OAuth and durable-secret recovery mutation extension
 
-Date: 2026-11-23. Tracking: [demand-side-ai #2006](https://github.com/backblaze-labs/demand-side-ai/issues/2006).
+Date: 2026-11-23.
 
 Two dedicated isolated workstreams extend the measured security boundaries from
 cumulative validation seed `a5ea61976ddc91beb7278d2c214ba1616b67bebb`. It includes
@@ -27,9 +27,12 @@ Recovery first reached a same-source coverage checkpoint of 87.83%: 200 assertio
 kills, two watchdog detections, 23 survivors and five uncovered out of 230.
 All 150 original assertion kills remained killed; 47 old survivors and three
 uncovered mutations became assertion kills, while two survivors became watchdog
-detections. A subsequent defensive logging repair changed the source: the final
-228 mutations comprise 201 assertion kills, two watchdog detections, 23 survivors
-and two uncovered. Explicit unchanged-line/source-fragment correspondence matches
+detections. A subsequent defensive logging repair changed the source: the original
+final 228-mutation run comprises 201 assertion kills, two watchdog detections,
+23 survivors and two uncovered. Its publication rerun on the same source and
+cases recorded 200 assertion kills and three watchdog detections with the same
+score, survivors, uncovered count and zero errors; one assertion-kill-to-watchdog
+transition came from covering-test order. Explicit unchanged-line/source-fragment correspondence matches
 226 checkpoint/final sites; four old and two new changed nodes are reported
 separately. Removed structural sites are not counted as kills. Watchdog detections
 are not assertion kills.
@@ -48,13 +51,21 @@ metadata, and real credential providers refusing unsafe header or principal
 routing. Public logger assertions retain error code/provider/method without
 exposing caller or server credential values. Global unexpected fetches fail.
 
-The [23 recovery cases](../../tests/unit/secret-recovery-policy.unit.test.ts)
-use real temporary ledgers and controlled filesystem failures. They distinguish
+The [recovery policy suite](../../tests/unit/secret-recovery-policy.unit.test.ts)
+uses real temporary ledgers and controlled filesystem failures. Its initial 23
+cases distinguish
 known provider refusal from unknown side effects, retain unresolved claims,
 prevent a second durable create, preserve committed material/replay, separate
 confirmed from ambiguous rollback, and protect actual nested secret material in
 logs, including circular/getter-bearing results. No real provider call or
 credential is used.
+
+Seven local review regressions bring that suite to 30 cases. They cover direct
+secret accessors, inherited nested secret data, non-secret-named accessors, a
+Proxy that conceals a secret-bearing value, and a hostile recovery-status
+accessor. The final local policy does not inspect provider result graphs for
+logging. It emits only fixed tool/sink context and recovery statuses validated
+from own data descriptors against a closed allowlist.
 
 The initial 45 area contracts pass unchanged production behavior. Three further
 [defensive logging cases](../../tests/unit/secret-recovery-uninspectable-result.unit.test.ts)
@@ -114,29 +125,27 @@ All retained judgments are bounded to reviewed current callers and inputs.
 
 ## Verification and interrupted-run provenance
 
-Combined required verification passes after the source repair: 2,966 unit cases
+Recorded combined required verification passed after the publication source repair: 2,966 unit cases
 with 20 existing skips across 131 files, 58 runtime-security cases, 48 modern
 protocol cases, and 12 legacy protocol cases, plus typecheck/build/static/docs/
-format/spelling/listener checks. All 23 observability cases also pass. The final
+format/spelling/listener checks. All 23 observability cases also passed. The final
 package passes existing limits at 665,253 packed / 2,987,105 unpacked bytes,
 281 entries, nine direct dependencies, 47 production packages, and 34,923,513
-clean-consumer bytes; no duplicate runtime versions are present. The extension adds 59 cases: 48 area
-contracts and eleven tooling contracts. Focused area runs pass 299 HTTP/OAuth
-and 96 recovery cases. No package budget or dependency change is introduced.
+clean-consumer bytes; no duplicate runtime versions are present. With the seven
+local review regressions, the extension contains 66 cases: 55 area contracts
+and eleven tooling contracts. Focused area runs pass 299 HTTP/OAuth and 103
+recovery cases. No new native recovery mutation measurement is claimed for the
+local review source change; the recovery percentages above remain historical.
+No package budget or dependency change is introduced.
 
 An initial final verification stopped at spelling on the legitimate term
 uninspectable in the new test. Adding the term to the central project dictionary
 preserved the frozen source/test hashes; the complete failed attempt and
 subsequent required verification are retained. Mutation settings were unchanged.
 
-One final recovery dry run failed across a system power event: Low Power Sleep
-at 21:46:12 on 1% battery, followed by AC-attach wake from hibernation at 22:32:08.
-Its stale intermediate report and failed attempt were archived rather than
-accepted as final. After independently confirming AC power and another 93-case
-focused pass, one documented rerun completed with unchanged source/tests,
-profile, and timeout settings. HTTP measurements completed before the event or
-began after wake. Process-scoped caffeinate was used; permanent power settings
-were unchanged.
+One final recovery dry run did not complete, so its stale intermediate report
+and failed attempt were archived rather than accepted as final. The completed
+rerun used unchanged source, tests, profile, and timeout settings.
 
 Ignored reports/mutation/extension retains two complete handoffs, exact source/
 test/manifest hashes, before/final and intermediate native reports, mutation

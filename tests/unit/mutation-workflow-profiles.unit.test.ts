@@ -26,14 +26,14 @@ it("schedules each advisory profile and publishes the report its real config pro
   };
   const job = workflow.jobs.mutation;
   const rows = job.strategy?.matrix.include;
-  expect(rows).toHaveLength(3);
+  expect(rows).toHaveLength(5);
   if (!rows) throw new Error("Mutation workflow has no named profiles");
   expect(new Set(rows.map((row) => row.profile))).toEqual(
-    new Set(["core", "http-oauth", "secret-recovery"]),
+    new Set(["core", "http-oauth", "secret-recovery", "jwks-cache", "ledger-lock"]),
   );
   expect(job["timeout-minutes"]).toBe(90);
   expect(rows.find((row) => row.profile === "core")?.artifactName).toBe("mutation-reports");
-  expect(new Set(rows.map((row) => row.artifactName)).size).toBe(3);
+  expect(new Set(rows.map((row) => row.artifactName)).size).toBe(rows.length);
 
   for (const row of rows) {
     const script = `const {default: config} = await import(${JSON.stringify(pathToFileURL(resolve(root, row.config)).href)}); process.stdout.write(JSON.stringify(config));`;
