@@ -475,23 +475,40 @@ function sanitizeValue(
 
   if (Array.isArray(value)) {
     const output: unknown[] = [];
-    const outputRecord = output as unknown as Record<string, unknown>;
     output.length = safeArrayLength(value);
     for (const [key, descriptor] of enumerableDescriptors(value)) {
-      outputRecord[key] = isSensitiveField(key, path, mode)
-        ? REDACTED
-        : sanitizeDescriptorValue(descriptor, [...path, key], seen, options, mode);
+      setSanitizedProperty(
+        output,
+        key,
+        isSensitiveField(key, path, mode)
+          ? REDACTED
+          : sanitizeDescriptorValue(descriptor, [...path, key], seen, options, mode),
+      );
     }
     return output;
   }
 
   const output: Record<string, unknown> = {};
   for (const [key, descriptor] of enumerableDescriptors(value)) {
-    output[key] = isSensitiveField(key, path, mode)
-      ? REDACTED
-      : sanitizeDescriptorValue(descriptor, [...path, key], seen, options, mode);
+    setSanitizedProperty(
+      output,
+      key,
+      isSensitiveField(key, path, mode)
+        ? REDACTED
+        : sanitizeDescriptorValue(descriptor, [...path, key], seen, options, mode),
+    );
   }
   return output;
+}
+
+function setSanitizedProperty(output: object, key: string, value: unknown): void {
+  // Treat every input key as data, including the legacy __proto__ setter name.
+  Object.defineProperty(output, key, {
+    value,
+    enumerable: true,
+    configurable: true,
+    writable: true,
+  });
 }
 
 function enumerableDescriptors(value: object): Array<[string, PropertyDescriptor]> {
@@ -575,13 +592,16 @@ function sanitizeErrorForLog(err: Error, seen: WeakSet<object>, options: Sanitiz
   safe.name = sanitizeErrorStringField(err, "name", options) ?? "Error";
   const stack = sanitizeErrorStringField(err, "stack", options);
   if (stack !== undefined) safe.stack = stack;
-  const safeRecord = safe as unknown as Record<string, unknown>;
 
   for (const [key, descriptor] of enumerableDescriptors(err)) {
     if (key === "message" || key === "name" || key === "stack") continue;
-    safeRecord[key] = isSensitiveField(key, [], "log")
-      ? REDACTED
-      : sanitizeDescriptorValue(descriptor, [key], seen, options, "log");
+    setSanitizedProperty(
+      safe,
+      key,
+      isSensitiveField(key, [], "log")
+        ? REDACTED
+        : sanitizeDescriptorValue(descriptor, [key], seen, options, "log"),
+    );
   }
   return safe;
 }
