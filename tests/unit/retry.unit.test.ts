@@ -6,6 +6,8 @@
  * Max retries: 3 (4 total attempts).
  */
 
+import { readFileSync } from "fs";
+import { join } from "path";
 import { abortError } from "../../src/utils/named-error";
 import {
   _consumeRetryToken,
@@ -13,6 +15,7 @@ import {
   isRetryableError,
   withRetry,
 } from "../../src/utils/retry";
+import { expectDefect, knownDefect } from "../support/known-defect";
 
 // Suppress actual sleep delays by mocking timers
 beforeAll(() => {
@@ -349,4 +352,68 @@ describe("withRetry — global retry budget", () => {
     expect(fn).toHaveBeenCalledTimes(1);
     expect(vi.getTimerCount()).toBe(0);
   });
+});
+
+// -- Case C13 (known defects; see tests/support/known-defect.ts) --------------------
+
+describe("withRetry — case C13", () => {
+  knownDefect(
+    "Finding C13: backoff sleeps do not leave abort listeners on a long-lived signal",
+    async () => {
+      const abort = new AbortController();
+      const addSpy = vi.spyOn(abort.signal, "addEventListener");
+      const removeSpy = vi.spyOn(abort.signal, "removeEventListener");
+      const fn = vi
+        .fn()
+        .mockRejectedValueOnce(httpError(503))
+        .mockRejectedValueOnce(httpError(503))
+        .mockResolvedValue("ok");
+
+      const promise = withRetry(fn, 3, abort.signal);
+      await flushRetries();
+      await expect(promise).resolves.toBe("ok");
+
+      const capture = (options: unknown) =>
+        typeof options === "boolean"
+          ? options
+          : Boolean((options as { capture?: boolean } | undefined)?.capture);
+      const added = addSpy.mock.calls.filter(([type]) => type === "abort");
+      const removed = removeSpy.mock.calls.filter(([type]) => type === "abort");
+      expect(added.length, "abort listeners were registered").toBeGreaterThan(0);
+
+      // Every registered listener must be removed, matched by identity and capture flag as a
+      // multiset (removal order is incidental). Unmatched additions are listeners left attached.
+      const pending = [...removed];
+      let stillAttached = 0;
+      for (const [, listener, options] of added) {
+        const match = pending.findIndex(
+          ([, candidate, candidateOptions]) =>
+            candidate === listener && capture(candidateOptions) === capture(options),
+        );
+        if (match === -1) stillAttached += 1;
+        else pending.splice(match, 1);
+      }
+      await expectDefect(() =>
+        expect(stillAttached, "abort listeners registered but never removed").toBe(0),
+      );
+    },
+  );
+
+  // Source-text check: it pins the opening 400 characters of src/utils/retry.ts, so moving or
+  // rewording that header comment requires updating it.
+  knownDefect(
+    "Finding C13: the module header lists every status that is actually retried",
+    async () => {
+      const header = readFileSync(join(__dirname, "../../src/utils/retry.ts"), "utf8").slice(
+        0,
+        400,
+      );
+      expect(header.length, "module header was read").toBeGreaterThan(0);
+      await expectDefect(() => {
+        for (const status of ["408", "429", "500", "502", "503", "504"]) {
+          expect(header, `module header mentions status ${status}`).toContain(status);
+        }
+      });
+    },
+  );
 });
