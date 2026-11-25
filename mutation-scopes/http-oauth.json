@@ -1,0 +1,33 @@
+{
+  "description": "OAuth verified-claim and bearer/preverified boundaries plus HTTP credential-header refusal and SDK header sanitization. Bounded initial extension; dependency fetching, caching, and HTTP lifecycle are separate future scopes.",
+  "targets": [
+    {
+      "file": "src/oauth-resource-server.ts",
+      "declarations": [
+        "jwtNumericDateClaim",
+        "requireMatch",
+        "assertTimeWindow",
+        "assertJwtTimeWindow",
+        "assertTokenType",
+        "assertTokenAlgorithm",
+        "assertAllowedAlgorithm",
+        "assertDeploymentScope",
+        "assertRequiredScopes",
+        "assertAllowedSubject",
+        "assertJwtDeploymentBinding",
+        "authInfoFromVerifiedClaims",
+        "validatePreverifiedOAuthAuthInfo",
+        "authenticateOAuthRequest"
+      ]
+    },
+    {
+      "file": "src/http-fetch-handler.ts",
+      "declarations": [
+        "sdkHeaderAllowed",
+        "sanitizedHeadersFromRequest",
+        "shouldRejectPublicCredentialHeaders",
+        "publicCredentialHeaderRejection"
+      ]
+    }
+  ]
+}
