@@ -1,6 +1,5 @@
 # HTTP and OAuth boundary mutation extension
 
-Tracking: [demand-side-ai #2006](https://github.com/backblaze-labs/demand-side-ai/issues/2006).
 Validation seed: `a5ea61976ddc91beb7278d2c214ba1616b67bebb`, a local cumulative
 snapshot containing earlier follow-ups awaiting required approval.
 
@@ -90,7 +89,7 @@ These are bounded judgments, not universal equivalence proofs.
 
 Node.js 22.23.1, pnpm 11.20.0, and locked Stryker 10.0.0 were used in an isolated
 checkout without spaces and with its own frozen dependencies. Native runs used
-two workers and process-scoped caffeinate -is. No live credentials or external
+two workers. No live credentials or external
 provider/B2 calls were needed; unexpected global fetches fail locally.
 
 All 22 new cases and neighboring OAuth/HTTP suites pass **299 cases across four

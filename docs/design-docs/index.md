@@ -23,6 +23,9 @@ start with [`../README.md`](../README.md).
 | [`../TESTING.md`](../TESTING.md) | Sophie / QK | Deterministic PR gates, contract evidence, and live B2 smoke policy | active | #50, #51, #52, #60, #61, #63 |
 | [`../EVALS.md`](../EVALS.md) | Sophie / QK | LLM eval local and CI runbook | active | #251 |
 | [`mutation-testing.md`](mutation-testing.md) | Sophie / QK | Advisory StrykerJS mutation-testing baseline and survivor triage | active | #397 |
+| [`mutation-http-oauth-extension.md`](mutation-http-oauth-extension.md) | Sophie / QK | Bounded HTTP and OAuth mutation profile and survivor audit | active | #397 |
+| [`mutation-secret-recovery-extension.md`](mutation-secret-recovery-extension.md) | Sophie / QK | Bounded durable-secret recovery mutation profile and survivor audit | active | #397 |
+| [`mutation-security-extension.md`](mutation-security-extension.md) | Sophie / QK | Combined HTTP/OAuth and durable-secret recovery mutation extension | active | #397 |
 | [`mutation-jwks-cache-extension.md`](mutation-jwks-cache-extension.md) | Sophie / QK | Bounded JWKS/cache mutation evidence and retained gaps | active | See linked PR |
 | [`mutation-ledger-lock-extension.md`](mutation-ledger-lock-extension.md) | Sophie / QK | Bounded ledger/lock mutation evidence and retained gaps | active | See linked PR |
 | [`mutation-failure-extension.md`](mutation-failure-extension.md) | Sophie / QK | Combined failure-profile scope, measurements and validation limits | active | See linked PR |

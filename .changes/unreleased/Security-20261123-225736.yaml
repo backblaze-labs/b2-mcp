@@ -1,3 +1,3 @@
 kind: Security
-body: "Fail closed when durable-secret provider metadata cannot be inspected, preventing minted values in recovery diagnostics from reaching logs. Related to demand-side-ai #2006."
+body: "Restrict durable-secret post-create logs to fixed operation context and allowlisted recovery statuses, preventing provider results and callback-controlled details from exposing minted values."
 time: 2026-11-23T22:57:36.778066-03:00

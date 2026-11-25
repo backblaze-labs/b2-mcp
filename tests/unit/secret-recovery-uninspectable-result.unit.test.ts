@@ -3,7 +3,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { inspect } from "node:util";
 import { logger } from "../../src/utils/logger";
-import { LOG_SANITIZER_FAILURE } from "../../src/utils/secret-sanitizer";
 import {
   durableSecretIdempotency,
   executeDurableSecretOperation,
@@ -82,9 +81,9 @@ it.each(["root", "nested"] as const)(
     const fields = vi.mocked(logger.fatal).mock.calls[0][0];
     expect(inspect(fields, { depth: 20 })).not.toContain(secret);
     expect(fields).toEqual({
-      logSanitizer: LOG_SANITIZER_FAILURE,
       tool: "b2_create_key",
       secretSink: { type: "file", path: f.file },
+      recovery: { status: "failed" },
     });
     expect(readFileSync(f.file, "utf8")).toBe("");
     expect(readdirSync(f.dir).filter((name) => name.endsWith(".pending"))).toHaveLength(1);
@@ -96,21 +95,18 @@ it.each(["root", "nested"] as const)(
   },
 );
 
-it("retains useful sanitized diagnostics for an inspectable nested result", async () => {
+it("uses the same fixed diagnostics for an inspectable nested result", async () => {
   const f = operation({ nested: { applicationKey: secret } }, "inspectable-control");
   await expect(executeDurableSecretOperation(f.options)).rejects.toMatchObject({
     status: 500,
     code: "secret_sink_projection_failed",
   });
-  const fields = vi.mocked(logger.fatal).mock.calls[0][0] as {
-    err: Error;
-    minted: { resourceType: string };
-    recovery: { status: string; error: string };
-  };
+  const fields = vi.mocked(logger.fatal).mock.calls[0][0];
   expect(inspect(fields, { depth: 20 })).not.toContain(secret);
-  expect(fields.err.message).toBe("projection failed for [redacted]");
-  expect(fields.minted.resourceType).toBe("application-key");
-  expect(fields.recovery).toEqual({ status: "failed", error: "cleanup failed for [redacted]" });
-  expect(fields).not.toHaveProperty("logSanitizer");
+  expect(fields).toEqual({
+    tool: "b2_create_key",
+    secretSink: { type: "file", path: f.file },
+    recovery: { status: "failed" },
+  });
   expect(readdirSync(f.dir).filter((name) => name.endsWith(".pending"))).toHaveLength(1);
 });

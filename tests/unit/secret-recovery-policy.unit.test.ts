@@ -106,27 +106,28 @@ it.each([null, "provider disconnected", 0, false])(
   },
 );
 
-it("reports unavailable diagnostics without replacing the post-create outcome", async () => {
+it("omits callback diagnostics without replacing the post-create outcome", async () => {
   const cause = new Error("provider response validation failed");
   const recovery = vi.fn(() => ({ status: "recovery_incomplete" }));
+  const diagnostics = vi.fn(() => {
+    throw new Error(`diagnostic callback failed: ${created.applicationKey}`);
+  });
   const f = fixture("diagnostics-failed", {
     create: async () => {
       throw durableSecretPostCreateFailure(created, cause);
     },
-    diagnostics: () => {
-      throw new Error(`diagnostic callback failed: ${created.applicationKey}`);
-    },
+    diagnostics,
     recoverAfterSinkFailure: recovery,
   });
   const failure = await executeDurableSecretOperation(f.options).catch((error: unknown) => error);
   operatorFailure(failure, "secret_sink_projection_failed");
   expect(recovery).toHaveBeenCalledWith(created, cause);
+  expect(diagnostics).not.toHaveBeenCalled();
   expect(pending(f.dir)).toHaveLength(1);
   expect(logger.fatal).toHaveBeenCalledWith(
     expect.objectContaining({
       tool: "b2_create_key",
       secretSink: { type: "file", path: f.file },
-      minted: { diagnostics_unavailable: true },
       recovery: { status: "recovery_incomplete" },
     }),
     expect.stringMatching(/\S/),
@@ -163,7 +164,7 @@ it.each([
   );
 });
 
-it("retains nested exact-secret redaction and recovery diagnostics for a circular provider result", async () => {
+it("fails closed without invoking an unrelated accessor on a circular provider result", async () => {
   const secret = "nested-provider-value-987654321";
   const value: Created = {
     result: { applicationKey: secret },
@@ -182,16 +183,212 @@ it("retains nested exact-secret redaction and recovery diagnostics for a circula
   });
   const failure = await executeDurableSecretOperation(f.options).catch((error: unknown) => error);
   operatorFailure(failure, "secret_sink_projection_failed");
-  const fields = vi.mocked(logger.fatal).mock.calls[0][0] as {
-    err: Error;
-    minted: { resourceType: string };
-    recovery: { status: string; note: string };
-  };
-  expect(fields.minted.resourceType).toBe("application-key");
-  expect(fields.recovery.status).toBe("recovery_incomplete");
-  expect(fields.err.message).toContain("[redacted]");
-  expect(fields.recovery.note).toBe("review [redacted]");
+  expect(vi.mocked(logger.fatal).mock.calls[0]?.[0]).toMatchObject({
+    recovery: { status: "recovery_incomplete" },
+  });
+  expect(JSON.stringify(vi.mocked(logger.fatal).mock.calls)).not.toContain(secret);
   expect(getter).not.toHaveBeenCalled();
+  expect(pending(f.dir)).toHaveLength(1);
+});
+
+it("fails closed when a proxy conceals a nested durable secret", async () => {
+  const secret = "proxy-hidden-provider-secret-987654321";
+  const target: Created = { applicationKeyId: "proxy-hidden-key-id" };
+  const concealed = new Proxy(target, {
+    ownKeys: () => ["applicationKeyId"],
+    getOwnPropertyDescriptor: (object, key) => Object.getOwnPropertyDescriptor(object, key),
+    get: (object, key, receiver) => {
+      if (key === "metadata") return { applicationKey: secret };
+      return Reflect.get(object, key, receiver);
+    },
+  });
+  const f = fixture("proxy-hidden-secret", {
+    create: async () => concealed,
+    projectRedacted: () => {
+      throw new Error("redacted response could not be built");
+    },
+    recoverAfterSinkFailure: (value) => {
+      const metadata = value.metadata as { applicationKey: string };
+      throw new Error(`cleanup failed for ${metadata.applicationKey}`);
+    },
+  });
+
+  const failure = await executeDurableSecretOperation(f.options).catch((error: unknown) => error);
+
+  operatorFailure(failure, "secret_sink_projection_failed");
+  expect(JSON.stringify(vi.mocked(logger.fatal).mock.calls)).not.toContain(secret);
+  expect(vi.mocked(logger.fatal).mock.calls[0]?.[0]).toMatchObject({
+    recovery: { status: "failed" },
+  });
+  expect(pending(f.dir)).toHaveLength(1);
+});
+
+it("does not invoke or log a recovery status accessor", async () => {
+  const secret = "recovery-status-accessor-secret-987654321";
+  const getter = vi.fn(() => secret);
+  const recovery = {};
+  Object.defineProperty(recovery, "status", { enumerable: true, get: getter });
+  const f = fixture("recovery-status-accessor", {
+    projectRedacted: () => {
+      throw new Error("redacted response could not be built");
+    },
+    recoverAfterSinkFailure: () => recovery,
+  });
+
+  const failure = await executeDurableSecretOperation(f.options).catch((error: unknown) => error);
+
+  operatorFailure(failure, "secret_sink_projection_failed");
+  expect(getter).not.toHaveBeenCalled();
+  expect(vi.mocked(logger.fatal).mock.calls[0]?.[0]).toEqual({
+    tool: "b2_create_key",
+    secretSink: { type: "file", path: f.file },
+  });
+  expect(JSON.stringify(vi.mocked(logger.fatal).mock.calls)).not.toContain(secret);
+  expect(pending(f.dir)).toHaveLength(1);
+});
+
+it("normalizes a stateful recovery status once before logging and claim cleanup", async () => {
+  let descriptorReads = 0;
+  const recovery = new Proxy(
+    {},
+    {
+      getOwnPropertyDescriptor: (_target, key) => {
+        if (key !== "status") return undefined;
+        descriptorReads += 1;
+        return {
+          configurable: true,
+          enumerable: true,
+          writable: true,
+          value: descriptorReads % 2 === 1 ? "failed" : "deleted",
+        };
+      },
+    },
+  );
+  const f = fixture("stateful-recovery-status", {
+    projectRedacted: () => {
+      throw new Error("redacted response could not be built");
+    },
+    recoverAfterSinkFailure: () => recovery,
+  });
+
+  const first = await executeDurableSecretOperation(f.options).catch((error: unknown) => error);
+  const second = await executeDurableSecretOperation(f.options).catch((error: unknown) => error);
+
+  operatorFailure(first, "secret_sink_projection_failed");
+  expect(second).toMatchObject({
+    status: 409,
+    code: "idempotency_key_pending",
+    message: expect.any(String),
+  });
+  expect(descriptorReads).toBe(1);
+  expect(f.create).toHaveBeenCalledTimes(1);
+  expect(vi.mocked(logger.fatal).mock.calls[0]?.[0]).toMatchObject({
+    recovery: { status: "failed" },
+  });
+  expect(pending(f.dir)).toHaveLength(1);
+});
+
+it("fails closed when a non-secret accessor reveals a nested durable secret", async () => {
+  const secret = "accessor-nested-provider-secret-987654321";
+  let getterReads = 0;
+  const createdWithAccessor: Created = { applicationKeyId: "accessor-metadata-key-id" };
+  Object.defineProperty(createdWithAccessor, "metadata", {
+    enumerable: true,
+    get: () => {
+      getterReads += 1;
+      return { applicationKey: secret };
+    },
+  });
+  const f = fixture("accessor-nested-secret", {
+    create: async () => createdWithAccessor,
+    projectRedacted: () => {
+      throw new Error("redacted response could not be built");
+    },
+    recoverAfterSinkFailure: (value) => {
+      const metadata = value.metadata as { applicationKey: string };
+      throw new Error(`cleanup failed for ${metadata.applicationKey}`);
+    },
+  });
+  const failure = await executeDurableSecretOperation(f.options).catch((error: unknown) => error);
+  operatorFailure(failure, "secret_sink_projection_failed");
+  expect(getterReads).toBe(1);
+  expect(JSON.stringify(vi.mocked(logger.fatal).mock.calls)).not.toContain(secret);
+  expect(vi.mocked(logger.fatal).mock.calls[0]?.[0]).toMatchObject({
+    recovery: { status: "failed" },
+  });
+  expect(pending(f.dir)).toHaveLength(1);
+});
+
+it.each([
+  {
+    label: "an own getter",
+    result(secret: string): Created {
+      const value: Created = { applicationKeyId: "own-getter-key-id" };
+      Object.defineProperty(value, "applicationKey", {
+        enumerable: true,
+        get: () => secret,
+      });
+      return value;
+    },
+  },
+  {
+    label: "a prototype getter",
+    result(secret: string): Created {
+      const prototype = Object.create(null) as Created;
+      Object.defineProperty(prototype, "applicationKey", {
+        enumerable: true,
+        get: () => secret,
+      });
+      return Object.assign(Object.create(prototype) as Created, {
+        applicationKeyId: "prototype-getter-key-id",
+      });
+    },
+  },
+])("redacts a durable secret exposed through $label", async ({ label, result }) => {
+  const secret = `provider-${label.replace(/ /g, "-")}-secret-987654321`;
+  const createdWithAccessor = result(secret);
+  const f = fixture(`secret-accessor-${label}`, {
+    create: async () => createdWithAccessor,
+    projectRedacted: () => {
+      throw new Error("redacted response could not be built");
+    },
+    recoverAfterSinkFailure: (value) => {
+      throw new Error(`cleanup failed for ${String(value.applicationKey)}`);
+    },
+  });
+
+  const failure = await executeDurableSecretOperation(f.options).catch((error: unknown) => error);
+
+  operatorFailure(failure, "secret_sink_projection_failed");
+  expect(JSON.stringify(vi.mocked(logger.fatal).mock.calls)).not.toContain(secret);
+  expect(pending(f.dir)).toHaveLength(1);
+});
+
+it("redacts a nested durable secret inherited through a data property", async () => {
+  const secret = "inherited-nested-provider-secret-987654321";
+  const prototype = Object.create(null) as Created;
+  Object.defineProperty(prototype, "metadata", {
+    enumerable: true,
+    value: { applicationKey: secret },
+  });
+  const createdWithInheritedMetadata = Object.assign(Object.create(prototype) as Created, {
+    applicationKeyId: "inherited-metadata-key-id",
+  });
+  const f = fixture("inherited-nested-secret", {
+    create: async () => createdWithInheritedMetadata,
+    projectRedacted: () => {
+      throw new Error("redacted response could not be built");
+    },
+    recoverAfterSinkFailure: (value) => {
+      const metadata = value.metadata as { applicationKey: string };
+      throw new Error(`cleanup failed for ${metadata.applicationKey}`);
+    },
+  });
+
+  const failure = await executeDurableSecretOperation(f.options).catch((error: unknown) => error);
+
+  operatorFailure(failure, "secret_sink_projection_failed");
+  expect(JSON.stringify(vi.mocked(logger.fatal).mock.calls)).not.toContain(secret);
   expect(pending(f.dir)).toHaveLength(1);
 });
 
@@ -247,7 +444,6 @@ it.each(["rejection", "compensation", "committed"] as const)(
     expect(pending(f.dir)).toHaveLength(1);
     expect(logger.warn).toHaveBeenCalledWith(
       expect.objectContaining({
-        err: expect.any(Error),
         tool: "b2_create_key",
         secretSink: { type: "file", path: f.file },
         lockPath: expect.stringContaining(f.file),
@@ -277,14 +473,17 @@ it("leaves committed material available and identifies its ledger when replay me
   expect(recovery).not.toHaveBeenCalled();
   const calls = vi.mocked(logger.fatal).mock.calls;
   expect(calls).toHaveLength(2);
-  for (const [fields, event] of calls) {
-    expect(fields).toMatchObject({
-      tool: "b2_create_key",
-      secretSink: { type: "file", path: f.file },
-      lockPath: expect.stringContaining(f.file),
-    });
-    expect(event?.trim().length ?? 0).toBeGreaterThan(0);
-  }
+  expect(calls[0]?.[0]).toEqual({
+    tool: "b2_create_key",
+    secretSink: { type: "file", path: f.file },
+    recovery: { status: "pending_reconciliation" },
+  });
+  expect(calls[1]?.[0]).toMatchObject({
+    tool: "b2_create_key",
+    secretSink: { type: "file", path: f.file },
+    lockPath: expect.stringContaining(f.file),
+  });
+  for (const [, event] of calls) expect(event?.trim().length ?? 0).toBeGreaterThan(0);
 });
 
 it("preserves an inline provider rejection without inventing a file claim", async () => {
