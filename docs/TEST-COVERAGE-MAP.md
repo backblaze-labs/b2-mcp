@@ -166,3 +166,8 @@ The credential-routing safety row was added on 2026-11-21. The older capability
 and layer-count snapshots above were not regenerated. Scoped credentials
 mutation evidence is recorded in
 [`design-docs/mutation-testing.md`](design-docs/mutation-testing.md).
+
+The secret-redaction safety row was refreshed on 2026-11-21. The older capability
+and layer-count snapshots above were not regenerated. Scoped sanitizer mutation
+evidence and remaining gaps are recorded in
+[`design-docs/mutation-testing.md`](design-docs/mutation-testing.md).
