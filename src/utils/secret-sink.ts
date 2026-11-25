@@ -22,13 +22,7 @@ import {
   SECURE_APPEND_FILE_MODE,
   secureAppendFileErrorDetail,
 } from "./secure-append-file.js";
-import {
-  LOG_SANITIZER_FAILURE,
-  currentSanitizerOptions,
-  sanitizeForMcpOutput,
-  sanitizeStructuredLogValue,
-} from "./secret-sanitizer.js";
-import type { SanitizerOptions } from "./secret-sanitizer.js";
+import { sanitizeForMcpOutput } from "./secret-sanitizer.js";
 
 /** Default local ledger path for file-mode durable secret storage. */
 export const DEFAULT_SECRET_SINK_PATH = join(homedir(), ".b2-mcp", "secrets.jsonl");
@@ -46,11 +40,13 @@ const HTTP_INLINE_OPT_IN_ENV = "B2_ALLOW_INLINE_SECRETS";
 const STALE_APPEND_LOCK_MS = 5 * 60 * 1000;
 const SECRET_SINK_TAIL_READ_BYTES = 1024 * 1024;
 const OPERATION_STATUS_UNKNOWN_CODE = "operation_status_unknown";
-const DURABLE_SECRET_VALUE_FIELD_NAMES = new Set([
-  "applicationKey",
-  "appKey",
-  "masterKey",
-  "secretAccessKey",
+const DURABLE_SECRET_RECOVERY_STATUSES = new Set([
+  "deleted",
+  "ejected_group_members",
+  "failed",
+  "not_configured",
+  "pending_reconciliation",
+  "recovery_incomplete",
 ]);
 const DURABLE_SECRET_POST_CREATE_RESULT = Symbol("b2-mcp.durableSecretPostCreateResult");
 
@@ -509,12 +505,11 @@ export function appendSecretSinkRecord(
             rollbackErr,
           );
           logger.fatal(
-            durableSecretLogPayload(result, {
-              err,
-              rollbackErr,
+            durableSecretLogPayload(
               tool,
-              secretSink: { type: "file", path: sink.filePath },
-            }),
+              { type: "file", path: sink.filePath },
+              "pending_reconciliation",
+            ),
             "secret_sink.rollback_failed_after_write_error",
           );
         }
@@ -526,12 +521,12 @@ export function appendSecretSinkRecord(
         closeError = err;
         if (committed) {
           logger.warn(
-            { err, tool, secretSink: { type: "file", path: sink.filePath } },
+            { tool, secretSink: { type: "file", path: sink.filePath } },
             "secret_sink.close_failed_after_commit",
           );
         } else if (operationError !== undefined) {
           logger.warn(
-            { err, tool, secretSink: { type: "file", path: sink.filePath } },
+            { tool, secretSink: { type: "file", path: sink.filePath } },
             "secret_sink.close_failed_before_commit",
           );
         }
@@ -1205,8 +1200,8 @@ function releaseSecretSinkClaimBestEffort(
 ): void {
   try {
     releaseSecretSinkClaim(claim);
-  } catch (err) {
-    logger.warn({ err, ...context }, "secret_sink.claim_cleanup_failed");
+  } catch {
+    logger.warn(context, "secret_sink.claim_cleanup_failed");
   }
 }
 
@@ -1215,12 +1210,6 @@ function createErrorHasKnownProviderRejection(err: unknown): boolean {
   if ((err as { code?: unknown }).code === OPERATION_STATUS_UNKNOWN_CODE) return false;
   const status = (err as { status?: unknown }).status;
   return typeof status === "number" && status >= 400 && status < 500 && status !== 408;
-}
-
-function recoveryClearedProviderSideEffect(recovery: unknown): boolean {
-  if (!recovery || typeof recovery !== "object" || !("status" in recovery)) return false;
-  const status = (recovery as { status?: unknown }).status;
-  return status === "deleted";
 }
 
 function isSecretSinkCommitAmbiguous(err: unknown): boolean {
@@ -1239,64 +1228,38 @@ function projectionPreflightPointer(
   return { type: "file", path: sink.filePath, recordId: "projection-preflight" };
 }
 
-function durableSecretDiagnostics<T>(
-  diagnostics: ((result: T) => Record<string, unknown>) | undefined,
-  result: T,
-): Record<string, unknown> {
+function durableSecretRecoveryLogStatus(recovery: unknown): string | undefined {
   try {
-    return diagnostics?.(result) ?? {};
+    if (recovery === null || typeof recovery !== "object") return undefined;
+    const statusDescriptor = Object.getOwnPropertyDescriptor(recovery, "status");
+    if (
+      !statusDescriptor ||
+      !("value" in statusDescriptor) ||
+      typeof statusDescriptor.value !== "string" ||
+      !DURABLE_SECRET_RECOVERY_STATUSES.has(statusDescriptor.value)
+    ) {
+      return undefined;
+    }
+    return statusDescriptor.value;
   } catch {
-    return { diagnostics_unavailable: true };
+    return undefined;
   }
 }
 
-function durableSecretExactValues(value: unknown): string[] {
-  const secrets = new Set<string>();
-  const seen = new WeakSet<object>();
-  const visit = (node: unknown): void => {
-    if (node === null || typeof node !== "object") return;
-    if (seen.has(node)) return;
-    seen.add(node);
-    let descriptors: Array<[string, PropertyDescriptor]>;
-    try {
-      descriptors = Object.entries(Object.getOwnPropertyDescriptors(node));
-    } catch {
-      return;
-    }
-    for (const [key, descriptor] of descriptors) {
-      if (!("value" in descriptor)) continue;
-      const fieldValue = descriptor.value;
-      if (DURABLE_SECRET_VALUE_FIELD_NAMES.has(key) && typeof fieldValue === "string") {
-        secrets.add(fieldValue);
-      }
-      visit(fieldValue);
-    }
-  };
-  visit(value);
-  return [...secrets];
-}
-
-function durableSecretSanitizerOptions(result: unknown): SanitizerOptions {
-  const current = currentSanitizerOptions();
+function durableSecretLogPayload(
+  tool: string,
+  secretSink: { type: "file"; path: string } | { type: "inline" },
+  recoveryStatus: string | undefined,
+) {
   return {
-    ...current,
-    secrets: [...(current.secrets ?? []), ...durableSecretExactValues(result)],
+    tool,
+    secretSink,
+    ...(recoveryStatus ? { recovery: { status: recoveryStatus } } : {}),
   };
 }
 
-function durableSecretLogPayload(result: unknown, payload: Record<string, unknown>) {
-  try {
-    return sanitizeStructuredLogValue(payload, durableSecretSanitizerOptions(result)) as Record<
-      string,
-      unknown
-    >;
-  } catch {
-    return {
-      logSanitizer: LOG_SANITIZER_FAILURE,
-      tool: payload.tool,
-      secretSink: payload.secretSink,
-    };
-  }
+function recoveryClearedProviderSideEffect(recoveryStatus: string | undefined): boolean {
+  return recoveryStatus === "deleted";
 }
 
 async function recoverDurableSecretAfterCreate<T>(
@@ -1321,7 +1284,6 @@ async function failDurableSecretAfterCreate<T>({
   toolName,
   result,
   err,
-  diagnostics,
   recoverAfterSinkFailure,
   logEvent,
   code,
@@ -1332,28 +1294,19 @@ async function failDurableSecretAfterCreate<T>({
   toolName: string;
   result: T;
   err: unknown;
-  diagnostics?: (result: T) => Record<string, unknown>;
   recoverAfterSinkFailure?: (result: T, err: unknown) => Promise<unknown> | unknown;
   logEvent: string;
   code: string;
   message: string;
 }): Promise<never> {
   const recovery = await recoverDurableSecretAfterCreate(result, err, recoverAfterSinkFailure);
+  const recoveryStatus = durableSecretRecoveryLogStatus(recovery);
   const secretSinkLog =
     secretSink.mode === "file"
       ? { type: "file" as const, path: secretSink.filePath }
       : { type: "inline" as const };
-  logger.fatal(
-    durableSecretLogPayload(result, {
-      err,
-      tool: toolName,
-      secretSink: secretSinkLog,
-      minted: durableSecretDiagnostics(diagnostics, result),
-      recovery,
-    }),
-    logEvent,
-  );
-  if (claim && secretSink.mode === "file" && recoveryClearedProviderSideEffect(recovery)) {
+  logger.fatal(durableSecretLogPayload(toolName, secretSinkLog, recoveryStatus), logEvent);
+  if (claim && secretSink.mode === "file" && recoveryClearedProviderSideEffect(recoveryStatus)) {
     releaseSecretSinkClaimBestEffort(claim, {
       tool: toolName,
       secretSink: { type: "file", path: secretSink.filePath },
@@ -1388,7 +1341,7 @@ export interface DurableSecretResponseOptions<T> {
   projectRedacted: (result: T, pointer: SecretSinkPointer) => unknown;
   /** Projection used when inline mode deliberately returns the secret. */
   projectInline: (result: T, warning: string) => unknown;
-  /** Non-secret diagnostics for critical logs after sink failures. */
+  /** @deprecated Retained for source compatibility; post-create logs never invoke this callback. */
   diagnostics?: (result: T) => Record<string, unknown>;
   /** Optional provider-side cleanup when sink storage fails after creation. */
   recoverAfterSinkFailure?: (result: T, err: unknown) => Promise<unknown> | unknown;
@@ -1425,7 +1378,6 @@ export async function executeDurableSecretOperation<T>({
   create,
   projectRedacted,
   projectInline,
-  diagnostics,
   recoverAfterSinkFailure,
 }: DurableSecretOperationOptions<T>): Promise<StructuredToolResult> {
   let claim: SecretSinkClaim | undefined;
@@ -1448,7 +1400,6 @@ export async function executeDurableSecretOperation<T>({
         toolName,
         result: postCreate.result as T,
         err: postCreate.cause,
-        diagnostics,
         recoverAfterSinkFailure,
         logEvent: "secret_sink.projection_failed_after_provider_create",
         code: "secret_sink_projection_failed",
@@ -1483,7 +1434,6 @@ export async function executeDurableSecretOperation<T>({
       toolName,
       result,
       err,
-      diagnostics,
       recoverAfterSinkFailure,
       logEvent: "secret_sink.projection_failed_after_provider_create",
       code: "secret_sink_projection_failed",
@@ -1497,13 +1447,11 @@ export async function executeDurableSecretOperation<T>({
   } catch (err) {
     if (isSecretSinkCommitAmbiguous(err)) {
       logger.fatal(
-        durableSecretLogPayload(result, {
-          err,
-          tool: toolName,
-          secretSink: { type: "file", path: secretSink.filePath },
-          minted: durableSecretDiagnostics(diagnostics, result),
-          recovery: { status: "pending_reconciliation" },
-        }),
+        durableSecretLogPayload(
+          toolName,
+          { type: "file", path: secretSink.filePath },
+          "pending_reconciliation",
+        ),
         "secret_sink.write_failed_with_ambiguous_commit",
       );
       throw {
@@ -1519,7 +1467,6 @@ export async function executeDurableSecretOperation<T>({
       toolName,
       result,
       err,
-      diagnostics,
       recoverAfterSinkFailure,
       logEvent: "secret_sink.write_failed_after_provider_create",
       code: "secret_sink_write_failed",
@@ -1529,14 +1476,13 @@ export async function executeDurableSecretOperation<T>({
   }
   try {
     appendSecretSinkIdempotencyIndex(secretSink, toolName, pointer, result, idempotency);
-  } catch (err) {
+  } catch {
     logger.fatal(
-      {
-        err,
-        tool: toolName,
-        secretSink: { type: "file", path: secretSink.filePath },
-        lockPath: claim.lockPath,
-      },
+      durableSecretLogPayload(
+        toolName,
+        { type: "file", path: secretSink.filePath },
+        "pending_reconciliation",
+      ),
       "secret_sink.idempotency_index_write_failed",
     );
     logger.fatal(

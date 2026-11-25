@@ -87,6 +87,7 @@ sessionful
 Smithery
 unallowed
 unforgeable
+uninspectable
 unparseable
 unreviewed
 
