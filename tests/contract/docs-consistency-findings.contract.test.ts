@@ -1,7 +1,7 @@
 /**
  * Docs and release-metadata consistency checks (cases C3, C4, C11, C12).
  * Each asserts the correct state of the documentation. Cases whose defect is still present
- * use `knownDefect` (see tests/support/known-defect.ts); the checks read repository files and
+ * (the unpublished-package wording, release tags) use `knownDefect` (see tests/support/known-defect.ts); the checks read repository files and
  * are skipped, not failed, when run outside a full checkout.
  */
 import { execFileSync } from "child_process";
@@ -39,18 +39,13 @@ const releaseTagsAvailable = fullCheckout && hasGitTag("v0.2.1") && hasGitTag("v
 describe.skipIf(!fullCheckout)(
   "Finding C3: README describes where B2_ALLOW_LOCAL_FILES and B2_FILE_ROOT apply",
   () => {
-    knownDefect(
-      "does not call B2_ALLOW_LOCAL_FILES / B2_FILE_ROOT HTTP-only (stdio reads both)",
-      async () => {
-        const line = read("README.md")
-          .split("\n")
-          .find((l) => l.includes("B2_ALLOW_LOCAL_FILES") && l.includes("B2_FILE_ROOT"));
-        expect(line, "README mentions both variables").toBeDefined();
-        await expectDefect(() =>
-          expect(line, "README line describing the local-file variables").not.toMatch(/HTTP-only/i),
-        );
-      },
-    );
+    it("does not call B2_ALLOW_LOCAL_FILES / B2_FILE_ROOT HTTP-only (stdio reads both)", async () => {
+      const line = read("README.md")
+        .split("\n")
+        .find((l) => l.includes("B2_ALLOW_LOCAL_FILES") && l.includes("B2_FILE_ROOT"));
+      expect(line, "README mentions both variables").toBeDefined();
+      expect(line, "README line describing the local-file variables").not.toMatch(/HTTP-only/i);
+    });
 
     it("the stdio credential reader does consume both variables (guard for the claim above)", () => {
       const source = read("src/credentials.ts");
@@ -127,37 +122,30 @@ describe("Finding C11: CHANGELOG [0.2.2] claims about held-back dependency bumps
 describe.skipIf(!fullCheckout)(
   "Finding C12: README pointers into docs/AUTHENTICATION.md resolve to real content",
   () => {
-    knownDefect(
-      "AUTHENTICATION.md covers every topic the README pointer to it claims",
-      async () => {
-        // Derive the claims from the pointer README makes today. If the pointer is removed or
-        // reworded to claim only what the destination has, there is nothing unsupported left.
-        const topics: Array<{ name: string; pattern: RegExp }> = [
-          { name: "destructive gate", pattern: /destructive/i },
-          { name: "secret sinks", pattern: /secret sink/i },
-          { name: "idempotency keys", pattern: /idempotency/i },
-          { name: "POSIX behavior", pattern: /POSIX/i },
-          { name: "Windows behavior", pattern: /Windows/i },
-        ];
-        const pointerLines = read("README.md")
-          .split("\n")
-          .filter((line) => line.includes("docs/AUTHENTICATION.md"));
-        const destination = join(root, "docs/AUTHENTICATION.md");
-        // The destination of a pointer must exist; a dangling pointer is a different defect.
-        expect(existsSync(destination), "docs/AUTHENTICATION.md exists").toBe(true);
-        const auth = read("docs/AUTHENTICATION.md");
+    it("AUTHENTICATION.md covers every topic the README pointer to it claims", async () => {
+      // Derive the claims from the pointer README makes today. If the pointer is removed or
+      // reworded to claim only what the destination has, there is nothing unsupported left.
+      const topics: Array<{ name: string; pattern: RegExp }> = [
+        { name: "destructive gate", pattern: /destructive/i },
+        { name: "secret sinks", pattern: /secret sink/i },
+        { name: "idempotency keys", pattern: /idempotency/i },
+        { name: "POSIX behavior", pattern: /POSIX/i },
+        { name: "Windows behavior", pattern: /Windows/i },
+      ];
+      const pointerLines = read("README.md")
+        .split("\n")
+        .filter((line) => line.includes("docs/AUTHENTICATION.md"));
+      const destination = join(root, "docs/AUTHENTICATION.md");
+      // The destination of a pointer must exist; a dangling pointer is a different defect.
+      expect(existsSync(destination), "docs/AUTHENTICATION.md exists").toBe(true);
+      const auth = read("docs/AUTHENTICATION.md");
 
-        const unsupported = pointerLines.flatMap((line) =>
-          topics
-            .filter(({ pattern }) => pattern.test(line) && !pattern.test(auth))
-            .map(({ name }) => name),
-        );
-        await expectDefect(() =>
-          expect(unsupported, "topics README claims AUTHENTICATION.md covers but it lacks").toEqual(
-            [],
-          ),
-        );
-      },
-    );
+      const unsupported = pointerLines.flatMap((line) =>
+        topics
+          .filter(({ pattern }) => pattern.test(line) && !pattern.test(auth))
+          .map(({ name }) => name),
+      );
+      expect(unsupported, "topics README claims AUTHENTICATION.md covers but it lacks").toEqual([]);
+    });
   },
 );

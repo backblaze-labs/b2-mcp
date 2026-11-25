@@ -1,7 +1,6 @@
 /**
  * Cases for src/s3/objects.ts: C2, C5, C6, C7, C8, C9. Each asserts the correct behavior.
- * C6 and the valid-base64 property already hold and run as normal tests; the other cases are
- * still defective and use `knownDefect` (see tests/support/known-defect.ts).
+ * The defects they first recorded are fixed, so all cases run as normal tests.
  */
 import fc from "fast-check";
 import { ReadableStream } from "node:stream/web";
@@ -25,7 +24,6 @@ import {
   testConfig,
 } from "../support/deterministic-fakes";
 import { FASTCHECK_SEED } from "../support/fast-check-seed";
-import { expectDefect, knownDefect } from "../support/known-defect";
 
 const INLINE_LIMIT = 1024 * 1024;
 
@@ -77,7 +75,7 @@ describe("Finding C5: early local-file refusals are client errors (400), not 500
     fs.rmSync(outside, { recursive: true, force: true });
   });
 
-  knownDefect("s3_put_object with local files disabled returns 400", async () => {
+  it("s3_put_object with local files disabled returns 400", async () => {
     const { tools, s3 } = setup({ ...testConfig, allowLocalFiles: false });
     const result = await tools.call("s3_put_object", {
       bucket: "b",
@@ -88,10 +86,10 @@ describe("Finding C5: early local-file refusals are client errors (400), not 500
     expect(result.isError, "request is refused").toBe(true);
     expect(s3.requests, "no S3 request sent").toEqual([]);
     const error = parseErrorText(parseResult(result) as string);
-    await expectDefect(() => expect(error, "error status").toMatchObject({ status: 400 }));
+    expect(error, "error status").toMatchObject({ status: 400 });
   });
 
-  knownDefect("s3_put_object with a filePath outside the sandbox root returns 400", async () => {
+  it("s3_put_object with a filePath outside the sandbox root returns 400", async () => {
     const { tools, s3 } = setup({ ...testConfig, fileRoot: dir });
     const result = await tools.call("s3_put_object", {
       bucket: "b",
@@ -102,10 +100,10 @@ describe("Finding C5: early local-file refusals are client errors (400), not 500
     expect(result.isError, "request is refused").toBe(true);
     expect(s3.requests, "no S3 request sent").toEqual([]);
     const error = parseErrorText(parseResult(result) as string);
-    await expectDefect(() => expect(error, "error status").toMatchObject({ status: 400 }));
+    expect(error, "error status").toMatchObject({ status: 400 });
   });
 
-  knownDefect("s3_get_object with local files disabled and saveToPath returns 400", async () => {
+  it("s3_get_object with local files disabled and saveToPath returns 400", async () => {
     const { tools, s3 } = setup({ ...testConfig, allowLocalFiles: false });
     const result = await tools.call("s3_get_object", {
       bucket: "b",
@@ -115,10 +113,10 @@ describe("Finding C5: early local-file refusals are client errors (400), not 500
     expect(result.isError, "request is refused").toBe(true);
     expect(s3.requests, "no S3 request sent").toEqual([]);
     const error = parseErrorText(parseResult(result) as string);
-    await expectDefect(() => expect(error, "error status").toMatchObject({ status: 400 }));
+    expect(error, "error status").toMatchObject({ status: 400 });
   });
 
-  knownDefect("s3_get_object with a saveToPath outside the sandbox root returns 400", async () => {
+  it("s3_get_object with a saveToPath outside the sandbox root returns 400", async () => {
     const { tools, s3 } = setup({ ...testConfig, fileRoot: dir });
     const result = await tools.call("s3_get_object", {
       bucket: "b",
@@ -128,7 +126,7 @@ describe("Finding C5: early local-file refusals are client errors (400), not 500
     expect(result.isError, "request is refused").toBe(true);
     expect(s3.requests, "no S3 request sent").toEqual([]);
     const error = parseErrorText(parseResult(result) as string);
-    await expectDefect(() => expect(error, "error status").toMatchObject({ status: 400 }));
+    expect(error, "error status").toMatchObject({ status: 400 });
   });
 });
 
@@ -151,35 +149,30 @@ describe("Finding C6: empty inline content", () => {
 });
 
 describe("Finding C7: inline upload input handling", () => {
-  knownDefect(
-    "rejects content that is not valid base64 instead of uploading decoded garbage (property)",
-    async () => {
-      // fc.check reports the property's own failure (the AssertionError from the checks below)
-      // as errorInstance, so only that failure is accepted as the defect.
-      const details = await fc.check(
-        fc.asyncProperty(
-          fc.string({ minLength: 1, maxLength: 24 }),
-          fc.constantFrom("!", "@", "#", "$", "%", "^", "*", "("),
-          fc.string({ maxLength: 24 }),
-          async (head, bad, tail) => {
-            const { tools, s3 } = setup();
-            const result = await tools.call("s3_put_object", {
-              bucket: "b",
-              key: "k",
-              content: `${head}${bad}${tail}`,
-              contentType: "text/plain",
-            });
-            expect(result.isError, "invalid base64 is refused").toBe(true);
-            expect(s3.requestsFor("putObject"), "no put sent").toHaveLength(0);
-          },
-        ),
-        { numRuns: 25, seed: FASTCHECK_SEED },
-      );
-      await expectDefect(() => {
-        if (details.failed) throw details.errorInstance;
-      });
-    },
-  );
+  it("rejects content that is not valid base64 instead of uploading decoded garbage (property)", async () => {
+    // fc.check reports the property's own failure (the AssertionError from the checks below)
+    // as errorInstance, so only that failure is accepted as the defect.
+    const details = await fc.check(
+      fc.asyncProperty(
+        fc.string({ minLength: 1, maxLength: 24 }),
+        fc.constantFrom("!", "@", "#", "$", "%", "^", "*", "("),
+        fc.string({ maxLength: 24 }),
+        async (head, bad, tail) => {
+          const { tools, s3 } = setup();
+          const result = await tools.call("s3_put_object", {
+            bucket: "b",
+            key: "k",
+            content: `${head}${bad}${tail}`,
+            contentType: "text/plain",
+          });
+          expect(result.isError, "invalid base64 is refused").toBe(true);
+          expect(s3.requestsFor("putObject"), "no put sent").toHaveLength(0);
+        },
+      ),
+      { numRuns: 25, seed: FASTCHECK_SEED },
+    );
+    if (details.failed) throw details.errorInstance;
+  });
 
   it("uploads exactly the bytes of any valid base64 content (property, guard)", async () => {
     await fc.assert(
@@ -199,7 +192,7 @@ describe("Finding C7: inline upload input handling", () => {
     );
   });
 
-  knownDefect("does not silently let filePath win when content is also supplied", async () => {
+  it("does not silently let filePath win when content is also supplied", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "b2-c7-"));
     try {
       const file = path.join(dir, "a.txt");
@@ -214,9 +207,8 @@ describe("Finding C7: inline upload input handling", () => {
       });
 
       // Ambiguous input must be refused, not resolved by quietly ignoring one source.
-      await expectDefect(() => {
-        expect(result.isError, "filePath plus content is refused").toBe(true);
-      });
+      expect(result.isError, "filePath plus content is refused").toBe(true);
+
       // Checked once the marker above is removed.
       expect(s3.requestsFor("putObject"), "no put sent").toHaveLength(0);
     } finally {
@@ -274,37 +266,29 @@ describe("Finding C8: inline put limit versus the HTTP body cap", () => {
     ).toBeNull();
   });
 
-  knownDefect(
-    "a complete MCP tools/call request carrying the largest inline upload is accepted by the HTTP body cap",
-    async () => {
-      const inlineLimit = advertisedInlineLimitBytes();
-      expect(inlineLimit, "the tool advertises 1 MiB inline").toBe(INLINE_LIMIT);
+  it("a complete MCP tools/call request carrying the largest inline upload is accepted by the HTTP body cap", async () => {
+    const inlineLimit = advertisedInlineLimitBytes();
+    expect(inlineLimit, "the tool advertises 1 MiB inline").toBe(INLINE_LIMIT);
 
-      const { tools, s3 } = setup();
-      const result = await tools.call("s3_put_object", {
-        bucket: "b",
-        key: "limit.bin",
-        content: Buffer.alloc(inlineLimit).toString("base64"),
-        contentType: "application/octet-stream",
-      });
-      expect(result.isError, "the tool accepts the advertised maximum inline payload").toBeFalsy();
-      expect(s3.requestsFor("putObject"), "one put sent").toHaveLength(1);
+    const { tools, s3 } = setup();
+    const result = await tools.call("s3_put_object", {
+      bucket: "b",
+      key: "limit.bin",
+      content: Buffer.alloc(inlineLimit).toString("base64"),
+      contentType: "application/octet-stream",
+    });
+    expect(result.isError, "the tool accepts the advertised maximum inline payload").toBeFalsy();
+    expect(s3.requestsFor("putObject"), "one put sent").toHaveLength(1);
 
-      // The whole serialized request (JSON-RPC envelope included) goes through the HTTP reader.
-      // A payload the tool accepts but the HTTP transport rejects (413) is a contract gap.
-      const accepted = await readCappedBodyBytes(postRequest(putObjectRequestBody(inlineLimit)));
-      await expectDefect(() =>
-        expect(
-          accepted,
-          "HTTP accepts the full request for the largest inline upload",
-        ).not.toBeNull(),
-      );
-    },
-  );
+    // The whole serialized request (JSON-RPC envelope included) goes through the HTTP reader.
+    // A payload the tool accepts but the HTTP transport rejects (413) is a contract gap.
+    const accepted = await readCappedBodyBytes(postRequest(putObjectRequestBody(inlineLimit)));
+    expect(accepted, "HTTP accepts the full request for the largest inline upload").not.toBeNull();
+  });
 });
 
 describe("Finding C9: failed save-to-path downloads leave nothing behind", () => {
-  knownDefect("does not create the parent directories when the object fetch fails", async () => {
+  it("does not create the parent directories when the object fetch fails", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "b2-c9-"));
     try {
       const { tools, s3 } = setup();
@@ -320,9 +304,7 @@ describe("Finding C9: failed save-to-path downloads leave nothing behind", () =>
       });
 
       expect(result.isError, "missing object is an error").toBe(true);
-      await expectDefect(() =>
-        expect(fs.existsSync(path.join(root, "made")), "parent directory created").toBe(false),
-      );
+      expect(fs.existsSync(path.join(root, "made")), "parent directory created").toBe(false);
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
@@ -330,7 +312,7 @@ describe("Finding C9: failed save-to-path downloads leave nothing behind", () =>
 });
 
 describe("Finding C2: inline s3_get_object checks the received length", () => {
-  knownDefect("fails when the body ends before the advertised contentLength", async () => {
+  it("fails when the body ends before the advertised contentLength", async () => {
     const { tools, s3 } = setup();
     s3.respond("getObject", () => ({
       key: "k",
@@ -345,9 +327,8 @@ describe("Finding C2: inline s3_get_object checks the received length", () => {
 
     const result = await tools.call("s3_get_object", { bucket: "b", key: "k" });
 
-    await expectDefect(() => {
-      expect(result.isError, "truncated body is an error").toBe(true);
-    });
+    expect(result.isError, "truncated body is an error").toBe(true);
+
     // Checked once the marker above is removed.
     expect(parseErrorText(parseResult(result) as string), "error code").toMatchObject({
       code: "incomplete_download",

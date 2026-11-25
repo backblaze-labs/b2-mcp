@@ -1,10 +1,9 @@
 /**
  * Case C1: when authorize fails and the facade falls back to an uncached S3 client, that
- * client must stay alive until the download body has been read. The defect is still present,
- * so the test uses `knownDefect` (see tests/support/known-defect.ts).
+ * client must stay alive until the download body has been read. The defect is fixed, so the
+ * test runs as a normal test.
  */
 import { describe, expect, vi } from "vitest";
-import { expectDefect, knownDefect } from "../support/known-defect";
 
 const BODY_BYTES = vi.hoisted(() => new TextEncoder().encode("stream-bound-to-this-client"));
 
@@ -74,56 +73,52 @@ const config: B2Config = {
 };
 
 describe("createAuthorizedS3Client fallback client lifecycle (Finding C1)", () => {
-  knownDefect(
-    "Finding C1: does not destroy the fallback client before the caller has consumed the object body",
-    async () => {
-      const facade = createAuthorizedS3Client({
-        getConfig: () => config,
-        getAuth: async () => {
-          throw Object.assign(new Error("authorize outage"), { status: 503, code: "unavailable" });
-        },
-      });
+  it("Finding C1: does not destroy the fallback client before the caller has consumed the object body", async () => {
+    const facade = createAuthorizedS3Client({
+      getConfig: () => config,
+      getAuth: async () => {
+        throw Object.assign(new Error("authorize outage"), { status: 503, code: "unavailable" });
+      },
+    });
 
-      const object = await (
-        facade as unknown as {
-          getObject: (input: unknown) => Promise<{ body: ReadableStream<Uint8Array> }>;
-          destroy: () => void;
-        }
-      ).getObject({ bucket: "b", key: "k" });
-      expect(peers, "one fallback client created").toHaveLength(1);
-      const [peer] = peers;
-
-      // Consume the body the way a caller does, to completion.
-      const received: Uint8Array[] = [];
-      let readError: unknown;
-      try {
-        const reader = object.body.getReader();
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          received.push(value);
-        }
-      } catch (error) {
-        readError = error;
+    const object = await (
+      facade as unknown as {
+        getObject: (input: unknown) => Promise<{ body: ReadableStream<Uint8Array> }>;
+        destroy: () => void;
       }
+    ).getObject({ bucket: "b", key: "k" });
+    expect(peers, "one fallback client created").toHaveLength(1);
+    const [peer] = peers;
 
-      // The body must stay readable while the caller reads it; destroying the client at
-      // return would cut the transfer.
-      await expectDefect(() => {
-        expect(readError, "body readable while the fallback client is alive").toBeUndefined();
-      });
-      // Checked once the marker above is removed.
-      expect(peer.pulledAfterDestroy, "body pulled after the client was destroyed").toBe(false);
-      expect(Buffer.concat(received).toString(), "bytes read from the body").toBe(
-        Buffer.from(BODY_BYTES).toString(),
-      );
+    // Consume the body the way a caller does, to completion.
+    const received: Uint8Array[] = [];
+    let readError: unknown;
+    try {
+      const reader = object.body.getReader();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        received.push(value);
+      }
+    } catch (error) {
+      readError = error;
+    }
 
-      // Once the body is consumed and the facade is closed, the fallback client is released.
-      object.body.cancel?.().catch(() => undefined);
-      facade.destroy();
-      await vi.waitFor(() => expect(peer.destroy, "fallback client destroyed").toHaveBeenCalled(), {
-        timeout: 1000,
-      });
-    },
-  );
+    // The body must stay readable while the caller reads it; destroying the client at
+    // return would cut the transfer.
+    expect(readError, "body readable while the fallback client is alive").toBeUndefined();
+
+    // Checked once the marker above is removed.
+    expect(peer.pulledAfterDestroy, "body pulled after the client was destroyed").toBe(false);
+    expect(Buffer.concat(received).toString(), "bytes read from the body").toBe(
+      Buffer.from(BODY_BYTES).toString(),
+    );
+
+    // Once the body is consumed and the facade is closed, the fallback client is released.
+    object.body.cancel?.().catch(() => undefined);
+    facade.destroy();
+    await vi.waitFor(() => expect(peer.destroy, "fallback client destroyed").toHaveBeenCalled(), {
+      timeout: 1000,
+    });
+  });
 });

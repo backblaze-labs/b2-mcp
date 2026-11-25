@@ -1,13 +1,11 @@
 /**
  * Case C27: a non-idempotent B2 write must be sent exactly once, whatever the failure
- * status, including a 401 that triggers re-authorization. The 503 cases already hold and run
- * as normal tests; the 401 cases are still defective and use `knownDefect`
- * (see tests/support/known-defect.ts). Covers 5 of the no-replay endpoints.
+ * status, including a 401 that triggers re-authorization. Covers 5 of the no-replay endpoints.
+ * The 401 defect these tests first recorded is fixed, so they run as normal tests.
  */
 import { B2AuthManager } from "../../src/auth";
 import { B2Client } from "../../src/b2/client";
 import type { B2Config } from "../../src/utils/types";
-import { expectDefect, knownDefect } from "../support/known-defect";
 import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
 import {
   authorizeResponse,
@@ -61,7 +59,7 @@ const failures: Array<[string, number, string]> = [
 describe("Finding C27: non-idempotent native writes are never replayed", () => {
   for (const [endpoint, method, call] of writes) {
     for (const [label, status, code] of failures) {
-      const register = status === 401 ? knownDefect : it;
+      const register = it;
       register(`${method} (${endpoint}) is sent once after a ${label}`, async () => {
         let writeCalls = 0;
         const transport = new RecordingTransport((request) => {
@@ -105,7 +103,7 @@ describe("Finding C27: non-idempotent native writes are never replayed", () => {
 
         expect(writeCalls, `${endpoint} was requested`).toBeGreaterThan(0);
         if (status === 401) {
-          await expectDefect(() => expect(writeCalls, `${endpoint} requests sent`).toBe(1));
+          expect(writeCalls, `${endpoint} requests sent`).toBe(1);
         } else {
           expect(writeCalls, `${endpoint} requests sent`).toBe(1);
         }

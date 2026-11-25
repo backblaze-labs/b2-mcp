@@ -7,7 +7,6 @@ import { circuitBreaker } from "../../src/utils/circuit-breaker";
 import { _consumeRetryToken, _resetRetryBudget } from "../../src/utils/retry";
 import type { B2AuthResponse } from "../../src/utils/types";
 import { testConfig } from "../support/deterministic-fakes";
-import { expectDefect, knownDefect } from "../support/known-defect";
 import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
 import {
   authorizeResponse,
@@ -1042,57 +1041,52 @@ describe("B2Client native edge branches", () => {
       expect(result[2]).toEqual({ object: { key: "latest.txt" }, version: null });
     });
 
-    knownDefect(
-      "Finding C20: a caller abort mid-batch never returns a shorter, misaligned result list",
-      async () => {
-        const controller = new AbortController();
-        const sdk = {
-          getBucket: vi.fn(async () => ({ id: "bucket-1" })),
-          raw: {
-            getFileInfo: vi.fn(
-              async (_apiUrl: string, _authorizationToken: string, request: object) => {
-                controller.abort(new Error("caller aborted"));
-                const fileId = (request as { fileId: string }).fileId;
-                return fileVersion({ fileId, fileName: `${fileId}.txt`, bucketId: "bucket-1" });
-              },
-            ),
-          },
-        };
-        const { client } = clientWithMockedNativeSdk(sdk);
-        const objects = [
-          { key: "v1.txt", versionId: "v1" },
-          { key: "v2.txt", versionId: "v2" },
-          { key: "v3.txt", versionId: "v3" },
-        ];
+    it("Finding C20: a caller abort mid-batch never returns a shorter, misaligned result list", async () => {
+      const controller = new AbortController();
+      const sdk = {
+        getBucket: vi.fn(async () => ({ id: "bucket-1" })),
+        raw: {
+          getFileInfo: vi.fn(
+            async (_apiUrl: string, _authorizationToken: string, request: object) => {
+              controller.abort(new Error("caller aborted"));
+              const fileId = (request as { fileId: string }).fileId;
+              return fileVersion({ fileId, fileName: `${fileId}.txt`, bucketId: "bucket-1" });
+            },
+          ),
+        },
+      };
+      const { client } = clientWithMockedNativeSdk(sdk);
+      const objects = [
+        { key: "v1.txt", versionId: "v1" },
+        { key: "v2.txt", versionId: "v2" },
+        { key: "v3.txt", versionId: "v3" },
+      ];
 
-        const outcome = await runWithMcpRequestSignal(controller.signal, () =>
-          client.resolveS3FileVersions({ bucket: "bucket", objects, maxConcurrency: 1 }),
-        ).then(
-          (value) => ({ value }),
-          (error: unknown) => ({ error }),
-        );
+      const outcome = await runWithMcpRequestSignal(controller.signal, () =>
+        client.resolveS3FileVersions({ bucket: "bucket", objects, maxConcurrency: 1 }),
+      ).then(
+        (value) => ({ value }),
+        (error: unknown) => ({ error }),
+      );
 
-        // Correct: either the abort is surfaced, or one entry comes back per requested object
-        // in request order. Silently dropping the unprocessed targets is the defect.
-        if ("value" in outcome) {
-          await expectDefect(() =>
-            expect(
-              outcome.value.map((entry) => entry.object.key),
-              "one result per requested object, in request order",
-            ).toEqual(objects.map((object) => object.key)),
-          );
-        } else {
-          // A rejection is only correct when it surfaces the caller's abort. Any other error
-          // (authorization, lookup, ...) is a different failure and must fail this test.
-          const reason = controller.signal.reason;
-          const error = outcome.error as { cause?: unknown };
-          expect(
-            outcome.error === reason || error?.cause === reason,
-            `rejection carries the caller's abort reason, got: ${String(outcome.error)}`,
-          ).toBe(true);
-        }
-      },
-    );
+      // Correct: either the abort is surfaced, or one entry comes back per requested object
+      // in request order. Silently dropping the unprocessed targets is the defect.
+      if ("value" in outcome) {
+        expect(
+          outcome.value.map((entry) => entry.object.key),
+          "one result per requested object, in request order",
+        ).toEqual(objects.map((object) => object.key));
+      } else {
+        // A rejection is only correct when it surfaces the caller's abort. Any other error
+        // (authorization, lookup, ...) is a different failure and must fail this test.
+        const reason = controller.signal.reason;
+        const error = outcome.error as { cause?: unknown };
+        expect(
+          outcome.error === reason || error?.cause === reason,
+          `rejection carries the caller's abort reason, got: ${String(outcome.error)}`,
+        ).toBe(true);
+      }
+    });
 
     it("fails version binding closed when the bucket lookup returns no bucket", async () => {
       const sdk = {

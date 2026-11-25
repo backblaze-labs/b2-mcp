@@ -1,7 +1,6 @@
 /**
  * Cases for the multipart/copy tools: C10, C17, C18, C26. Each asserts the correct behavior.
- * C17 and C18 already hold and run as normal tests; C10 and C26 are still defective and use
- * `knownDefect` (see tests/support/known-defect.ts).
+ * The C10 and C26 defects they first recorded are fixed, so all four run as normal tests.
  */
 import { S3Client } from "@aws-sdk/client-s3";
 import { createServer, invalidateAuthManagerCache } from "../../src/server";
@@ -10,7 +9,6 @@ import type { McpServer } from "../../src/mcp";
 import { circuitBreaker, s3CircuitBreaker } from "../../src/utils/circuit-breaker";
 import { callTool, testConfig } from "../support/deterministic-fakes";
 import { installAuthorizedS3Transport } from "../support/sdk-test-helpers";
-import { expectDefect, knownDefect } from "../support/known-defect";
 import { restoreB2SdkTransportForTests } from "../support/sdk-factory-hook";
 import type { MockInstance } from "vitest";
 
@@ -70,7 +68,7 @@ describe("Finding C18: s3_copy_object REPLACE applies the content-type guard", (
 });
 
 describe("Finding C26: create-multipart acl is a documented no-op and must not be sent", () => {
-  knownDefect("does not forward ACL to CreateMultipartUpload", async () => {
+  it("does not forward ACL to CreateMultipartUpload", async () => {
     sendSpy.mockResolvedValue({ UploadId: "u", Bucket: "b", Key: "k" });
 
     const result = await callTool(server, "s3_create_multipart_upload", {
@@ -83,12 +81,12 @@ describe("Finding C26: create-multipart acl is a documented no-op and must not b
     expect(result.isError, "create succeeds").toBeFalsy();
     const creates = commandsNamed("CreateMultipartUploadCommand");
     expect(creates, "one create sent").toHaveLength(1);
-    await expectDefect(() => expect(creates[0].input.ACL, "ACL is not forwarded").toBeUndefined());
+    expect(creates[0].input.ACL, "ACL is not forwarded").toBeUndefined();
   });
 });
 
 describe("Finding C10: abort multipart upload does not use the retrying client", () => {
-  knownDefect("sends AbortMultipartUpload through a client with a single attempt", async () => {
+  it("sends AbortMultipartUpload through a client with a single attempt", async () => {
     let attempts: number | undefined;
     sendSpy.mockImplementation(async function (
       this: S3Client,
@@ -110,8 +108,6 @@ describe("Finding C10: abort multipart upload does not use the retrying client",
 
     expect(result.isError, "abort succeeds").toBeFalsy();
     expect(attempts, "abort command reached the client").toBeDefined();
-    await expectDefect(() =>
-      expect(attempts, "max attempts of the client used for the abort").toBe(1),
-    );
+    expect(attempts, "max attempts of the client used for the abort").toBe(1);
   });
 });
