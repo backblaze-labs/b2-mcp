@@ -23,6 +23,8 @@ start with [`../README.md`](../README.md).
 | [`../TESTING.md`](../TESTING.md) | Sophie / QK | Deterministic PR gates, contract evidence, and live B2 smoke policy | active | #50, #51, #52, #60, #61, #63 |
 | [`../EVALS.md`](../EVALS.md) | Sophie / QK | LLM eval local and CI runbook | active | #251 |
 | [`mutation-testing.md`](mutation-testing.md) | Sophie / QK | Advisory StrykerJS mutation-testing baseline and survivor triage | active | #397 |
+| [`mutation-http-oauth-extension.md`](mutation-http-oauth-extension.md) | Sophie / QK | Bounded HTTP and OAuth mutation profile and survivor audit | active | #397 |
+| [`mutation-secret-recovery-extension.md`](mutation-secret-recovery-extension.md) | Sophie / QK | Bounded durable-secret recovery mutation profile and survivor audit | active | #397 |
 | [`security-review.md`](security-review.md) | Sophie / QK | Pre-public secret scanning, provenance, and legal review checklist | skeleton | #62, #66, #67 |
 | [`supply-chain-security.md`](supply-chain-security.md) | Sophie / QK | npm/GHCR compromise denylist, branch/artifact scan, and incident runbook | active | #89, #106 |
 | [`../SECURITY.md`](../SECURITY.md) | Sophie / QK | Engineering security map for security and supply-chain docs | active | #62, #66, #67, #89, #106 |

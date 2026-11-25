@@ -2062,7 +2062,7 @@ describe("secret sink file writer", () => {
     expect(JSON.stringify(fatalSpy.mock.calls)).toContain("ejected_group_members");
   });
 
-  it("redacts newly minted exact secrets from projection and recovery fatal logs", async () => {
+  it("omits free-form projection and recovery details from fatal logs", async () => {
     const fatalSpy = vi.spyOn(logger, "fatal").mockImplementation(() => undefined as never);
     const dir = tempDir();
     const file = join(dir, "secrets.jsonl");
@@ -2086,14 +2086,12 @@ describe("secret sink file writer", () => {
       }),
     ).rejects.toMatchObject({ code: "secret_sink_projection_failed" });
 
-    const payload = fatalSpy.mock.calls[0]?.[0] as {
-      err?: Error;
-      recovery?: { error?: string };
-    };
-    expect(payload.err?.message).toContain("[redacted]");
-    expect(payload.recovery?.error).toContain("[redacted]");
-    expect(payload.err?.message).not.toContain(secret);
-    expect(payload.recovery?.error).not.toContain(secret);
+    expect(fatalSpy.mock.calls[0]?.[0]).toEqual({
+      tool: "b2_create_key",
+      secretSink: { type: "file", path: file },
+      recovery: { status: "failed" },
+    });
+    expect(JSON.stringify(fatalSpy.mock.calls)).not.toContain(secret);
   });
 
   it("runs recovery when create reports post-create normalization failure", async () => {
@@ -2124,11 +2122,15 @@ describe("secret sink file writer", () => {
       }),
     ).rejects.toMatchObject({ code: "secret_sink_projection_failed" });
 
-    const payload = fatalSpy.mock.calls[0]?.[0] as { err?: Error };
     expect(recoverSpy).toHaveBeenCalledWith(created, expect.any(Error));
     expect(pendingClaimNames(dir)).toHaveLength(0);
-    expect(payload.err?.message).toContain("[redacted]");
-    expect(payload.err?.message).not.toContain(secret);
+    expect(fatalSpy.mock.calls[0]?.[0]).toEqual({
+      tool: "b2_create_key",
+      secretSink: { type: "file", path: file },
+      recovery: { status: "deleted" },
+    });
+    expect(JSON.stringify(fatalSpy.mock.calls)).not.toContain(secret);
+    expect(JSON.stringify(fatalSpy.mock.calls)).not.toContain(created.accountId);
     expect(JSON.stringify(fatalSpy.mock.calls)).toContain(
       "projection_failed_after_provider_create",
     );
@@ -2163,7 +2165,11 @@ describe("secret sink file writer", () => {
     ).rejects.toMatchObject({ code: "secret_sink_write_failed" });
 
     expect(pendingClaimNames(dir).length).toBeGreaterThan(0);
-    expect(JSON.stringify(fatalSpy.mock.calls)).toContain("manual-review");
+    expect(fatalSpy.mock.calls[0]?.[0]).toEqual({
+      tool: "b2_create_key",
+      secretSink: { type: "file", path: file },
+    });
+    expect(JSON.stringify(fatalSpy.mock.calls)).not.toContain("manual-review");
   });
 
   it("keeps the default recovery status when recovery returns undefined", async () => {
@@ -2229,7 +2235,12 @@ describe("secret sink file writer", () => {
     ).rejects.toMatchObject({ code: "secret_sink_write_failed" });
 
     expect(pendingClaimNames(dir).length).toBeGreaterThan(0);
-    expect(JSON.stringify(fatalSpy.mock.calls)).toContain("cleanup failed");
+    expect(fatalSpy.mock.calls[0]?.[0]).toEqual({
+      tool: "b2_create_key",
+      secretSink: { type: "file", path: file },
+      recovery: { status: "failed" },
+    });
+    expect(JSON.stringify(fatalSpy.mock.calls)).not.toContain("cleanup failed");
   });
 
   it("records Error recovery messages without releasing the pending claim", async () => {
@@ -2263,7 +2274,12 @@ describe("secret sink file writer", () => {
     ).rejects.toMatchObject({ code: "secret_sink_write_failed" });
 
     expect(pendingClaimNames(dir).length).toBeGreaterThan(0);
-    expect(JSON.stringify(fatalSpy.mock.calls)).toContain("cleanup failed with Error");
+    expect(fatalSpy.mock.calls[0]?.[0]).toEqual({
+      tool: "b2_create_key",
+      secretSink: { type: "file", path: file },
+      recovery: { status: "failed" },
+    });
+    expect(JSON.stringify(fatalSpy.mock.calls)).not.toContain("cleanup failed with Error");
   });
 
   it("keeps the pending claim when rollback after write failure is unconfirmed", async () => {

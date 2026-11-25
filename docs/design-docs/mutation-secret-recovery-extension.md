@@ -1,22 +1,21 @@
 # Durable-secret recovery mutation extension
 
-Date: 2026-11-23. Tracking: [demand-side-ai #2006](https://github.com/backblaze-labs/demand-side-ai/issues/2006).
+Date: 2026-11-23.
 
 ## Scope and method
 
 This bounded profile measures provider-create outcome classification,
 compensation ownership, retained idempotency claims, and failure diagnostics in
 [secret-sink.ts](../../src/utils/secret-sink.ts). Its
-[named declaration manifest](../../mutation-scopes/secret-recovery.json) selects
-ten top-level declarations; the shared resolver derives current source ranges
+[named declaration manifest](../../mutation-scopes/secret-recovery.json) currently selects
+eight top-level declarations; the shared resolver derives current source ranges
 from TypeScript syntax and fails explicitly when a selected declaration is
 missing. The profile remains advisory and inherits the core operator, timeout,
 and static-mutant settings.
 
-The selected declarations are createErrorHasKnownProviderRejection,
+The current selected declarations are createErrorHasKnownProviderRejection,
 recoveryClearedProviderSideEffect, isSecretSinkCommitAmbiguous,
-durableSecretDiagnostics, durableSecretExactValues,
-durableSecretSanitizerOptions, durableSecretLogPayload,
+durableSecretRecoveryLogStatus, durableSecretLogPayload,
 recoverDurableSecretAfterCreate, failDurableSecretAfterCreate, and
 executeDurableSecretOperation.
 
@@ -30,8 +29,10 @@ seed `a5ea61976ddc91beb7278d2c214ba1616b67bebb`. An ignored temporary configurat
 selected the equivalent three source ranges before the shared named resolver
 was ready. The maintained profile instruments the same 230 identities through the initial
 coverage-only checkpoint. A later peer-review privacy repair, described below,
-changes the source corpus to 228 mutants while retaining the same ten selected
-declarations.
+changes the source corpus to 228 mutants while retaining the same historical ten
+selected declarations. The later local fixed-diagnostics repair removes three
+collector/sanitizer declarations, adds durableSecretRecoveryLogStatus to the
+maintained eight-declaration manifest, and has no new native measurement.
 
 ## Independent behavioral contracts
 
@@ -83,12 +84,15 @@ not evidence of production defects.
 | Untouched baseline | 230 | 150 | 0 | 72 | 8 | 65.22% |
 | Intermediate 20-case snapshot | 230 | 194 | 2 | 29 | 5 | 85.22% |
 | Same-source coverage checkpoint, 23 cases | 230 | 200 | 2 | 23 | 5 | 87.83% |
-| Changed-source privacy repair, 26 cases | 228 | 201 | 2 | 23 | 2 | 89.04% |
+| Original changed-source privacy repair, 26 cases | 228 | 201 | 2 | 23 | 2 | 89.04% |
+| Publication rerun, same source and cases | 228 | 200 | 3 | 23 | 2 | 89.04% |
 
 The intermediate snapshot predates the final optional-event type correction and
 three additional supported reconciliation cases. It is preserved separately
-and is not substituted for the final frozen result. The two watchdog detections
-remove cycle tracking; they are not assertion kills.
+and is not substituted for the final frozen result. The publication rerun had
+one assertion-kill-to-watchdog transition caused by covering-test order; it is
+not counted as a new assertion kill. Watchdog detections remain distinct from
+assertion kills.
 
 The coverage-checkpoint awake run completed in 1 minute 31 seconds with zero
 errors. All
@@ -132,22 +136,17 @@ private missing-claim state was fabricated to force that invariant.
 Node.js 22.23.1, pnpm 11.20.0, locked Stryker 10.0.0, two native workers, and an
 isolated no-space checkout with its own frozen dependencies were used.
 The original secret-sink suite passed 70 cases. The initial 23 cases yielded
-93 focused passes, including after the host wake described below. With the
-subsequent three privacy/control regressions, **96 focused cases pass** across
+93 focused passes. With the three publication privacy/control regressions and
+seven subsequent local review regressions, **103 focused cases pass** across
 three files, along with all-test typecheck.
 All-test typecheck, changed-file Biome lint/format, spelling, and local link
 checks are recorded separately. Root owns the combined required verification
 and shared scheduled/manual workflow integration. No live B2 operation, hosted
 mutation result, new commit, or remote write is claimed by this subtask.
 
-The first coverage-checkpoint final-run attempt failed during initial dry run. It started at
-21:45:55 and timed out at 22:32:10; the system power log independently records Low Power Sleep
-at 21:46:12 on 1% battery and AC-attach wake from hibernation at 22:32:08.
-No mutant totals are accepted from that failed attempt. Original logs and exact
-sleep/wake events are retained. After confirming AC charging and another 93/93
-focused pass, one documented rerun used the same source/tests, profile and
-60-second mutation / 120-second test timeouts under process-scoped caffeinate.
-No permanent power setting or test timeout was changed.
+The first coverage-checkpoint final-run attempt did not complete, so no mutant
+totals are accepted from it. The completed rerun used the same source, tests,
+profile, and 60-second mutation / 120-second test timeouts.
 
 Ignored reports/mutation/secret-recovery-extension retains raw reports, source
 and test hashes, the intermediate snapshot, failed dry run, power evidence,
@@ -194,16 +193,21 @@ itself enumerated the wrapper; it was corrected to reference identity before
 this meaningful 2-failed/1-passed privacy red. No production edit preceded that
 separately observed red.
 
-The minimal repair removes the collector's inner try/catch-and-return. Any
-inspection failure now reaches the existing outer fail-closed logging boundary,
-which retains only its failure sentinel and trusted tool/sink context. It drops
-unsafe Error/recovery details while preserving the recovery attempt, normalized
-operation failure, pending claim, and protection against a repeated create.
+The publication repair removed the collector's inner try/catch-and-return so an
+inspection failure reached the existing outer fail-closed boundary. Local review
+then demonstrated that even successful Proxy introspection cannot prove an
+arbitrary provider graph complete. The local repair therefore no longer inspects
+provider results for logging: post-create logs retain only fixed tool/sink
+context and a recovery status read from an own data descriptor and accepted by
+a closed allowlist. Free-form errors, recovery fields, optional diagnostics,
+provider identifiers, and result objects are omitted. This preserves the
+recovery attempt, normalized operation failure, pending claim, and protection
+against a repeated create without relying on graph introspection for secrecy.
 All three new cases and 93 neighboring cases pass. A Security release fragment
 records the bounded data-protection repair; detailed evidence remains local pending
 security-owner review under [the reporting policy](../../SECURITY.md).
 
-The final frozen run completed in 1 minute 25 seconds: **228 generated, 201
+The original final frozen run completed in 1 minute 25 seconds: **228 generated, 201
 assertion kills, two watchdog detections, 23 survivors, two uncovered, zero
 errors; 89.04% total / 89.82% covered**. The selected declaration names, mutation
 operators, threshold, static policy, and timeouts did not change. The removed
@@ -214,13 +218,18 @@ survivors, two remain watchdog detections, two previously uncovered log-fallback
 mutants become assertion kills, and two remain uncovered. Four old changed or
 removed nodes and two changed new nodes are preserved explicitly; both changed
 new function-body nodes are killed. There is no blind ID join or fixed-corpus
-score claim across this source repair.
+score claim across this source repair. The separate publication rerun on the
+same source and cases recorded 200 assertion kills and three watchdog
+detections, preserving the same score, survivors, uncovered count, and zero
+errors.
 
 ## Publication context
 
 The publication stack is based on main `69c3f1d`, without importing the earlier
-pending mutation follow-ups. Its selected recovery source and 26 new cases match
-the measured final source/tests; all 96 focused recovery cases pass on that
-publication branch. The native percentages above retain their cumulative-seed
-measurement context. PR #613 depends on #612 for the declaration resolver and
-targets main so the repository's main-only required workflows execute.
+pending mutation follow-ups. At the published head, its selected recovery source
+and 26 new cases matched the measured final source/tests, and 96 focused recovery
+cases passed. The subsequent local review fix changes the selected source and
+adds seven regression cases; 103 focused recovery cases pass, but no new native
+mutation measurement is claimed. The percentages above remain historical results
+for their recorded source. PR #613 depends on #612 for the declaration resolver
+and targets main so the repository's main-only required workflows execute.
