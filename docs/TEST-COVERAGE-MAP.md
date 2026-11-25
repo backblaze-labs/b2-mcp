@@ -145,8 +145,13 @@ tools or tests change.
 | Read-only profile visibility (a read-only key sees only read tools) | unit: `capability-registration`, `tool-capabilities-policy` (independent positive and negative grant matrix); contract: `tool-profile-contract`, `tools-schema`. |
 | OAuth deployment scopes only narrow the B2-capability surface | unit: `oauth-scope-tools`, `tool-capabilities-policy` (explicit tiers, inheritance, empty/unknown scopes, and unmapped tools). |
 | Published tool hints and Partner classifications remain accurate | unit: `tool-annotations`, `tool-capabilities-policy` (reviewed fixture and independent Partner names). |
-| Secret redaction (no credentials, webhook secrets, or tokens returned or logged) | unit: `secret-sanitizer`, `secret-sanitizer.property`, `secret-sink`, `b2-buckets-fixtures` (notification rules); observability: `logging.behavior`. |
+| Secret redaction (no credentials, webhook secrets, or tokens returned or logged) | unit: `secret-sanitizer`, `secret-sanitizer.property`, `secret-sanitizer-policy` (independent field/header/label rules, normalization, environment aliases, preservation boundaries, and Error modes), `secret-sink`, `b2-buckets-fixtures` (notification rules); observability: `logging.behavior`. |
 | The 1 MiB inline object cap | unit: `s3-tools` (upload over the cap, read over the cap, streaming body that exceeds its declared size). |
 
 Any change that weakens one of these should come with a test change that makes
 the reason visible in review.
+
+The secret-redaction safety row was refreshed on 2026-11-21. The older capability
+and layer-count snapshots above were not regenerated. Scoped sanitizer mutation
+evidence and remaining gaps are recorded in
+[`design-docs/mutation-testing.md`](design-docs/mutation-testing.md).
