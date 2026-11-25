@@ -1,6 +1,7 @@
 name: Mutation testing (advisory)
 
-# Advisory StrykerJS mutation baseline (issue #397). High line/branch coverage
+# Advisory StrykerJS core baseline (#397) and boundary profiles (demand-side-ai #2006).
+# Each profile has its own job and reports. High line/branch coverage
 # does not prove the tests *assert* the right behavior; mutation testing does.
 # This job is intentionally NON-BLOCKING:
 #   - It is a standalone workflow, so it is not part of the required CI gate
@@ -25,13 +26,29 @@ concurrency:
 
 jobs:
   mutation:
-    name: Stryker mutation score
+    name: Stryker mutation score / ${{ matrix.profile }}
     if: github.repository == 'backblaze-labs/b2-mcp'
     runs-on: ubuntu-latest
     # Generous headroom: Stryker runs the suite under Babel instrumentation from
     # the isolated tools/mutation toolchain, which is slower than a plain unit
     # run. The job is advisory and the summary step reports an incomplete run.
     timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - profile: core
+            config: stryker.config.mjs
+            reportPrefix: reports/mutation/mutation
+            artifactName: mutation-reports
+          - profile: http-oauth
+            config: stryker.http-oauth.config.mjs
+            reportPrefix: reports/mutation/http-oauth/mutation
+            artifactName: mutation-reports-http-oauth
+          - profile: secret-recovery
+            config: stryker.secret-recovery.config.mjs
+            reportPrefix: reports/mutation/secret-recovery/mutation
+            artifactName: mutation-reports-secret-recovery
     steps:
       # actions/checkout v7, reviewed 2026-08-25.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -50,7 +67,9 @@ jobs:
       - name: Run Stryker mutation baseline (advisory)
         id: mutation
         continue-on-error: true
-        run: pnpm run test:mutation
+        env:
+          MUTATION_CONFIG: ${{ matrix.config }}
+        run: pnpm run test:mutation -- "$MUTATION_CONFIG"
       - name: Publish mutation score summary
         # Runs on success or Stryker failure. Note: a job cancelled at
         # `timeout-minutes` may skip even `if: always()` steps, so keep the
@@ -59,18 +78,22 @@ jobs:
         # to a note instead of aborting the step.
         if: always()
         continue-on-error: true
+        env:
+          MUTATION_PROFILE: ${{ matrix.profile }}
+          MUTATION_REPORT: ${{ matrix.reportPrefix }}.json
         run: |
           set -uo pipefail
           echo "## Mutation testing (advisory)" >> "$GITHUB_STEP_SUMMARY"
-          if [ ! -f reports/mutation/mutation.json ]; then
-            echo '(reports/mutation/mutation.json not found — run did not complete)' >> "$GITHUB_STEP_SUMMARY"
+          echo "Profile: $MUTATION_PROFILE" >> "$GITHUB_STEP_SUMMARY"
+          if [ ! -f "$MUTATION_REPORT" ]; then
+            echo '(profile mutation report not found — run did not complete)' >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           node -e "
             const { readFileSync } = require('node:fs');
             let r;
             try {
-              r = JSON.parse(readFileSync('./reports/mutation/mutation.json', 'utf8'));
+              r = JSON.parse(readFileSync(process.env.MUTATION_REPORT, 'utf8'));
             } catch (err) {
               console.log('(mutation.json unreadable or partial — run likely incomplete: ' + err.message + ')');
               process.exit(0);
@@ -123,9 +146,9 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: mutation-reports
+          name: ${{ matrix.artifactName }}
           path: |
-            reports/mutation/mutation.html
-            reports/mutation/mutation.json
+            ${{ matrix.reportPrefix }}.html
+            ${{ matrix.reportPrefix }}.json
           if-no-files-found: warn
           retention-days: 14
