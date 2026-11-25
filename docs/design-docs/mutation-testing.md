@@ -402,3 +402,78 @@ The final report retains every existing kill, catches all 49 former survivors
 and both previously uncovered mutants, and contains no ignored, timeout,
 compile-error, or runtime-error results. All 240 detections are assertion kills.
 No thresholds, test skips, or mutation exclusions were changed.
+
+## Credentials follow-up (2026-11-21)
+
+The scoped run starts from `61110dac`, independently of the pending capability,
+sanitizer, and destructive-gate work. It uses Node.js 22.23.1, pnpm 11.20.0, and
+the locked Stryker 10.0.0 toolchain:
+
+```bash
+pnpm run test:mutation -- --mutate=src/credentials.ts --concurrency=2 --reporters=json,clear-text,progress
+```
+
+`credentials-policy.unit.test.ts` adds 112 cases against unchanged production
+code. Each case loads a fresh module to exercise header sets, retired-alias
+patterns, and the initial warning guard under the active mutant. The cases cover:
+
+- Explicit destructive policies and safe transport defaults; required primary
+  credentials, partial optional master pairs, file access, and region defaults.
+- All canonical and retired credential header rejection guards, conflicting and
+  identical duplicate values, compatibility parsing, and literal discovery
+  placeholders. Rejected principal requests do not call the secret broker.
+- Stable verified subject claims, issuer qualification, client-only rate scopes,
+  credential-reference boundaries, malformed maps, normalization collisions,
+  map changes, and separate credential selection for distinct issuers.
+- Independently calculated SHA-256 vectors for public, private, caller, principal,
+  and discovery scopes; secret rotation invalidates private capability caches
+  while public identity remains stable. Verified caller scopes stay separate
+  even when callers share underlying credentials.
+- Startup validation and a real unusable file-sink path: stdio resolution and
+  HTTP startup refuse the sink before use, leaving the existing parent file
+  unchanged. A preflight dependency that throws a non-Error value is wrapped in
+  the fixed public error without exposing its detail.
+- One-time migration warnings for each retired alias and supported file variant,
+  strict name boundaries, warning reset, and omission of secret values.
+
+These provider tests consume verified `AuthInfo`; OAuth token verification
+remains the responsibility of the existing OAuth/HTTP security suites. New
+assertions passed against existing behavior, so no production change or
+artificial failing implementation was introduced.
+
+| Stage | Mutants | Killed | Survived | No coverage | Timeout/errors | Native score |
+| --- | --- | --- | --- | --- | --- | --- |
+| Fresh baseline | 430 | 303 | 113 | 14 | 0 | 70.47% |
+| Final policy cases | 430 | 422 | 8 | 0 | 0 | 98.14% |
+
+Both runs use identical source and mutant locations/replacements. The final
+result retains all 303 original kills, catches 106 former survivors and 13
+previously uncovered mutants, and executes the remaining formerly uncovered
+internal-error-message mutant (now a retained survivor). All 422 detections are
+assertion kills. There are no ignored, timeout, compile-error, or runtime-error
+results. No thresholds, mutation exclusions, or existing tests were changed.
+
+### Retained credentials mutations
+
+The eight survivors remain in the raw score. IDs refer to this final scoped
+report, not the full multi-module run. The reasoning below is bounded to the
+current provider implementation and accepted inputs:
+
+| Scoped IDs | Reason retained |
+| --- | --- |
+| 31 | Every provider constructs a configuration whose nonempty `credentialFingerprint` already equals `fingerprintConfig(config)` before deriving the caller scope. Recomputing that fingerprint through the mutated branch produces the same value. |
+| 81 | Partial optional pairs have already returned a fallback or thrown before this ternary. On the remaining inputs both values are truthy or both are falsy, making `id && key` and `id || key` the same condition. |
+| 157, 160 | Each canonical field currently has one accepted header name. An absent header becomes either an empty list or a single `undefined`; both return `undefined`. Adding accepted aliases would require revisiting this reasoning. |
+| 251 | The standard server provider accepts both an empty context and an empty-header request. Its startup validation has no request or principal in either case. Tests do not pin incidental argument shape for overridden provider methods. |
+| 314 | Removing the parsed-map cache only parses the same JSON again; it does not change routing results. This is a performance difference, not a functional authorization difference. |
+| 330, 343 | These internal exception messages are discarded by the enclosing catch, which always raises the fixed public `invalid_principal_map` error. |
+
+This score measures detection of the current generated fault set, not all
+possible credential-routing defects. No new test skips or suppression comments
+were added.
+
+Verification note: an earlier required-gate run timed out in the unchanged
+`supply-chain-policy` suite, including the runner's automatic retry. The suite
+then passed all 67 tests in isolation, and the completed tests passed the full
+required gate. The original timeout's cause was not established; its logs are
+retained with the local evidence.
