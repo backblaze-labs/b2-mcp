@@ -226,7 +226,7 @@ TypeScript is intentionally constrained to the `6.0.x` line while
 the toolchain validates support on Node.js 22, 24, and 26. Widen the
 TypeScript range only with a matching typecheck and lint toolchain upgrade.
 The TypeScript 7 native compiler decision and trigger are recorded in
-[`exec-plans/active/typescript-7-migration.md`](exec-plans/active/typescript-7-migration.md).
+[`intent/typescript-7-migration/plan.md`](../intent/typescript-7-migration/plan.md).
 
 Biome is also the only formatter. `pnpm run format` and `pnpm run format:check`
 cover Biome-supported file types; Markdown and YAML files are not part of the
@@ -695,3 +695,49 @@ credentials. The called workflow's jobs bind
 `B2_LIVE_TEST_ACCOUNT_ID` there; those values must not be duplicated or
 forwarded from repository or `npm-publish` secrets. GitHub Release publication
 events are not pre-release gates and are not used for live contract evidence.
+
+## Command Reference
+
+Moved from `AGENTS.md`; the day-one commands stay there.
+
+
+Run a single test by name:
+
+```bash
+pnpm exec vitest run --config vitest.config.mts --project=unit --testNamePattern="should cache the token"
+```
+
+Eval harness tests:
+
+```bash
+pnpm run evals
+```
+
+The deterministic harness self-tests run without provider credentials. Provider
+adapters should gate real LLM-backed eval cases on `RUN_LLM_EVALS=1` plus their
+own provider key env var (for example `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`)
+so normal CI remains key-free.
+
+TypeDoc is strict. `typedoc.json` enumerates the public `src` entry-point
+surface, writes generated HTML to gitignored `api-docs/`, requires module,
+class, interface, function, method, property, enum, type alias, variable,
+accessor, constructor, and signature documentation, and treats warnings as
+errors. Undocumented public API members, undocumented modules, and invalid
+links fail `pnpm run docs` and the docs workflow; issue #308 closed this
+strict-validation ratchet.
+
+Integration tests require env vars. The live suite exercises native, S3, key
+management, event notifications, and the Partner API with no opt-in skips, so it
+needs the full set: a non-master application key (`B2_APPLICATION_KEY_ID` /
+`B2_APPLICATION_KEY`) for native, S3, and key management; the account master key
+(`B2_MASTER_KEY_ID` / `B2_MASTER_KEY`) for the Partner API (which rejects
+non-master keys); `B2_REGION` for the account's S3 region; and
+`B2_LIVE_NOTIFICATION_BUCKET` naming a pre-provisioned, notifications-enabled
+bucket:
+
+```bash
+B2_APPLICATION_KEY_ID=appkey_id B2_APPLICATION_KEY=appkey_secret \
+B2_MASTER_KEY_ID=master_id B2_MASTER_KEY=master_secret \
+B2_REGION=us-east-005 B2_LIVE_NOTIFICATION_BUCKET=your-notify-bucket \
+pnpm run test:live:b2
+```

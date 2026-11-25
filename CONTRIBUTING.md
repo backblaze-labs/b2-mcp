@@ -88,7 +88,9 @@ touches the corresponding contract.
 ## Pull requests
 
 - Branch off `main`; keep changes focused.
-- `pnpm run verify` must pass before opening a PR. CI runs deterministic
+- Run `pnpm run ci` before pushing; it mirrors every required PR job in
+  `.github/workflows/test.yml`. `pnpm run verify` is the faster inner loop and
+  must pass before opening a PR. CI runs deterministic
   coverage, slow lifecycle, and production dependency audit evidence on Node.js
   22.23.1, 24, and 26, runs a patched Node 22 LTS cross-platform suite, and
   exercises the advertised Node.js 22.22.2 engine floor with a packed-package
@@ -98,6 +100,11 @@ touches the corresponding contract.
 - Assign the PR and its linked issue to the intended release milestone before
   merge; see [Release Milestones](RELEASE.md#release-milestones).
 - Add a Changie fragment for user-visible changes (see below).
+- Larger changes (new tools, credential, transport or release changes) start
+  in `intent/<slug>/` with `intent.md`, `spec.md` and `plan.md`; see
+  [`intent/README.md`](intent/README.md).
+- Read [`docs/review-lessons.md`](docs/review-lessons.md) before writing code;
+  reviewers follow [`REVIEW.md`](REVIEW.md).
 
 ## Changelog entries
 

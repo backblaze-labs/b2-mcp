@@ -13,6 +13,8 @@
       "!dist/**",
       "!node_modules/**",
       "!tools/mutation/node_modules/**",
+      "!tools/agent-cli/node_modules/**",
+      "!.claude/skills/**",
       "!coverage/**",
       "!reports/**",
       "!package-lock.json",
