@@ -1,6 +1,6 @@
 # Sanitizer module survivor sweep
 
-Date: 2026-11-23. Related: [demand-side-ai #2006](https://github.com/backblaze-labs/demand-side-ai/issues/2006).
+Date: 2026-11-23. Follow-up to [#397](https://github.com/backblaze-labs/b2-mcp/issues/397) (mutation testing).
 Validation base: `69c8f35fcd3ce02c2bab40156dab456ecbc8173e` (local cumulative
 snapshot containing follow-ups awaiting required approval, not a publication
 base).

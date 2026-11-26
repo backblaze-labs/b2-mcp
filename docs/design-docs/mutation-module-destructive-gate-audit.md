@@ -1,6 +1,6 @@
 # Destructive gate detector ownership follow-up
 
-Date: 2026-11-23. Tracking: [demand-side-ai #2006](https://github.com/backblaze-labs/demand-side-ai/issues/2006).
+Date: 2026-11-23. Follow-up to [#397](https://github.com/backblaze-labs/b2-mcp/issues/397) (mutation testing).
 
 ## Result and public contract
 

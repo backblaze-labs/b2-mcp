@@ -1,6 +1,6 @@
 # Auth defensive-boundary follow-up
 
-Date: 2026-11-23. Tracking: [demand-side-ai #2006](https://github.com/backblaze-labs/demand-side-ai/issues/2006).
+Date: 2026-11-23. Follow-up to [#397](https://github.com/backblaze-labs/b2-mcp/issues/397) (mutation testing).
 
 This follow-up depends on PR #596 commit
 `32b08c01caf286a36ba5bf0d2513fcda2d8a5acc`; the parent branch is untouched.
