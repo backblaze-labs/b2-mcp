@@ -87,6 +87,12 @@ not evidence of production defects.
 | Original changed-source privacy repair, 26 cases | 228 | 201 | 2 | 23 | 2 | 89.04% |
 | Publication rerun, same source and cases | 228 | 200 | 3 | 23 | 2 | 89.04% |
 
+These figures predate the combined review bundle. A reviewer's run of this
+profile on the bundle head (2026-11-25) measured 83.00% with 31 survivors,
+mostly in `durableSecretRecoveryLogStatus` and `isSecretSinkCommitAmbiguous`.
+Tests that pin both were added afterwards; the profile has not been
+re-measured since.
+
 The intermediate snapshot predates the final optional-event type correction and
 three additional supported reconciliation cases. It is preserved separately
 and is not substituted for the final frozen result. The publication rerun had
