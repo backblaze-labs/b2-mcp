@@ -1431,7 +1431,7 @@ export async function executeDurableSecretOperation<T>({
         logEvent: "secret_sink.projection_failed_after_provider_create",
         code: "secret_sink_projection_failed",
         message:
-          "B2 created a durable credential, but the MCP server could not validate the secret-bearing response. The secret was not returned in MCP output. Check the server critical log for the created resource identifiers and recovery status.",
+          "B2 created a durable credential, but the MCP server could not validate the secret-bearing response. The secret was not returned in MCP output. Check the server critical log for the recovery status. The log does not name the created key or account; find it by listing keys or accounts created at this time.",
       });
     }
     if (claim && secretSink.mode === "file" && createErrorHasKnownProviderRejection(err)) {
@@ -1465,7 +1465,7 @@ export async function executeDurableSecretOperation<T>({
       logEvent: "secret_sink.projection_failed_after_provider_create",
       code: "secret_sink_projection_failed",
       message:
-        "B2 created a durable credential, but the MCP server could not build a redacted response before storing the secret. The secret was not returned in MCP output. Check the server critical log for the created resource identifiers and recovery status.",
+        "B2 created a durable credential, but the MCP server could not build a redacted response before storing the secret. The secret was not returned in MCP output. Check the server critical log for the recovery status. The log does not name the created key or account; find it by listing keys or accounts created at this time.",
     });
   }
   let pointer: SecretSinkPointer;
@@ -1498,7 +1498,7 @@ export async function executeDurableSecretOperation<T>({
       logEvent: "secret_sink.write_failed_after_provider_create",
       code: "secret_sink_write_failed",
       message:
-        "B2 created a durable credential, but the configured file secret sink failed before the secret could be stored. The secret was not returned in MCP output. Check the server critical log for the created resource identifiers and recovery status, then rotate or revoke the created resource.",
+        "B2 created a durable credential, but the configured file secret sink failed before the secret could be stored. The secret was not returned in MCP output. Check the server critical log for the recovery status. The log does not name the created key or account; find it by listing keys or accounts created at this time, then rotate or revoke it.",
     });
   }
   try {
