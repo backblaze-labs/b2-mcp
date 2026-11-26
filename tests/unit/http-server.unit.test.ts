@@ -1433,3 +1433,36 @@ describe("getHost", () => {
     expect(() => getHost()).toThrow(/--host requires a value/);
   });
 });
+
+describe("buildHttpServer — getAuthInfo failure (Finding C24)", () => {
+  it("Finding C24: a throwing getAuthInfo hook yields an HTTP error response, not a hung request", async () => {
+    const fetch = vi.fn(async () => new Response("should not be reached", { status: 200 }));
+    const handle = buildHttpServer({
+      idleSweepMode: "request",
+      getAuthInfo: () => {
+        throw new Error("token verifier unavailable");
+      },
+      mcpHandler: { fetch, close: vi.fn(async () => undefined) },
+    });
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", onUnhandled);
+
+    try {
+      const port = await listenOnLocalhost(handle);
+      const res = await request(port, "GET", "/mcp").catch((err: Error) => err);
+
+      expect(fetch, "MCP handler not reached").not.toHaveBeenCalled();
+      await new Promise((resolve) => setImmediate(resolve));
+      // The defect: the request hangs (res is a timeout Error) instead of getting a response.
+      expect(res, "request completed with a response").not.toBeInstanceOf(Error);
+
+      // Checked once the marker above is removed.
+      expect((res as { status: number }).status, "error status").toBeGreaterThanOrEqual(400);
+      expect(unhandled, "unhandled rejections").toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+      await closeHttpServer(handle);
+    }
+  });
+});

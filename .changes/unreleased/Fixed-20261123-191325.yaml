@@ -1,0 +1,3 @@
+kind: Fixed
+body: "Treat only owned destructive detector entries as registered tools, so prototype-named unknown tools do not produce invalid effects or throw. Related to demand-side-ai #2006."
+time: 2026-11-23T19:13:25.119631-03:00

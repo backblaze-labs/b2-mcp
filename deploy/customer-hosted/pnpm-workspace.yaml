@@ -37,6 +37,9 @@ overrides:
   '@hono/node-server': 2.1.7
   '@types/node': 22.20.4
   '@vercel/backends>path-to-regexp': 8.4.0
+  # Dev-only Vercel file tracing: move off glob 13 (GHSA-3g3m-2fjr-6pw4).
+  # The reviewed upstream release uses the patched glob 14 line.
+  '@vercel/nft': 1.11.12
   # Dev-only transitive dep via @vercel/blob; force the patched build off the
   # undici WebSocket permessage-deflate DoS (GHSA-3wwx-pv8p-q78v, fixed 6.28.1).
   '@vercel/blob>undici': '>=6.29.1 <7'

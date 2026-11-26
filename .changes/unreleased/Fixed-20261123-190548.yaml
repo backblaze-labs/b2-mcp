@@ -1,0 +1,3 @@
+kind: Fixed
+body: 'Preserve prototype-named metadata as sanitized own data without replacing object, array, or Error prototypes. Related to demand-side-ai#2006.'
+time: 2026-11-23T19:05:48.108236-03:00

@@ -271,7 +271,8 @@ function keyIdSecretValuesFromEnv(env: NodeJS.ProcessEnv = process.env): string[
 /** Add configured key-ID env values to options for log/bootstrap sanitization. */
 function withKeyIdLogSecrets(options: SanitizerOptions): SanitizerOptions {
   const keyIds = keyIdSecretValuesFromEnv(options.env);
-  if (keyIds.length === 0) return options;
+  // Materialize even without key IDs: a one-shot iterable must remain usable
+  // across Error core fields and every nested log value.
   return {
     ...options,
     secrets: [...(options.secrets ? [...options.secrets] : []), ...keyIds],
@@ -341,6 +342,9 @@ export function sanitizeText(text: unknown, options: SanitizerOptions = {}): str
 /**
  * Redact exact secret values from text, including overlapping matches.
  *
+ * Existing literal redaction markers are preserved for matches wholly inside
+ * them. Matches crossing a marker boundary are still redacted.
+ *
  * @param text - Text to redact.
  * @param secrets - Exact secret values to replace.
  *
@@ -350,11 +354,20 @@ export function redactExactTextSecrets(text: string, secrets: readonly string[])
   const spans: TextSpan[] = [];
   for (const secret of new Set(secrets)) {
     if (!secret.trim() || secret === REDACTED) continue;
+    // The marker is constant-width. Precompute every matching offset so even a
+    // repeated character is checked without searching backwards through text.
+    const markerOffsets: number[] = [];
+    for (let offset = 0; offset <= REDACTED.length - secret.length; offset++) {
+      if (REDACTED.startsWith(secret, offset)) markerOffsets.push(offset);
+    }
     let start = 0;
     while (start < text.length) {
       const index = text.indexOf(secret, start);
       if (index === -1) break;
-      spans.push({ start: index, end: index + secret.length });
+      const insideMarker = markerOffsets.some(
+        (offset) => index >= offset && text.startsWith(REDACTED, index - offset),
+      );
+      if (!insideMarker) spans.push({ start: index, end: index + secret.length });
       start = index + 1;
     }
   }
@@ -409,7 +422,13 @@ export function bootstrapErrorMessage(err: unknown): string {
  * @returns Sanitized clone suitable for MCP output.
  */
 export function sanitizeForMcpOutput(value: unknown, options: SanitizerOptions = {}): unknown {
-  return sanitizeValue(value, [], new WeakSet<object>(), options, "mcp");
+  // A caller may supply a one-shot iterable. Reuse its values for every string
+  // in the traversal rather than exhausting it on the first field.
+  const reusableOptions = {
+    ...options,
+    secrets: options.secrets ? [...options.secrets] : [],
+  };
+  return sanitizeValue(value, [], new WeakSet<object>(), reusableOptions, "mcp");
 }
 
 /**
@@ -456,23 +475,40 @@ function sanitizeValue(
 
   if (Array.isArray(value)) {
     const output: unknown[] = [];
-    const outputRecord = output as unknown as Record<string, unknown>;
     output.length = safeArrayLength(value);
     for (const [key, descriptor] of enumerableDescriptors(value)) {
-      outputRecord[key] = isSensitiveField(key, path, mode)
-        ? REDACTED
-        : sanitizeDescriptorValue(descriptor, [...path, key], seen, options, mode);
+      setSanitizedProperty(
+        output,
+        key,
+        isSensitiveField(key, path, mode)
+          ? REDACTED
+          : sanitizeDescriptorValue(descriptor, [...path, key], seen, options, mode),
+      );
     }
     return output;
   }
 
   const output: Record<string, unknown> = {};
   for (const [key, descriptor] of enumerableDescriptors(value)) {
-    output[key] = isSensitiveField(key, path, mode)
-      ? REDACTED
-      : sanitizeDescriptorValue(descriptor, [...path, key], seen, options, mode);
+    setSanitizedProperty(
+      output,
+      key,
+      isSensitiveField(key, path, mode)
+        ? REDACTED
+        : sanitizeDescriptorValue(descriptor, [...path, key], seen, options, mode),
+    );
   }
   return output;
+}
+
+function setSanitizedProperty(output: object, key: string, value: unknown): void {
+  // Treat every input key as data, including the legacy __proto__ setter name.
+  Object.defineProperty(output, key, {
+    value,
+    enumerable: true,
+    configurable: true,
+    writable: true,
+  });
 }
 
 function enumerableDescriptors(value: object): Array<[string, PropertyDescriptor]> {
@@ -485,7 +521,9 @@ function safeArrayLength(value: unknown[]): number {
   const descriptor = Object.getOwnPropertyDescriptor(value, "length");
   if (!descriptor || !("value" in descriptor)) return 0;
   const length = descriptor.value;
-  return Number.isSafeInteger(length) && length >= 0 ? length : 0;
+  // A Proxy may report a different value for this writable data property.
+  // Safe integers above the native array-length limit still throw on assignment.
+  return Number.isSafeInteger(length) && length >= 0 && length <= 0xffff_ffff ? length : 0;
 }
 
 function sanitizeDescriptorValue(
@@ -554,13 +592,16 @@ function sanitizeErrorForLog(err: Error, seen: WeakSet<object>, options: Sanitiz
   safe.name = sanitizeErrorStringField(err, "name", options) ?? "Error";
   const stack = sanitizeErrorStringField(err, "stack", options);
   if (stack !== undefined) safe.stack = stack;
-  const safeRecord = safe as unknown as Record<string, unknown>;
 
   for (const [key, descriptor] of enumerableDescriptors(err)) {
     if (key === "message" || key === "name" || key === "stack") continue;
-    safeRecord[key] = isSensitiveField(key, [], "log")
-      ? REDACTED
-      : sanitizeDescriptorValue(descriptor, [key], seen, options, "log");
+    setSanitizedProperty(
+      safe,
+      key,
+      isSensitiveField(key, [], "log")
+        ? REDACTED
+        : sanitizeDescriptorValue(descriptor, [key], seen, options, "log"),
+    );
   }
   return safe;
 }

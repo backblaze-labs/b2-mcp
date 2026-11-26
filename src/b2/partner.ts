@@ -94,14 +94,6 @@ function partnerGroupMember(result: unknown): unknown {
   return recordValue(result, "groupMember");
 }
 
-function partnerGroupMemberAccountId(result: unknown): string | null {
-  return stringValue(partnerGroupMember(result), "accountId");
-}
-
-function partnerDiagnosticAccountId(result: unknown): string | null {
-  return partnerGroupMemberAccountId(result) ?? stringValue(result, "accountId");
-}
-
 function partnerGroupMemberProjection(result: unknown): PartnerGroupMemberProjection {
   const groupMember = partnerGroupMember(result);
   return {
@@ -165,17 +157,6 @@ function activeSecretSink(
   config: B2Config,
 ): Extract<B2Config["secretSink"], { mode: "file" | "inline" }> {
   return config.secretSink as Extract<B2Config["secretSink"], { mode: "file" | "inline" }>;
-}
-
-function partnerSecretDiagnostics(response: unknown) {
-  const entries = partnerResultEntries(response);
-  return {
-    resultCount: entries.length,
-    applicationKeyIds: uniqueStrings(
-      entries.map((entry) => stringValue(entry, "applicationKeyId")),
-    ),
-    accountIds: uniqueStrings(entries.map(partnerDiagnosticAccountId)),
-  };
 }
 
 function callerFingerprint(config: B2Config): string {
@@ -372,7 +353,6 @@ export function registerPartnerTools(
               results: createGroupMemberProjections(created, { redact: false }),
               warning,
             }),
-            diagnostics: partnerSecretDiagnostics,
             recoverAfterSinkFailure: async (created) => {
               const accountIds: string[] = [];
               const ejectionFailures: { accountId: string; error: string }[] = [];
@@ -608,7 +588,6 @@ export function registerPartnerTools(
               results: [reserveTrialCreateAccountProjection(created, { redact: false })],
               warning,
             }),
-            diagnostics: partnerSecretDiagnostics,
           });
         } catch (err) {
           return toolError(err);
