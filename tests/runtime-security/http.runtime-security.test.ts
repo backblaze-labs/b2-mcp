@@ -9,7 +9,10 @@
 import * as http from "node:http";
 import { S3Client } from "@aws-sdk/client-s3";
 import type { HttpTransport } from "@backblaze-labs/b2-sdk";
-import { B2Simulator } from "@backblaze-labs/b2-sdk/simulator";
+import {
+  startStandaloneSimulator,
+  type StandaloneSimulator,
+} from "../../test-support/standalone-simulator";
 import {
   closeCloudflareMcpHandlerForTests,
   cloudflareWorkerFetch,
@@ -143,8 +146,8 @@ async function startNode(
 ): Promise<void> {
   if (handle) await closeHttpServer(handle);
   resetNodeEnv(overrides);
-  const simulator = new B2Simulator({ minimumPartSize: 1024, recommendedPartSize: 1024 });
-  installSdkTransport(transport ?? simulator.transport());
+  await sim.reset({ minimumPartSize: 1024, recommendedPartSize: 1024 });
+  installSdkTransport(transport ?? sim.transport());
   handle = buildHttpServer();
   port = await listenOnLocalhost(handle);
 }
@@ -219,12 +222,21 @@ async function waitForInFlightRequests(expected: number): Promise<void> {
   );
 }
 
-beforeEach(() => {
+let sim: StandaloneSimulator;
+
+beforeAll(async () => {
+  sim = await startStandaloneSimulator();
+});
+
+afterAll(async () => {
+  await sim?.stop();
+});
+
+beforeEach(async () => {
   resetNodeEnv();
   _resetRateLimiter();
-  installSdkTransport(
-    new B2Simulator({ minimumPartSize: 1024, recommendedPartSize: 1024 }).transport(),
-  );
+  await sim.reset({ minimumPartSize: 1024, recommendedPartSize: 1024 });
+  installSdkTransport(sim.transport());
   vi.spyOn(S3Client.prototype as any, "send").mockResolvedValue({});
 });
 

@@ -4,9 +4,15 @@ import { createRequire } from "module";
 
 const require = createRequire(import.meta.url);
 const { B2Client: SdkB2Client } = require("@backblaze-labs/b2-sdk");
-const { B2Simulator } = require("@backblaze-labs/b2-sdk/simulator");
 const { S3Client } = require("@aws-sdk/client-s3");
 const { createMcpHttpTransport, setB2SdkClientFactoryForTests } = require("../../../dist/auth.js");
+const { resolveSimulatorServeScript, startStandaloneSimulator } = await import(
+  "../../../test-support/standalone-simulator.mjs"
+);
+
+// Fail at start, with the discovery message on stderr, when B2_SIMULATOR_DIR
+// does not name a b2-simulator checkout.
+resolveSimulatorServeScript();
 
 const API_TIMEOUT_MS = 30_000;
 const READ_ONLY_CAPABILITIES = ["listBuckets", "listFiles", "readFiles"];
@@ -82,7 +88,25 @@ function credentialScopedTransport(inner) {
   };
 }
 
+// One standalone simulator per credential pair, started on first use, as the
+// SDK's in-process simulators were: each pair sees its own empty store. Each
+// server exits with this process (test-support/exit-with-owner.mjs).
 const simulators = new Map();
+
+function simulatorTransport(cacheKey) {
+  return {
+    async send(request) {
+      let simulator = simulators.get(cacheKey);
+      if (!simulator) {
+        simulator = startStandaloneSimulator({
+          extraArgs: ["--min-part-size", "1024", "--recommended-part-size", "1024"],
+        }).then((started) => started.transport());
+        simulators.set(cacheKey, simulator);
+      }
+      return (await simulator).send(request);
+    },
+  };
+}
 
 S3Client.prototype.send = async (command, options = {}) => {
   if (options.abortSignal?.aborted) throw options.abortSignal.reason ?? new Error("aborted");
@@ -110,11 +134,6 @@ S3Client.prototype.send = async (command, options = {}) => {
 
 setB2SdkClientFactoryForTests((config) => {
   const cacheKey = `${config.applicationKeyId}\0${config.applicationKey}`;
-  let simulator = simulators.get(cacheKey);
-  if (!simulator) {
-    simulator = new B2Simulator({ minimumPartSize: 1024, recommendedPartSize: 1024 });
-    simulators.set(cacheKey, simulator);
-  }
   const retry = {
     maxRetries: 0,
     initialRetryDelayMs: 1,
@@ -125,7 +144,10 @@ setB2SdkClientFactoryForTests((config) => {
     client: new SdkB2Client({
       applicationKeyId: config.applicationKeyId,
       applicationKey: config.applicationKey,
-      transport: createMcpHttpTransport(credentialScopedTransport(simulator.transport()), retry),
+      transport: createMcpHttpTransport(
+        credentialScopedTransport(simulatorTransport(cacheKey)),
+        retry,
+      ),
       retry,
     }),
   };

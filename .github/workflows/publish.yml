@@ -157,6 +157,11 @@ jobs:
             fi
             sleep "$attempt"
           done
+      # `pnpm run verify` includes simulator-backed tests (docs/TESTING.md).
+      - name: Set up the standalone B2 simulator
+        uses: ./.github/actions/b2-simulator
+        with:
+          deploy-key: ${{ secrets.SIMULATOR_DEPLOY_KEY }}
       - run: pnpm install --frozen-lockfile
         env:
           ACTIONS_CACHE_URL: ""

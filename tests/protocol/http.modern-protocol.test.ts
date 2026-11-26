@@ -5,7 +5,10 @@
  */
 
 import { S3Client } from "@aws-sdk/client-s3";
-import { B2Simulator } from "@backblaze-labs/b2-sdk/simulator";
+import {
+  startStandaloneSimulator,
+  type StandaloneSimulator,
+} from "../../test-support/standalone-simulator";
 import {
   CLIENT_CAPABILITIES_META_KEY,
   CLIENT_INFO_META_KEY,
@@ -53,9 +56,19 @@ afterAll(() => {
   restoreEnv(savedHttpEnv);
 });
 
+let sim: StandaloneSimulator;
+
+beforeAll(async () => {
+  sim = await startStandaloneSimulator();
+});
+
+afterAll(async () => {
+  await sim?.stop();
+});
+
 beforeEach(async () => {
-  const simulator = new B2Simulator({ minimumPartSize: 1024, recommendedPartSize: 1024 });
-  installSdkTransport(withTrustedS3ApiUrl(simulator.transport()));
+  await sim.reset({ minimumPartSize: 1024, recommendedPartSize: 1024 });
+  installSdkTransport(withTrustedS3ApiUrl(sim.transport()));
   vi.spyOn(S3Client.prototype as any, "send").mockResolvedValue({
     Contents: [],
     CommonPrefixes: [],

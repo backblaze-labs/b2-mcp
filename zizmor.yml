@@ -54,7 +54,7 @@ rules:
       - publish.yml:9
   adhoc-packages:
     ignore:
-      # The packed-install smoke test (test.yml:406) is the pack-smoke install
+      # The packed-install smoke test (test.yml:422) is the pack-smoke install
       # of the locally-built tarball, not an unpinned third-party dependency.
       # It builds the package tarball, then `npm install`s THAT tarball into an
       # isolated temp dir to prove the published artifact installs cleanly —
@@ -64,13 +64,13 @@ rules:
       # installs only the locally-built `$tarball_path`. The adhoc-packages
       # risk this audit flags does not apply, so the finding is accepted.
       #
-      # Anchored to the `npm install "$tarball_path"` line (test.yml:406).
+      # Anchored to the `npm install "$tarball_path"` line (test.yml:422).
       # Re-review whenever the pack-smoke install step moves or changes what it
       # installs.
-      - test.yml:406
+      - test.yml:422
   artipacked:
     ignore:
-      # The ci-green marker job (test.yml:1021) checks out with
+      # The ci-green marker job (test.yml:1041) checks out with
       # `persist-credentials: true` on purpose: it force-advances the owned
       # `ci-green` marker ref on `main` via `git push` in the following step,
       # and that push needs the persisted checkout credential. Setting
@@ -91,10 +91,10 @@ rules:
       # Re-review whenever this job gains any third-party action/script, an
       # artifact upload, or stops pushing the marker ref.
       #
-      # Anchored to the ci-green marker `actions/checkout` (test.yml:1021).
+      # Anchored to the ci-green marker `actions/checkout` (test.yml:1041).
       # zizmor matches ignores by file:line, not by job/step identity, so a
       # shifted line could mask an unrelated checkout. A required test
       # (tests/unit/supply-chain-policy.unit.test.ts) compensates: it fails if
       # this anchor no longer resolves to the persist-credentials:true checkout
       # inside the mark-green job, or if any other job persists credentials.
-      - test.yml:1021
+      - test.yml:1041

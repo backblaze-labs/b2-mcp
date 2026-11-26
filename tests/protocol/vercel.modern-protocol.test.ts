@@ -6,7 +6,10 @@
  */
 
 import { S3Client } from "@aws-sdk/client-s3";
-import { B2Simulator } from "@backblaze-labs/b2-sdk/simulator";
+import {
+  startStandaloneSimulator,
+  type StandaloneSimulator,
+} from "../../test-support/standalone-simulator";
 import { closeVercelMcpHandlerForTests } from "../../deploy/vercel/adapter";
 import { invalidateAuthManagerCache, invalidateCapabilityCache } from "../../src/server";
 import {
@@ -96,16 +99,23 @@ function expectStatelessModernRequests(requests: VercelRequests): void {
   expect(requests.every((record) => record.headers["mcp-session-id"] === undefined)).toBe(true);
 }
 
+let sim: StandaloneSimulator;
+
+beforeAll(async () => {
+  sim = await startStandaloneSimulator();
+});
+
+afterAll(async () => {
+  await sim?.stop();
+});
+
 beforeEach(async () => {
   setVercelProtocolEnv(savedEnv);
   // The full frozen profile advertises the prompt surface, so enable prompts to
   // exercise parity; afterEach restores process.env from savedEnv.
   process.env.B2_ENABLE_MCP_PROMPTS = "true";
-  installSdkTransport(
-    withTrustedS3ApiUrl(
-      new B2Simulator({ minimumPartSize: 1024, recommendedPartSize: 1024 }).transport(),
-    ),
-  );
+  await sim.reset({ minimumPartSize: 1024, recommendedPartSize: 1024 });
+  installSdkTransport(withTrustedS3ApiUrl(sim.transport()));
   // s3_* tools run on the AWS SDK, which the B2 simulator transport does not
   // intercept; stub the S3 client so the representative s3_list_objects_v2 call
   // stays deterministic and offline.
