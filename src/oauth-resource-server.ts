@@ -1116,11 +1116,14 @@ function cacheKey(
 }
 
 function cloneAuthInfo(authInfo: AuthInfo): AuthInfo {
+  const extra = { ...(authInfo.extra ?? {}) };
+  if (Array.isArray(extra.aud)) extra.aud = [...extra.aud];
+  if (Array.isArray(extra.resource)) extra.resource = [...extra.resource];
   return {
     ...authInfo,
     scopes: [...authInfo.scopes],
     ...(authInfo.resource && { resource: new URL(authInfo.resource.href) }),
-    extra: { ...(authInfo.extra ?? {}) },
+    extra,
   };
 }
 

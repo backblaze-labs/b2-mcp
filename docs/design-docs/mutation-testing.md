@@ -124,6 +124,56 @@ prioritized ahead of a repo-wide `src/**` run:
 - `src/auth.ts`
 - `src/utils/tool-capabilities.ts`
 
+## Additional boundary profiles
+
+The default command keeps the six-module core scope above. Four separate bounded
+profiles extend HTTP/OAuth, JWKS/cache, durable-secret recovery and ledger/lock coverage:
+
+```sh
+pnpm run test:mutation -- stryker.http-oauth.config.mjs
+pnpm run test:mutation -- stryker.secret-recovery.config.mjs
+pnpm run test:mutation -- stryker.jwks-cache.config.mjs
+pnpm run test:mutation -- stryker.ledger-lock.config.mjs
+```
+
+The [HTTP/OAuth manifest](../../mutation-scopes/http-oauth.json) selects 18
+named declarations for token-claim validation, preverified middleware policy,
+bearer errors, and credential-header handoff. The
+[recovery manifest](../../mutation-scopes/secret-recovery.json) selects ten
+creation-outcome, compensation, claim-ownership, and secret-safe diagnostic
+declarations. These are bounded slices rather than whole-file scores.
+
+The [shared resolver](../../scripts/lib/mutation-profiles.cjs) reads TypeScript
+syntax and resolves current declaration ranges for each run. Missing, ambiguous,
+empty, duplicate, or unbounded selections fail explicitly. Refactors therefore
+cannot silently leave a stale line range selecting unrelated code. New profiles
+inherit the core runner, operators, static policy, and timeouts.
+The new [JWKS/cache manifest](../../mutation-scopes/jwks-cache.json) selects
+key retrieval, cache and dependency-failure handling. The
+[ledger/lock manifest](../../mutation-scopes/ledger-lock.json) selects durable
+append, tail recovery, committed-record replay and lock ownership. Their
+[extension report](mutation-failure-extension.md) records separate measured
+baselines rather than folding these fault sets into the earlier scores.
+
+The weekly/manual advisory workflow runs core, http-oauth, secret-recovery,
+jwks-cache, and ledger-lock in independent matrix jobs, each with the existing 90-minute budget. A failure
+in one profile does not cancel the others. Reports are separate:
+
+| Profile | Local report directory | Hosted artifact |
+| --- | --- | --- |
+| core | reports/mutation | mutation-reports |
+| http-oauth | reports/mutation/http-oauth | mutation-reports-http-oauth |
+| secret-recovery | reports/mutation/secret-recovery | mutation-reports-secret-recovery |
+| jwks-cache | reports/mutation/jwks-cache | mutation-reports-jwks-cache |
+| ledger-lock | reports/mutation/ledger-lock | mutation-reports-ledger-lock |
+
+The core artifact name remains compatible with existing consumers. The runner
+accepts each config as the positional Stryker configuration argument. The
+[HTTP/OAuth audit](mutation-http-oauth-extension.md),
+[recovery audit](mutation-secret-recovery-extension.md), and
+[combined extension report](mutation-security-extension.md) disclose before/after
+measurements, retained mutants, and the important paths outside each first slice.
+
 ## Baseline (2026-09-07)
 
 Stryker 10.0.0, 2453 mutants across the six modules. **Overall score: 64.49%**
@@ -140,13 +190,63 @@ Stryker 10.0.0, 2453 mutants across the six modules. **Overall score: 64.49%**
 
 Reproduce with `pnpm run test:mutation`; the score moves as tests are added.
 
+## Capability-policy follow-up (2026-11-21)
+
+The focused `tool-capabilities.ts` campaign now has **233 killed, 4 survived,
+0 no-coverage, 0 timeouts, and 0 errors out of 237 mutants: 98.31%**. Before
+the test changes, the same module reproduced the historical result exactly:
+80 killed, 156 survived, and 1 no-coverage (33.76%). These are module results,
+not a new baseline for the other five modules.
+
+[`tool-capabilities-policy.unit.test.ts`](../../tests/unit/tool-capabilities-policy.unit.test.ts)
+adds 42 cases covering independent single-capability allow/deny profiles,
+OAuth tool tiers and operation inheritance, unknown-tool fallback, mixed
+read/write requirements, Partner classification, and the published annotation
+fixture. Real server registration also checks the full surface, unavailable
+durable-secret stubs, and fail-closed discovery. Expected grants are not derived
+from the production policy tables.
+
+The tests reload policy data inside each case after `vi.resetModules()`. This
+matters for mutation activation: a controlled two-mutant experiment on the
+`b2_list_buckets` capability entry ignored both mutants with a module-scope
+import, while the same tests with per-case imports killed both. Both variants
+had passing baselines without mutations. The existing `ignoreStatic: true` setting is
+unchanged; policy data must actually be exercised during a test to be scored.
+
+Reproduce the focused campaign with:
+
+```bash
+pnpm run test:mutation -- --mutate=src/utils/tool-capabilities.ts --concurrency=2 --reporters=json,clear-text
+```
+
+The initial before/after comparison on Node 26.13.1 measured 80 then 227 kills.
+The CI-pinned Node 22.23.1 runtime reproduced 227 kills with those 41 cases,
+then 233 kills with the final 42-case suite. All runs used pnpm 11.20.0 and
+Stryker 10.0.0 with the same options. Production code,
+operator set, thresholds, and exclusions were not changed.
+
+### Four retained survivors
+
+The raw score still includes these mutants. No suppressions were added.
+
+| Scoped mutant ID | Location | Why current shipped behavior is preserved |
+| --- | --- | --- |
+| `106`, `107` | `hasReadOnlyToolCapabilities`: replace the positive length check with `true` / `>= 0` | Every current mapped capability array is nonempty; the guard does not distinguish any current mapped tool. |
+| `212` | `isToolEnabled`: replace `required.length === 0` with `false` | Current mappings are all nonempty. Unmapped tools still return through `!required`. |
+| `219` | `isToolAllowedByOAuthScopes`: remove the `scopes === null` early return | The following admin-operation check calls `oauthScopesAllowOperation(null, "admin")`, which already returns `true`. |
+
+These are bounded equivalence observations, not universal claims about mutable
+policy tables or future changes. Revisit the length-check classifications if
+an empty mapping is introduced, and the OAuth classification if null-scope
+operation semantics change. The policy matrix must be reviewed alongside new
+tools and grants.
+
 ## Highest-value surviving mutants to fix
 
-Ranked by security impact, not by count. Many survivors in
-`tool-capabilities.ts` are low value (it is largely a static capability-name
-data map; mutating one string in an array rarely breaks a behavioral test).
-The behavioral logic below is where surviving mutants signal real assertion
-gaps:
+Ranked by security impact, not by count, from the historical baseline above.
+Capability-name data controls authorization and tool visibility; do not dismiss
+its mutants solely because they change table values. The focused follow-up
+above addresses that module. The remaining modules still need targeted work:
 
 1. **`destructive-gate.ts` lifecycle-deletion detection** (`L88`, `L100`–`L106`).
    Surviving `MethodExpression`/`ConditionalExpression` mutants on the
@@ -176,7 +276,297 @@ gaps:
    mean the shape of the elicitation request/response is asserted loosely.
    Assert the specific refused/required/approved outcome codes and messages.
 
-`tool-capabilities.ts` (score 33.76%) is dominated by data-map string/array
-mutants; the highest-value fix there is a contract test that asserts the
-capability map for a representative read-only and write key, rather than chasing
-each string mutant.
+For `tool-capabilities.ts`, retain the independent positive and negative policy
+matrix and the per-case module loading described above when extending tests.
+
+## Secret sanitizer follow-up (2026-11-21)
+
+The scoped run below starts from `61110dac`, independently of the pending
+capability-policy work. It uses Node.js 22.23.1, pnpm 11.20.0, and the locked
+Stryker 10.0.0 toolchain:
+
+```bash
+pnpm run test:mutation -- --mutate=src/utils/secret-sanitizer.ts --concurrency=2 --reporters=json,clear-text,progress
+```
+
+`secret-sanitizer-policy.unit.test.ts` adds 116 cases with independent literal policy for
+structured fields, header names, text labels, case/separator normalization,
+credential environment names, and log-only key IDs. Ordinary secret values
+prevent the canary or configured-value rules from masking a broken field rule.
+Exact preservation assertions cover pagination tokens, public metadata, key IDs
+in MCP output, existing redaction markers, sparse arrays, and inert built-ins.
+Error cases cover inherited descriptors, accessors, and the separate MCP/log
+representations. Each case reloads the module so policy sets and regexes created
+at import time are exercised under the active mutant.
+
+Before changing production code, the new policy tests caught 112 former
+survivors and six previously uncovered mutants, retaining all 355 existing
+kills. Those tests passed against existing behavior; no artificial failing
+production change was used to establish coverage.
+
+| Stage | Mutants | Killed | Timeout | Survived | No coverage | Native score |
+| --- | --- | --- | --- | --- | --- | --- |
+| Fresh baseline, unchanged source | 526 | 355 | 6 | 157 | 8 | 68.63% |
+| Policy tests, unchanged source | 526 | 473 | 6 | 45 | 2 | 91.06% |
+| Policy tests and iterable fix | 526 | 474 | 5 | 45 | 2 | 91.06% |
+
+Triage also exposed a real leak in the public `Iterable` secret option: a
+one-shot generator was exhausted by the first string, leaving subsequent nested
+values, Error stacks, or Error metadata visible. Three additional regression
+cases reproduced the failure on unchanged source before the fix. Structured MCP
+sanitization now snapshots the iterable once per traversal; log/Error options
+always materialize their secrets, including when no key-ID environment values
+are present. Reusing a single already-consumed iterator across separate public
+calls is outside this fix; callers needing reuse should supply a reusable
+collection such as an array.
+
+The production fix changes the generated mutant set even though its count stays
+526. The exact same-source comparison is the first two rows, not an ID-based
+comparison across the production change.
+
+### Retained sanitizer mutations
+
+All 45 survivors remain in the raw result. The following triage uses IDs from
+the final scoped report; IDs differ in a full multi-module run. Equivalence
+reasoning is bounded to the current policy and ordinary supported Node objects,
+not a claim that arbitrary future policy changes or modified built-ins are safe.
+
+| Scoped IDs | Reason retained |
+| --- | --- |
+| 33, 34, 35, 78, 80 | Label sorting does not change matching when the separator must follow the entire label; `secretname` cannot satisfy `endsWith("secret")`. |
+| 151, 156, 160, 165 | Removing an intermediate null filter leaves values that the later candidate-validation pass rejects. |
+| 191, 193, 194 | Exact-secret iteration order does not change the union of matching spans. |
+| 199, 201 | `String(text)` preserves primitive strings, making the alternate coercion branch equivalent. |
+| 216, 228, 237 | An extra end-of-text search finds no nonempty secret; the empty-span path reconstructs the original text; sorting tied starts differently still merges their maximum end. |
+| 265, 266, 268, 428 | An inert initial path does not match `customHeaders`; an empty non-log mode takes the current MCP branches. |
+| 5, 338, 339, 343, 345, 346, 347, 362, 363, 365, 366, 367 | Standard arrays have a nonnegative integer data-property length; the native typed-array getter exists and returns a nonnegative integer, or throws for a proxy and takes the catch path. Replacing zero with fallback zero is indistinguishable. |
+| 381 | Reading an accessor descriptor's absent `value` still reaches the accessor sentinel without invoking its getter. |
+| 460, 461, 464, 468, 469 | For valid single-line HTTP header values, the outer trim, greedy whitespace matching, and successful capture make these anchor/trim/optional-chain changes redundant. Multiline values passed directly to the helper are outside this reasoning. |
+| 522, 524, 527 | Exact redaction already skips the redaction marker and replaces request secrets before the generic text pass. |
+| 172, 186, 264 | These are non-equivalent preservation gaps: the mutation injects an unrelated literal phrase into an otherwise empty configured-secret list. No assertion targeting the mutation tool's phrase was added merely to kill them. |
+
+Two mutants remain uncovered (405 and 408): fallback message/name literals when
+no descriptor exists anywhere in an Error's prototype chain. Ordinary Errors
+inherit those descriptors from `Error.prototype`; tests do not modify that
+global prototype to reach the fallback. Five timeout mutants remove loop
+progress or exit conditions in exact matching and prototype traversal. They
+remain separately reported as timeouts, not assertion kills. There are no
+compile/runtime-error mutants in the completed scoped run.
+
+Verification on Node.js 22.23.1 passed: `pnpm run verify` (2,406 unit tests with
+20 existing skips, 55 runtime-security tests, 48 modern and 12 legacy protocol
+tests), 343 contract tests, 23 observability tests, and all 158 focused sanitizer
+tests. The required gate runs from an identical checkout without spaces in its
+path because existing release-script tests do not quote their root path.
+
+The mutation configuration, thresholds, static-mutant handling, and exclusions
+are unchanged. The native score includes detected timeout mutants; it does not
+mean every mutation was killed by an assertion.
+
+## Destructive gate follow-up (2026-11-21)
+
+The scoped run starts from `61110dac`, independently of the pending capability
+and sanitizer work. It uses Node.js 22.23.1, pnpm 11.20.0, and the locked Stryker
+10.0.0 toolchain:
+
+```bash
+pnpm run test:mutation -- --mutate=src/utils/destructive-gate.ts --concurrency=2 --reporters=json,clear-text,progress
+```
+
+`destructive-gate-policy.unit.test.ts` adds 58 cases without changing production
+code or mutation configuration:
+
+- An independent literal list covers all 15 destructive tools, their effects,
+  refusal codes/statuses, and policy-specific approval behavior. Each case
+  reloads the module so mutations in the import-time detector registry are
+  exercised.
+- Mixed safe/destructive lifecycle rules in both orders distinguish `some`
+  from `every`; benign rules, absent deletion values, and the exported helper's
+  omitted-rules fallback cover the other side of the decision. Tool schemas
+  still require lifecycle rules.
+- Combined Object Lock, lifecycle, visibility, and replication changes must
+  retain every effect in the human-facing refusal. Refusals preserve the
+  instruction to report the decision to the human operator.
+- Independently computed Python HMAC/SHA-256 vectors pin credential binding,
+  domain separation, and canonical nested JSON. Tests distinguish each
+  credential part, object-key order, absent values, array order, primitive
+  types, top-level confirmation, exact tool names, and async consent scope.
+  Empty credential parts between populated keys are important: trailing NUL
+  bytes alone can be hidden by HMAC key padding.
+- The real S3 lifecycle handler runs against a recording client double. Refused
+  mixed expiration and blocked clearing call neither lifecycle write method;
+  confirmed expiration and benign cleanup reach the expected write once.
+
+The new assertions passed against existing behavior; no production change was
+made to manufacture a failing test. Mutation runs test whether damaged variants
+are detected. A mutation score remains evidence about this scoped set of
+generated faults, not proof that the gate or its callers have no other defects.
+
+| Stage | Mutants | Killed | Survived | No coverage | Timeout/errors | Native score |
+| --- | --- | --- | --- | --- | --- | --- |
+| Fresh baseline | 240 | 189 | 49 | 2 | 0 | 78.75% |
+| Final policy cases | 240 | 240 | 0 | 0 | 0 | 100.00% |
+
+The final report retains every existing kill, catches all 49 former survivors
+and both previously uncovered mutants, and contains no ignored, timeout,
+compile-error, or runtime-error results. All 240 detections are assertion kills.
+No thresholds, test skips, or mutation exclusions were changed.
+
+## Credentials follow-up (2026-11-21)
+
+The scoped run starts from `61110dac`, independently of the pending capability,
+sanitizer, and destructive-gate work. It uses Node.js 22.23.1, pnpm 11.20.0, and
+the locked Stryker 10.0.0 toolchain:
+
+```bash
+pnpm run test:mutation -- --mutate=src/credentials.ts --concurrency=2 --reporters=json,clear-text,progress
+```
+
+`credentials-policy.unit.test.ts` adds 112 cases against unchanged production
+code. Each case loads a fresh module to exercise header sets, retired-alias
+patterns, and the initial warning guard under the active mutant. The cases cover:
+
+- Explicit destructive policies and safe transport defaults; required primary
+  credentials, partial optional master pairs, file access, and region defaults.
+- All canonical and retired credential header rejection guards, conflicting and
+  identical duplicate values, compatibility parsing, and literal discovery
+  placeholders. Rejected principal requests do not call the secret broker.
+- Stable verified subject claims, issuer qualification, client-only rate scopes,
+  credential-reference boundaries, malformed maps, normalization collisions,
+  map changes, and separate credential selection for distinct issuers.
+- Independently calculated SHA-256 vectors for public, private, caller, principal,
+  and discovery scopes; secret rotation invalidates private capability caches
+  while public identity remains stable. Verified caller scopes stay separate
+  even when callers share underlying credentials.
+- Startup validation and a real unusable file-sink path: stdio resolution and
+  HTTP startup refuse the sink before use, leaving the existing parent file
+  unchanged. A preflight dependency that throws a non-Error value is wrapped in
+  the fixed public error without exposing its detail.
+- One-time migration warnings for each retired alias and supported file variant,
+  strict name boundaries, warning reset, and omission of secret values.
+
+These provider tests consume verified `AuthInfo`; OAuth token verification
+remains the responsibility of the existing OAuth/HTTP security suites. New
+assertions passed against existing behavior, so no production change or
+artificial failing implementation was introduced.
+
+| Stage | Mutants | Killed | Survived | No coverage | Timeout/errors | Native score |
+| --- | --- | --- | --- | --- | --- | --- |
+| Fresh baseline | 430 | 303 | 113 | 14 | 0 | 70.47% |
+| Final policy cases | 430 | 422 | 8 | 0 | 0 | 98.14% |
+
+Both runs use identical source and mutant locations/replacements. The final
+result retains all 303 original kills, catches 106 former survivors and 13
+previously uncovered mutants, and executes the remaining formerly uncovered
+internal-error-message mutant (now a retained survivor). All 422 detections are
+assertion kills. There are no ignored, timeout, compile-error, or runtime-error
+results. No thresholds, mutation exclusions, or existing tests were changed.
+
+### Retained credentials mutations
+
+The eight survivors remain in the raw score. IDs refer to this final scoped
+report, not the full multi-module run. The reasoning below is bounded to the
+current provider implementation and accepted inputs:
+
+| Scoped IDs | Reason retained |
+| --- | --- |
+| 31 | Every provider constructs a configuration whose nonempty `credentialFingerprint` already equals `fingerprintConfig(config)` before deriving the caller scope. Recomputing that fingerprint through the mutated branch produces the same value. |
+| 81 | Partial optional pairs have already returned a fallback or thrown before this ternary. On the remaining inputs both values are truthy or both are falsy, making `id && key` and `id || key` the same condition. |
+| 157, 160 | Each canonical field currently has one accepted header name. An absent header becomes either an empty list or a single `undefined`; both return `undefined`. Adding accepted aliases would require revisiting this reasoning. |
+| 251 | The standard server provider accepts both an empty context and an empty-header request. Its startup validation has no request or principal in either case. Tests do not pin incidental argument shape for overridden provider methods. |
+| 314 | Removing the parsed-map cache only parses the same JSON again; it does not change routing results. This is a performance difference, not a functional authorization difference. |
+| 330, 343 | These internal exception messages are discarded by the enclosing catch, which always raises the fixed public `invalid_principal_map` error. |
+
+This score measures detection of the current generated fault set, not all
+possible credential-routing defects. No new test skips or suppression comments
+were added.
+
+Verification note: an earlier required-gate run timed out in the unchanged
+`supply-chain-policy` suite, including the runner's automatic retry. The suite
+then passed all 67 tests in isolation, and the completed tests passed the full
+required gate. The original timeout's cause was not established; its logs are
+retained with the local evidence.
+
+## Secret sanitizer follow-up (2026-11-21)
+
+The scoped run below starts from `61110dac`, independently of the pending
+capability-policy work. It uses Node.js 22.23.1, pnpm 11.20.0, and the locked
+Stryker 10.0.0 toolchain:
+
+```bash
+pnpm run test:mutation -- --mutate=src/utils/secret-sanitizer.ts --concurrency=2 --reporters=json,clear-text,progress
+```
+
+`secret-sanitizer-policy.unit.test.ts` adds 116 cases with independent literal policy for
+structured fields, header names, text labels, case/separator normalization,
+credential environment names, and log-only key IDs. Ordinary secret values
+prevent the canary or configured-value rules from masking a broken field rule.
+Exact preservation assertions cover pagination tokens, public metadata, key IDs
+in MCP output, existing redaction markers, sparse arrays, and inert built-ins.
+Error cases cover inherited descriptors, accessors, and the separate MCP/log
+representations. Each case reloads the module so policy sets and regexes created
+at import time are exercised under the active mutant.
+
+Before changing production code, the new policy tests caught 112 former
+survivors and six previously uncovered mutants, retaining all 355 existing
+kills. Those tests passed against existing behavior; no artificial failing
+production change was used to establish coverage.
+
+| Stage | Mutants | Killed | Timeout | Survived | No coverage | Native score |
+| --- | --- | --- | --- | --- | --- | --- |
+| Fresh baseline, unchanged source | 526 | 355 | 6 | 157 | 8 | 68.63% |
+| Policy tests, unchanged source | 526 | 473 | 6 | 45 | 2 | 91.06% |
+| Policy tests and iterable fix | 526 | 474 | 5 | 45 | 2 | 91.06% |
+
+Triage also exposed a real leak in the public `Iterable` secret option: a
+one-shot generator was exhausted by the first string, leaving subsequent nested
+values, Error stacks, or Error metadata visible. Three additional regression
+cases reproduced the failure on unchanged source before the fix. Structured MCP
+sanitization now snapshots the iterable once per traversal; log/Error options
+always materialize their secrets, including when no key-ID environment values
+are present. Reusing a single already-consumed iterator across separate public
+calls is outside this fix; callers needing reuse should supply a reusable
+collection such as an array.
+
+The production fix changes the generated mutant set even though its count stays
+526. The exact same-source comparison is the first two rows, not an ID-based
+comparison across the production change.
+
+### Retained sanitizer mutations
+
+All 45 survivors remain in the raw result. The following triage uses IDs from
+the final scoped report; IDs differ in a full multi-module run. Equivalence
+reasoning is bounded to the current policy and ordinary supported Node objects,
+not a claim that arbitrary future policy changes or modified built-ins are safe.
+
+| Scoped IDs | Reason retained |
+| --- | --- |
+| 33, 34, 35, 78, 80 | Label sorting does not change matching when the separator must follow the entire label; `secretname` cannot satisfy `endsWith("secret")`. |
+| 151, 156, 160, 165 | Removing an intermediate null filter leaves values that the later candidate-validation pass rejects. |
+| 191, 193, 194 | Exact-secret iteration order does not change the union of matching spans. |
+| 199, 201 | `String(text)` preserves primitive strings, making the alternate coercion branch equivalent. |
+| 216, 228, 237 | An extra end-of-text search finds no nonempty secret; the empty-span path reconstructs the original text; sorting tied starts differently still merges their maximum end. |
+| 265, 266, 268, 428 | An inert initial path does not match `customHeaders`; an empty non-log mode takes the current MCP branches. |
+| 5, 338, 339, 343, 345, 346, 347, 362, 363, 365, 366, 367 | Standard arrays have a nonnegative integer data-property length; the native typed-array getter exists and returns a nonnegative integer, or throws for a proxy and takes the catch path. Replacing zero with fallback zero is indistinguishable. |
+| 381 | Reading an accessor descriptor's absent `value` still reaches the accessor sentinel without invoking its getter. |
+| 460, 461, 464, 468, 469 | For valid single-line HTTP header values, the outer trim, greedy whitespace matching, and successful capture make these anchor/trim/optional-chain changes redundant. Multiline values passed directly to the helper are outside this reasoning. |
+| 522, 524, 527 | Exact redaction already skips the redaction marker and replaces request secrets before the generic text pass. |
+| 172, 186, 264 | These are non-equivalent preservation gaps: the mutation injects an unrelated literal phrase into an otherwise empty configured-secret list. No assertion targeting the mutation tool's phrase was added merely to kill them. |
+
+Two mutants remain uncovered (405 and 408): fallback message/name literals when
+no descriptor exists anywhere in an Error's prototype chain. Ordinary Errors
+inherit those descriptors from `Error.prototype`; tests do not modify that
+global prototype to reach the fallback. Five timeout mutants remove loop
+progress or exit conditions in exact matching and prototype traversal. They
+remain separately reported as timeouts, not assertion kills. There are no
+compile/runtime-error mutants in the completed scoped run.
+
+Verification on Node.js 22.23.1 passed: `pnpm run verify` (2,406 unit tests with
+20 existing skips, 55 runtime-security tests, 48 modern and 12 legacy protocol
+tests), 343 contract tests, 23 observability tests, and all 158 focused sanitizer
+tests. The required gate runs from an identical checkout without spaces in its
+path because existing release-script tests do not quote their root path.
+
+The mutation configuration, thresholds, static-mutant handling, and exclusions
+are unchanged. The native score includes detected timeout mutants; it does not
+mean every mutation was killed by an assertion.

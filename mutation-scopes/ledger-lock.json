@@ -1,0 +1,29 @@
+{
+  "description": "Bounded durable ledger append, tail repair, committed marker replay and atomic replacement, append/reclaim lock ownership and stale recovery. Claim fingerprint construction and higher-level provider compensation are outside this profile.",
+  "targets": [
+    {
+      "file": "src/utils/secret-sink.ts",
+      "declarations": [
+        "writeAll",
+        "fsyncParentDirectory",
+        "appendSecretSinkRecord",
+        "readFileTail",
+        "readBoundedJsonlTailLines",
+        "truncateIncompleteLedgerTail",
+        "readCommittedIdempotencyRecord",
+        "writeCommittedIdempotencyRecord",
+        "createExclusiveLockFile",
+        "processIsAlive",
+        "readLockPayload",
+        "readLockIdentity",
+        "lockIdentitiesMatch",
+        "lockIdentityIsStale",
+        "reclaimStaleLockFile",
+        "acquireReclaimLock",
+        "reclaimStaleAppendLock",
+        "acquireLedgerAppendLock",
+        "releaseSecretSinkClaim"
+      ]
+    }
+  ]
+}

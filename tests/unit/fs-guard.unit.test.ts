@@ -194,3 +194,31 @@ describe("resolveLocalPath — refusal classification", () => {
     expect(parseB2Error(refusal)).toMatchObject({ code: "bad_request", status: 400 });
   });
 });
+
+describe("resolveLocalPath — sandbox names that begin with two dots (case C22)", () => {
+  it("Finding C22: allows a file inside a directory named '..cache' under the root", async () => {
+    const dir = path.join(root, "..cache");
+    fs.mkdirSync(dir);
+    const file = path.join(dir, "data.bin");
+    fs.writeFileSync(file, "x");
+    const cfg = { ...baseConfig, fileRoot: root };
+
+    // The defect is the sandbox wrongly refusing the path (FileAccessError) or reporting it
+    // outside the root; any other error (a TypeError, or a FileAccessError for another reason) is not the defect.
+    expect(resolveLocalPath(cfg, file, "read"), "read path resolves").toBe(fs.realpathSync(file));
+
+    // Checked once the marker above is removed.
+    expect(resolveLocalPath(cfg, path.join(dir, "new.bin"), "write"), "write path resolves").toBe(
+      path.join(fs.realpathSync(dir), "new.bin"),
+    );
+    expect(isInsideFileRoot(cfg, fs.realpathSync(file)), "file is inside the root").toBe(true);
+  });
+
+  it("Finding C22 guard: a path that really escapes the root through '..' is still refused", () => {
+    const cfg = { ...baseConfig, fileRoot: root };
+    expect(
+      () => resolveLocalPath(cfg, path.join(root, "..", "elsewhere.bin"), "write"),
+      "a real escape through '..' is refused",
+    ).toThrow(FileAccessError);
+  });
+});

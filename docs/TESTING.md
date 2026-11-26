@@ -232,6 +232,37 @@ Biome is also the only formatter. `pnpm run format` and `pnpm run format:check`
 cover Biome-supported file types; Markdown and YAML files are not part of the
 automated format gate.
 
+## Known-Defect Tests
+
+A test for a defect that is still present is registered with `knownDefect(...)` from
+`tests/support/known-defect.ts` instead of `it(...)`. The test names start with
+`[known defect]`.
+
+- Each test keeps its prerequisites (setup worked, the call succeeded, the request was sent)
+  as ordinary assertions and wraps only the defect assertion in `expectDefect(...)`. Default
+  layer commands (`test:unit`, `test:reliability`, `test:contract`, and the CI jobs built
+  on them) pass the test only when that `expectDefect` check fails with the designated
+  failure (an assertion error, or the error type given in `match`). A failing prerequisite,
+  an unrelated thrown error, or a test that finishes without the designated failure fails
+  the run with its own diagnostic ("Unexpected pass" when the defect is fixed), so a fix
+  cannot land with a stale marker and an unrelated regression cannot hide behind one.
+- `pnpm run test:known-defects` sets `B2_RUN_KNOWN_DEFECTS=1` and runs only these tests
+  as ordinary tests in the unit, reliability, and contract layers. It exits non-zero
+  while any known defect remains and prints each real assertion failure. The contract
+  layer reads `dist/`, so run `pnpm run build` first.
+- When a defect is fixed, change `knownDefect(` back to `it(` in the test file, unwrap the
+  `expectDefect(` calls into plain assertions (and drop the imports if no longer used) so
+  the test protects the fix in the normal suite.
+- A known-defect test is never skipped to hide a failure. The single exception is
+  `knownDefect.skip`, for a missing precondition such as a release tag that a shallow
+  clone does not have. The release-tag check (C11) is skipped in a default shallow CI
+  checkout, because the `v0.2.1` and `v0.2.2` tags are absent; it runs only where tags are
+  fetched (`fetch-depth: 0`) or locally.
+- The helper's own behavior (designated failure accepted, other failure rejected, unexpected
+  pass rejected) is covered by `tests/unit/known-defect.unit.test.ts`.
+- A few tests read repository text (README, SECURITY.md, `src/utils/retry.ts` header) and
+  pin its wording or position, so rewording that text can require a test update.
+
 ## Coverage Map
 
 [`TEST-COVERAGE-MAP.md`](TEST-COVERAGE-MAP.md) maps the existing tests to a shared list of
