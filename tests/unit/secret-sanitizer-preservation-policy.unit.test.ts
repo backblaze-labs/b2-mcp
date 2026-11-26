@@ -14,12 +14,14 @@ const prose = fc.string({
   // cspell:disable-next-line -- accented characters are generator inputs.
   unit: fc.constantFrom(..."abcdefghijklmnopqrstuvwxyz áéíóúñ.,!?;\n\t-'()"),
   maxLength: 160,
+  // Without size "max", fast-check caps strings near 10 characters.
+  size: "max",
 });
 const publicData = fc.record({
   description: prose,
   enabled: fc.boolean(),
   count: fc.integer(),
-  metadata: fc.record({ notes: fc.array(prose, { maxLength: 5 }), value: prose }),
+  metadata: fc.record({ notes: fc.array(prose, { maxLength: 5, size: "max" }), value: prose }),
 });
 const propertyOptions = { numRuns: 300, seed: FASTCHECK_SEED };
 
