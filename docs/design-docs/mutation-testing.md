@@ -196,7 +196,9 @@ The focused `tool-capabilities.ts` campaign now has **233 killed, 4 survived,
 0 no-coverage, 0 timeouts, and 0 errors out of 237 mutants: 98.31%**. Before
 the test changes, the same module reproduced the historical result exactly:
 80 killed, 156 survived, and 1 no-coverage (33.76%). These are module results,
-not a new baseline for the other five modules.
+not a new baseline for the other five modules. A later follow-up (#597) raised
+the module to 236 killed and 1 survived (99.58%); a reviewer's run on the
+combined bundle (2026-11-25) measured the same.
 
 [`tool-capabilities-policy.unit.test.ts`](../../tests/unit/tool-capabilities-policy.unit.test.ts)
 adds 42 cases covering independent single-capability allow/deny profiles,
@@ -486,87 +488,3 @@ Verification note: an earlier required-gate run timed out in the unchanged
 then passed all 67 tests in isolation, and the completed tests passed the full
 required gate. The original timeout's cause was not established; its logs are
 retained with the local evidence.
-
-## Secret sanitizer follow-up (2026-11-21)
-
-The scoped run below starts from `61110dac`, independently of the pending
-capability-policy work. It uses Node.js 22.23.1, pnpm 11.20.0, and the locked
-Stryker 10.0.0 toolchain:
-
-```bash
-pnpm run test:mutation -- --mutate=src/utils/secret-sanitizer.ts --concurrency=2 --reporters=json,clear-text,progress
-```
-
-`secret-sanitizer-policy.unit.test.ts` adds 116 cases with independent literal policy for
-structured fields, header names, text labels, case/separator normalization,
-credential environment names, and log-only key IDs. Ordinary secret values
-prevent the canary or configured-value rules from masking a broken field rule.
-Exact preservation assertions cover pagination tokens, public metadata, key IDs
-in MCP output, existing redaction markers, sparse arrays, and inert built-ins.
-Error cases cover inherited descriptors, accessors, and the separate MCP/log
-representations. Each case reloads the module so policy sets and regexes created
-at import time are exercised under the active mutant.
-
-Before changing production code, the new policy tests caught 112 former
-survivors and six previously uncovered mutants, retaining all 355 existing
-kills. Those tests passed against existing behavior; no artificial failing
-production change was used to establish coverage.
-
-| Stage | Mutants | Killed | Timeout | Survived | No coverage | Native score |
-| --- | --- | --- | --- | --- | --- | --- |
-| Fresh baseline, unchanged source | 526 | 355 | 6 | 157 | 8 | 68.63% |
-| Policy tests, unchanged source | 526 | 473 | 6 | 45 | 2 | 91.06% |
-| Policy tests and iterable fix | 526 | 474 | 5 | 45 | 2 | 91.06% |
-
-Triage also exposed a real leak in the public `Iterable` secret option: a
-one-shot generator was exhausted by the first string, leaving subsequent nested
-values, Error stacks, or Error metadata visible. Three additional regression
-cases reproduced the failure on unchanged source before the fix. Structured MCP
-sanitization now snapshots the iterable once per traversal; log/Error options
-always materialize their secrets, including when no key-ID environment values
-are present. Reusing a single already-consumed iterator across separate public
-calls is outside this fix; callers needing reuse should supply a reusable
-collection such as an array.
-
-The production fix changes the generated mutant set even though its count stays
-526. The exact same-source comparison is the first two rows, not an ID-based
-comparison across the production change.
-
-### Retained sanitizer mutations
-
-All 45 survivors remain in the raw result. The following triage uses IDs from
-the final scoped report; IDs differ in a full multi-module run. Equivalence
-reasoning is bounded to the current policy and ordinary supported Node objects,
-not a claim that arbitrary future policy changes or modified built-ins are safe.
-
-| Scoped IDs | Reason retained |
-| --- | --- |
-| 33, 34, 35, 78, 80 | Label sorting does not change matching when the separator must follow the entire label; `secretname` cannot satisfy `endsWith("secret")`. |
-| 151, 156, 160, 165 | Removing an intermediate null filter leaves values that the later candidate-validation pass rejects. |
-| 191, 193, 194 | Exact-secret iteration order does not change the union of matching spans. |
-| 199, 201 | `String(text)` preserves primitive strings, making the alternate coercion branch equivalent. |
-| 216, 228, 237 | An extra end-of-text search finds no nonempty secret; the empty-span path reconstructs the original text; sorting tied starts differently still merges their maximum end. |
-| 265, 266, 268, 428 | An inert initial path does not match `customHeaders`; an empty non-log mode takes the current MCP branches. |
-| 5, 338, 339, 343, 345, 346, 347, 362, 363, 365, 366, 367 | Standard arrays have a nonnegative integer data-property length; the native typed-array getter exists and returns a nonnegative integer, or throws for a proxy and takes the catch path. Replacing zero with fallback zero is indistinguishable. |
-| 381 | Reading an accessor descriptor's absent `value` still reaches the accessor sentinel without invoking its getter. |
-| 460, 461, 464, 468, 469 | For valid single-line HTTP header values, the outer trim, greedy whitespace matching, and successful capture make these anchor/trim/optional-chain changes redundant. Multiline values passed directly to the helper are outside this reasoning. |
-| 522, 524, 527 | Exact redaction already skips the redaction marker and replaces request secrets before the generic text pass. |
-| 172, 186, 264 | These are non-equivalent preservation gaps: the mutation injects an unrelated literal phrase into an otherwise empty configured-secret list. No assertion targeting the mutation tool's phrase was added merely to kill them. |
-
-Two mutants remain uncovered (405 and 408): fallback message/name literals when
-no descriptor exists anywhere in an Error's prototype chain. Ordinary Errors
-inherit those descriptors from `Error.prototype`; tests do not modify that
-global prototype to reach the fallback. Five timeout mutants remove loop
-progress or exit conditions in exact matching and prototype traversal. They
-remain separately reported as timeouts, not assertion kills. There are no
-compile/runtime-error mutants in the completed scoped run.
-
-Verification on Node.js 22.23.1 passed: `pnpm run verify` (2,406 unit tests with
-20 existing skips, 55 runtime-security tests, 48 modern and 12 legacy protocol
-tests), 343 contract tests, 23 observability tests, and all 158 focused sanitizer
-tests. The required gate runs from an identical checkout without spaces in its
-path because existing release-script tests do not quote their root path.
-
-The mutation configuration, thresholds, static-mutant handling, and exclusions
-are unchanged. The native score includes detected timeout mutants; it does not
-mean every mutation was killed by an assertion.

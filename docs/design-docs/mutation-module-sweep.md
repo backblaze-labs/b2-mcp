@@ -13,7 +13,7 @@ evidence rather than a publication branch.
 | Module | Starting survivors | Outcome |
 | --- | ---: | --- |
 | Auth | 42 | Two public SDK cache-refresh cases kill the optional cache-access target. No production edit. Fresh same-source native: 434 killed, 13 watchdog detections, 41 survivors, one uncovered; 91.21% to 91.41%. |
-| Secret sanitizer | 46 | Ten regression cases and a fix preserve own prototype-named keys in JSON, arrays, and log Errors. Fresh native result: 560 generated, 505 killed, seven watchdog detections, 48 survivors, 91.43%. The two added survivors change helper descriptor flags; all 46 old survivors remain. |
+| Secret sanitizer | 46 | Ten regression cases and a fix preserve own prototype-named keys in JSON, arrays, and log Errors. Fresh native result: 560 generated, 505 killed, seven watchdog detections, 48 survivors, 91.43%. The two added survivors change helper descriptor flags; all 46 old survivors remain. A reviewer's run on the combined bundle (2026-11-25) measured 503 killed and 50 survived (91.07%); not re-measured since. |
 | Destructive gate | 0 | Seven cases and an own-registry lookup fix reject inherited detector names. Fresh native result: 238 killed, zero survivors or uncovered, 100%. |
 | Destructive elicitation | 21 | All retained under reviewed JSON/SDK contracts; 138 existing focused cases pass. Reused source-matched native result: 96.15%. |
 | Credentials | 8 | All retained with exact-fragment rationales; 146 existing focused cases pass. Reused source-matched native result: 98.14%. |
