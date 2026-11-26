@@ -1,3 +1,3 @@
 kind: Fixed
-body: 'Preserve underlying socket error codes in ambiguous-write warnings and keep unavailable optional diagnostic metadata from masking the original write outcome. Related to demand-side-ai#2006.'
+body: 'Preserve underlying socket error codes in ambiguous-write warnings and keep unavailable optional diagnostic metadata from masking the original write outcome.'
 time: 2026-11-23T07:41:22.451912-03:00

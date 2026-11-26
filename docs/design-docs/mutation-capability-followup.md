@@ -2,7 +2,7 @@
 
 Date: 2026-11-21 (client timezone; native logs continue into 2026-11-22 UTC).
 
-Tracking: [demand-side-ai #2006](https://github.com/backblaze-labs/demand-side-ai/issues/2006).
+Follow-up to [#397](https://github.com/backblaze-labs/b2-mcp/issues/397) (mutation testing).
 
 This change follows pending PR #579 without modifying that PR's branch. It adds one test against the exported mutable `TOOL_CAPABILITIES` table;
 production policy and mutation settings are unchanged.
