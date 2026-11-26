@@ -7,9 +7,8 @@ Gonza (`@goanpeca`) and Sophie / Quality Keeper (QK) (`@sophiecarreras`).
 
 The latest minor release line on `main` is supported. Earlier releases are not
 patched in place; upgrade to the latest supported version to receive fixes. The
-first public supported package line is `0.1.x` after `v0.1.0` is published.
-Before that publish, source checkouts from `main` receive review and fixes but
-there is no supported installable npm version.
+package is published to npm as `@backblaze-labs/b2-mcp`; see
+[`RELEASE.md`](RELEASE.md#package-and-release-support-policy) for the policy.
 
 The package and release support policy is maintained in
 [`RELEASE.md`](RELEASE.md#package-and-release-support-policy).
