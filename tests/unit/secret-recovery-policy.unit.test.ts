@@ -758,3 +758,81 @@ it.each([
     );
   },
 );
+
+it.each([
+  { label: "an unknown status string", status: "recovery-status-secret-987654321" },
+  { label: "a number", status: 42 },
+  { label: "an array holding an allowed status", status: ["deleted"] },
+  { label: "a String object holding an allowed status", status: new String("deleted") },
+])("drops $label from the post-create fatal log and keeps the claim", async ({ status }) => {
+  const f = fixture(`recovery-status-${typeof status}-${String(status)}`, {
+    projectRedacted: () => {
+      throw new Error("redacted response could not be built");
+    },
+    recoverAfterSinkFailure: () => ({ status }),
+  });
+
+  const failure = await executeDurableSecretOperation(f.options).catch((error: unknown) => error);
+
+  operatorFailure(failure, "secret_sink_projection_failed");
+  expect(vi.mocked(logger.fatal).mock.calls[0]?.[0]).toEqual({
+    tool: "b2_create_key",
+    secretSink: { type: "file", path: f.file },
+  });
+  expect(inspect(vi.mocked(logger.fatal).mock.calls, { depth: 20 })).not.toContain(
+    "recovery-status-secret",
+  );
+  expect(pending(f.dir)).toHaveLength(1);
+});
+
+it.each([
+  {
+    label: "a foreign error carrying the ambiguous-commit code",
+    error: () =>
+      Object.assign(new Error("rollback state unknown"), {
+        code: "secret_sink_commit_ambiguous",
+      }),
+    code: "secret_sink_commit_ambiguous",
+    recoveryStatus: "pending_reconciliation",
+    recovers: false,
+  },
+  {
+    label: "a filesystem error with another code",
+    error: () => Object.assign(new Error("ledger flush failed"), { code: "EIO" }),
+    code: "secret_sink_write_failed",
+    recoveryStatus: "not_configured",
+    recovers: true,
+  },
+])(
+  "classifies a ledger write failure from $label",
+  async ({ label, error, code, recoveryStatus, recovers }) => {
+    const f = fixture(`write-code-${label}`);
+    const recover = vi.fn();
+    f.options.recoverAfterSinkFailure = recover;
+    const fsync = secretSinkFileOpsForTests.fsyncSync;
+    let writeFailed = false;
+    vi.spyOn(secretSinkFileOpsForTests, "fsyncSync").mockImplementation((fd) => {
+      if (
+        !writeFailed &&
+        existsSync(f.file) &&
+        readFileSync(f.file, "utf8").includes(created.applicationKey)
+      ) {
+        writeFailed = true;
+        throw error();
+      }
+      return fsync(fd);
+    });
+
+    const failure = await executeDurableSecretOperation(f.options).catch((err: unknown) => err);
+
+    operatorFailure(failure, code);
+    expect(writeFailed).toBe(true);
+    expect(recover).toHaveBeenCalledTimes(recovers ? 1 : 0);
+    expect(vi.mocked(logger.fatal).mock.calls.at(-1)?.[0]).toEqual({
+      tool: "b2_create_key",
+      secretSink: { type: "file", path: f.file },
+      recovery: { status: recoveryStatus },
+    });
+    expect(pending(f.dir)).toHaveLength(1);
+  },
+);
