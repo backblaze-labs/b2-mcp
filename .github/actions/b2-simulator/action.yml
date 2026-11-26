@@ -1,7 +1,8 @@
 name: Standalone B2 simulator
 description: >-
   Check out the pinned backblaze-labs/b2-simulator revision with a read-only
-  deploy key and export B2_SIMULATOR_DIR for the simulator-backed tests
+  deploy key and return its directory as the `dir` output. Each step that runs
+  simulator-backed tests sets B2_SIMULATOR_DIR from that output
   (docs/TESTING.md, "Standalone Simulator"). Pull requests from forks are
   refused, because GitHub does not give them the key.
 inputs:
@@ -11,17 +12,20 @@ inputs:
   revision:
     description: Full commit of backblaze-labs/b2-simulator to test against. Change it only here.
     required: false
-    default: f8e3cfc5e7f477835af3bf2a972f55cb0e8b0016
+    default: a1e1db373b71f2d5f40082c19bc716cb6b3c3675
+outputs:
+  dir:
+    description: Absolute path of the simulator checkout, outside the workspace, for B2_SIMULATOR_DIR.
+    value: ${{ steps.move.outputs.dir }}
 runs:
   using: composite
   steps:
     - name: Require a pull request branch in this repository
       shell: bash
       env:
-        EVENT_NAME: ${{ github.event_name }}
         HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
       run: |
-        if [ "$EVENT_NAME" = "pull_request" ] && [ "$HEAD_REPOSITORY" != "$GITHUB_REPOSITORY" ]; then
+        if [ "$HEAD_REPOSITORY" != "$GITHUB_REPOSITORY" ]; then
           echo "::error::Simulator-backed tests are required and need the SIMULATOR_DEPLOY_KEY secret, which GitHub does not give to pull requests from forks. Push this change to a branch in $GITHUB_REPOSITORY (a maintainer can do it for you) and open the pull request from there."
           exit 1
         fi
@@ -43,8 +47,10 @@ runs:
         ssh-key: ${{ inputs.deploy-key }}
         persist-credentials: false
         path: .b2-simulator
-    # Moved out of the workspace so lint, format and spelling never scan it.
-    - name: Verify the simulator revision and export B2_SIMULATOR_DIR
+    # Moved out of the workspace so lint, format and spelling never scan it,
+    # and so a later checkout in the same job does not remove it.
+    - name: Verify the simulator revision and move it out of the workspace
+      id: move
       shell: bash
       env:
         SIMULATOR_REVISION: ${{ inputs.revision }}
@@ -56,4 +62,4 @@ runs:
         rm -rf "$dest"
         mv .b2-simulator "$dest"
         if command -v cygpath >/dev/null 2>&1; then dest="$(cygpath -w "$dest")"; fi
-        echo "B2_SIMULATOR_DIR=$dest" >> "$GITHUB_ENV"
+        echo "dir=$dest" >> "$GITHUB_OUTPUT"

@@ -378,11 +378,11 @@ layers, so `pnpm test`, `pnpm run verify`, `pnpm run test:protocol`,
 
 How tests use it (`test-support/standalone-simulator.ts`):
 
-- Each test file starts its own server in `beforeAll` and stops it in
-  `afterAll`. Vitest runs files in separate workers, so files never share a
-  store. Each test calls `reset()` (the control plane's `POST /reset`) in
-  `beforeEach`, which empties the store, faults and clock; part sizes and the
-  Partner authorizer are chosen per reset.
+- Each test file that calls `startStandaloneSimulator` starts its own server in
+  `beforeAll` and stops it in `afterAll`, and its tests call `reset()` (the
+  control plane's `POST /reset`) in `beforeEach`, which empties the store,
+  faults and clock; part sizes and the Partner authorizer are chosen per reset.
+  Vitest runs files in separate workers, so files never share a store.
 - The server starts with `--profile ts-sdk --permissive-auth
   --no-partner-authorize`, the SDK's in-process simulator defaults: any
   credential authorizes and the account id is `sim_account_0001`.
@@ -399,8 +399,13 @@ How tests use it (`test-support/standalone-simulator.ts`):
 
 CI: `.github/actions/b2-simulator` checks the pinned revision out with the
 `SIMULATOR_DEPLOY_KEY` deploy key (read-only, credentials not persisted),
-verifies the revision and exports `B2_SIMULATOR_DIR`. Every job that runs a
-simulator-backed layer uses it. A pull request from a fork cannot read that
+verifies the revision, moves it to `$RUNNER_TEMP` and returns that directory as
+its `dir` output. Every job that runs a simulator-backed layer uses it, and each
+step that runs those tests sets `B2_SIMULATOR_DIR` from the output (the
+contract test above pins this). The release job runs it before it checks out
+the release tag, so no step or action from the tag is given the key. It reads
+the revision the tag pins with `git show` first, so a release is tested against
+the simulator its own CI used. A pull request from a fork cannot read that
 secret, so those jobs refuse it with a message asking for a branch in this
 repository; see `CONTRIBUTING.md`. Dependabot pull requests read Dependabot
 secrets, so the key must be stored there too.
