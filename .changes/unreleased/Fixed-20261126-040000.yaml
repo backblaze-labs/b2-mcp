@@ -1,0 +1,3 @@
+kind: Fixed
+body: 'Durable-credential failure messages no longer point operators to the critical log for the created key or account, which that log no longer records; they now say to find it by listing keys or accounts created at that time.'
+time: 2026-11-26T04:00:00.000000-03:00

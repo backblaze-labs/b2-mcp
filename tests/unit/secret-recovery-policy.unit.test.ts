@@ -836,3 +836,41 @@ it.each([
     expect(pending(f.dir)).toHaveLength(1);
   },
 );
+
+it.each(["post-create validation", "redacted projection", "ledger write"] as const)(
+  "tells the operator how to find the created resource after a failed %s",
+  async (phase) => {
+    const f = fixture(`operator-guidance-${phase}`);
+    if (phase === "post-create validation") {
+      f.options.create = async () => {
+        throw durableSecretPostCreateFailure(created, new Error("normalization failed"));
+      };
+    } else if (phase === "redacted projection") {
+      f.options.projectRedacted = () => {
+        throw new Error("redacted response could not be built");
+      };
+    } else {
+      const fsync = secretSinkFileOpsForTests.fsyncSync;
+      let writeFailed = false;
+      vi.spyOn(secretSinkFileOpsForTests, "fsyncSync").mockImplementation((fd) => {
+        if (!writeFailed && existsSync(f.file) && readFileSync(f.file, "utf8").length > 0) {
+          writeFailed = true;
+          throw new Error("ledger flush failed");
+        }
+        return fsync(fd);
+      });
+    }
+
+    const failure = await executeDurableSecretOperation(f.options).catch((error: unknown) => error);
+    const { message } = failure as { message: string };
+
+    // The fatal log carries only the tool, sink and recovery status, so the
+    // message must not send operators there for the created identifiers.
+    expect(message).not.toMatch(/identifiers/i);
+    expect(message).toMatch(/recovery status/);
+    expect(message).toMatch(/listing keys or accounts created at this time/);
+    expect(JSON.stringify(vi.mocked(logger.fatal).mock.calls)).not.toContain(
+      created.applicationKeyId,
+    );
+  },
+);
