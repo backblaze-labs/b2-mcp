@@ -1,7 +1,7 @@
 /**
  * Docs and release-metadata consistency checks (cases C3, C4, C11, C12).
  * Each asserts the correct state of the documentation. Cases whose defect is still present
- * (the unpublished-package wording, release tags) use `knownDefect` (see tests/support/known-defect.ts); the checks read repository files and
+ * (release tags) use `knownDefect` (see tests/support/known-defect.ts); the checks read repository files and
  * are skipped, not failed, when run outside a full checkout.
  */
 import { execFileSync } from "child_process";
@@ -60,19 +60,16 @@ describe.skipIf(!fullCheckout)(
 describe.skipIf(!fullCheckout)(
   "Finding C4: SECURITY.md supported-versions text matches the released package",
   () => {
-    knownDefect("does not describe the package as not yet published", async () => {
+    it("does not describe the package as not yet published", () => {
       const security = read("SECURITY.md");
       const section = security.slice(
         security.indexOf("## Supported Versions"),
         security.indexOf("## Reporting a Vulnerability"),
       );
       expect(section.length, "Supported Versions section found").toBeGreaterThan(0);
-      await expectDefect(() => {
-        expect(section, "SECURITY.md supported-versions text").not.toMatch(
-          /no supported installable npm version/i,
-        );
-      });
-      // Same stale paragraph; checked once the marker above is removed.
+      expect(section, "SECURITY.md supported-versions text").not.toMatch(
+        /no supported installable npm version/i,
+      );
       expect(section, "SECURITY.md supported-versions text").not.toMatch(/Before that publish/i);
     });
   },
