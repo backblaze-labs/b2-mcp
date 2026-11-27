@@ -1,4 +1,5 @@
 import { Readable } from "node:stream";
+import { setImmediate as realImmediate } from "node:timers/promises";
 import { B2AuthManager, SDK_RETRY_OPTIONS } from "../../src/auth";
 import { B2Client } from "../../src/b2/client";
 import { registerBucketTools } from "../../src/b2/buckets";
@@ -52,14 +53,24 @@ async function settle(): Promise<void> {
   await vi.advanceTimersByTimeAsync(0);
 }
 
+/**
+ * Poll until `reached()` holds, yielding real event-loop turns without moving the
+ * fake clock. The deadline is real elapsed time (not a turn count) so a loaded
+ * host that needs many turns to reach the first request cannot fall through early.
+ */
+async function waitUntil(reached: () => boolean, timeoutMs = 10_000): Promise<void> {
+  const deadline = vi.getRealSystemTime() + timeoutMs;
+  while (!reached() && vi.getRealSystemTime() < deadline) {
+    await settle();
+    await realImmediate();
+  }
+}
+
 async function waitForNativeRequests(
   transport: DeterministicB2NativeFake,
   count: number,
 ): Promise<void> {
-  for (let i = 0; i < 20; i++) {
-    await settle();
-    if (transport.requestsFor("b2_list_buckets").length >= count) return;
-  }
+  await waitUntil(() => transport.requestsFor("b2_list_buckets").length >= count);
   expect(transport.requestsFor("b2_list_buckets")).toHaveLength(count);
 }
 
@@ -92,10 +103,7 @@ function s3ClientWithHandler(handle: ReturnType<typeof vi.fn>): B2S3PeerClient {
 }
 
 async function waitForHandlerCalls(handle: ReturnType<typeof vi.fn>, count: number) {
-  for (let i = 0; i < 20; i++) {
-    await settle();
-    if (handle.mock.calls.length >= count) return;
-  }
+  await waitUntil(() => handle.mock.calls.length >= count);
   expect(handle).toHaveBeenCalledTimes(count);
 }
 
