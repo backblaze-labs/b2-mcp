@@ -17,7 +17,11 @@ playbook skills in `.claude/skills/` say `CLAUDE.md`, they mean this file.
 ## Commands
 
 - Build: `pnpm run build` (tsc to `dist/`; excludes `tests/`)
-- Test: `pnpm test` (typecheck of src and tests, then unit tests; no credentials)
+- Test: `pnpm test` (typecheck of src and tests, then unit tests; no B2 credentials,
+  but `B2_SIMULATOR_DIR`, below)
+- Simulator: unit, protocol, runtime-security and observability tests need
+  `B2_SIMULATOR_DIR` set to a `backblaze-labs/b2-simulator` checkout
+  (`docs/TESTING.md`, Standalone Simulator); without it they fail, never skip
 - Layers: `pnpm run test:contract`, `test:protocol`, `test:reliability`,
   `test:observability`, `test:package`, `test:slow` (no credentials)
 - Live: `pnpm run test:live:b2` (needs real B2 keys; see `docs/TESTING.md`)

@@ -27,6 +27,18 @@ pnpm run lint:links   # local Markdown link validation
 pnpm run spell        # cspell with the central .cspell/project-words.txt dictionary
 ```
 
+Most test layers also need the standalone B2 simulator,
+`backblaze-labs/b2-simulator`. That repository is not public: you need read
+access to it to run `pnpm test`, `pnpm run verify` or `pnpm run ci` locally,
+and CI runs these tests only for branches in this repository. Check it out at the revision CI pins and point
+`B2_SIMULATOR_DIR` at it; without it those tests fail with a message that names
+the variable. Setup and details:
+[`docs/TESTING.md#standalone-simulator`](./docs/TESTING.md#standalone-simulator).
+
+```bash
+export B2_SIMULATOR_DIR=/absolute/path/to/b2-simulator
+```
+
 For the version/build-pinned conda bootstrap:
 
 ```bash
@@ -88,6 +100,11 @@ touches the corresponding contract.
 ## Pull requests
 
 - Branch off `main`; keep changes focused.
+- Open pull requests from a branch in this repository. The simulator-backed CI
+  jobs need a deploy key that GitHub does not give to pull requests from
+  forks, so they refuse fork pull requests with a message saying so. If you
+  cannot push here, open the fork pull request anyway and a maintainer will
+  move it to a branch in this repository.
 - Run `pnpm run ci` before pushing; it mirrors every required PR job in
   `.github/workflows/test.yml`. `pnpm run verify` is the faster inner loop and
   must pass before opening a PR. CI runs deterministic

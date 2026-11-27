@@ -6,7 +6,6 @@ import {
   RetentionMode,
 } from "@backblaze-labs/b2-sdk";
 import { PartnerClient as SdkPartnerClient } from "@backblaze-labs/b2-sdk/partner";
-import { B2Simulator } from "@backblaze-labs/b2-sdk/simulator";
 import {
   existsSync,
   mkdtempSync,
@@ -43,8 +42,12 @@ import {
   StaticHttpResponse,
   type TransportHandler,
 } from "../support/sdk-test-helpers";
+import {
+  startStandaloneSimulator,
+  type StandaloneSimulator,
+} from "../../test-support/standalone-simulator";
 
-let sim: B2Simulator;
+let sim: StandaloneSimulator;
 let seed: SdkB2Client;
 let server: McpServer;
 
@@ -152,7 +155,7 @@ function bucketInfoFixture(bucketId: string, bucketName: string, bucketType = "a
 
 async function usePartnerSimulator(options: { partnerRequest?: PartnerRequestOverride } = {}) {
   invalidateAuthManagerCache();
-  sim = new B2Simulator({
+  await sim.reset({
     minimumPartSize: 1000,
     recommendedPartSize: 1000,
     partnerAuthorize: true,
@@ -199,9 +202,17 @@ async function usePartnerSimulator(options: { partnerRequest?: PartnerRequestOve
   return { adminAccountId: String(partnerAuth.accountId), transport, partnerSeed };
 }
 
+beforeAll(async () => {
+  sim = await startStandaloneSimulator();
+});
+
+afterAll(async () => {
+  await sim?.stop();
+});
+
 beforeEach(async () => {
   invalidateAuthManagerCache();
-  sim = new B2Simulator({ minimumPartSize: 1000, recommendedPartSize: 1000 });
+  await sim.reset({ minimumPartSize: 1000, recommendedPartSize: 1000 });
   installSdkTransport(sim.transport());
   seed = await seedClient();
   server = createServer(testConfig);
@@ -463,7 +474,7 @@ describe("b2_authorize_account", () => {
 describe("SDK 401 re-auth-and-retry", () => {
   it("re-authorizes and retries on an expired auth token", async () => {
     await createBucket("reauth-bucket");
-    sim.injectFailure({
+    await sim.injectFailure({
       on: "b2_list_buckets",
       status: 401,
       code: "expired_auth_token",
@@ -481,7 +492,7 @@ describe("SDK 401 re-auth-and-retry", () => {
       fileName: "large.bin",
       source: new BufferSource(new TextEncoder().encode("x")),
     });
-    sim.injectFailure({
+    await sim.injectFailure({
       on: "b2_list_file_names",
       status: 401,
       code: "expired_auth_token",
@@ -579,7 +590,7 @@ describe("SDK 401 re-auth-and-retry", () => {
   });
 
   it("surfaces repeated auth failures as a structured tool error", async () => {
-    sim.injectFailure({
+    await sim.injectFailure({
       on: "b2_list_buckets",
       status: 401,
       code: "expired_auth_token",
@@ -1561,7 +1572,7 @@ describe("native SDK DTO boundaries", () => {
 
 describe("Error propagation", () => {
   it("b2_list_keys returns isError for SDK B2 errors", async () => {
-    sim.injectFailure({
+    await sim.injectFailure({
       on: "b2_list_keys",
       status: 400,
       code: "bad_request",

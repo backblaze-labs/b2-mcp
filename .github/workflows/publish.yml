@@ -122,6 +122,37 @@ jobs:
             -c gpg.ssh.allowedSignersFile=.github/release-signers \
             verify-tag "${PUBLISH_TAG}"
           test "$(git rev-parse "refs/tags/${PUBLISH_TAG}^{commit}")" = "${EXPECTED_RELEASE_SHA}"
+      # `pnpm run verify` includes simulator-backed tests (docs/TESTING.md). The
+      # deploy key is used here, while the workspace still holds the trusted
+      # ci-green checkout, so the local action that receives the key is read
+      # from ci-green, never from the release tag. The action moves the
+      # simulator to $RUNNER_TEMP, outside the workspace, so the tag checkout
+      # below leaves it in place.
+      # Test the tag against the simulator revision the tag itself pins, read as
+      # data (git show, no tag code runs), not the one ci-green pins now.
+      - name: Read the simulator revision the release tag pins
+        id: simulator-revision
+        env:
+          CHECKOUT_SHA: ${{ steps.ref.outputs.checkout_sha }}
+        run: |
+          set -euo pipefail
+          action_file="${CHECKOUT_SHA}:.github/actions/b2-simulator/action.yml"
+          revision=""
+          if git cat-file -e "${action_file}" 2>/dev/null; then
+            revision="$(git show "${action_file}" \
+              | awk '/^  revision:/ { found = 1; next } found && /^  [^ ]/ { exit } found && $1 == "default:" { print $2; exit }')"
+          fi
+          if [[ ! "${revision}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::The release tag does not pin a full b2-simulator revision in .github/actions/b2-simulator/action.yml"
+            exit 1
+          fi
+          echo "revision=${revision}" >> "${GITHUB_OUTPUT}"
+      - name: Set up the standalone B2 simulator
+        id: simulator
+        uses: ./.github/actions/b2-simulator
+        with:
+          deploy-key: ${{ secrets.SIMULATOR_DEPLOY_KEY }}
+          revision: ${{ steps.simulator-revision.outputs.revision }}
       # actions/checkout v7, reviewed 2026-08-25.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -165,6 +196,7 @@ jobs:
           ACTIONS_RUNTIME_URL: ""
       - run: pnpm run verify
         env:
+          B2_SIMULATOR_DIR: ${{ steps.simulator.outputs.dir }}
           ACTIONS_CACHE_URL: ""
           ACTIONS_RESULTS_URL: ""
           ACTIONS_RUNTIME_TOKEN: ""

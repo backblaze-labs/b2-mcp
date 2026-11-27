@@ -253,7 +253,6 @@ describe("SDK adoption contract", () => {
   it("keeps the SDK subpath shim documented and aligned with public subpaths", async () => {
     const shim = readFileSync(join(ROOT, "src/types/backblaze-b2-sdk-s3.d.ts"), "utf8");
     const sdkS3 = await import("@backblaze-labs/b2-sdk/s3");
-    const sdkSimulator = await import("@backblaze-labs/b2-sdk/simulator");
 
     expect(shim).toContain("Temporary TypeScript-resolution shim");
     expect(shim).toContain("Issue");
@@ -264,8 +263,6 @@ describe("SDK adoption contract", () => {
     expect(shim).toContain("export function presignS3GetObjectUrl");
     expect(shim).toContain("export function presignS3PutObjectUrl");
     expect(shim).toContain("readonly forcePathStyle: boolean");
-    expect(typeof sdkSimulator.B2Simulator).toBe("function");
-    expect(shim).toContain("export class B2Simulator");
   });
 
   it("links the remaining upstream SDK gap and the #49 release gate", () => {

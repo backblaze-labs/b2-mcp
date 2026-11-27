@@ -351,6 +351,66 @@ Tool-surface tests inspect the repository-owned registration registry, not SDK
 private fields. The registry is sorted by tool name and mirrors the public
 `registerTool()` calls made at server construction.
 
+## Standalone Simulator
+
+Tests that need a B2 backend without credentials use the standalone simulator,
+`backblaze-labs/b2-simulator`, not the TypeScript SDK's built-in one. Using the
+SDK's `simulator` subpath is refused by
+`tests/contract/standalone-simulator.contract.test.ts`.
+
+Local setup: check the simulator out and point `B2_SIMULATOR_DIR` at it (an
+absolute path). Use the revision CI pins (the `revision` input's default in
+`.github/actions/b2-simulator/action.yml`). The repository is not public, so
+this needs read access to it.
+
+```bash
+git clone git@github.com:backblaze-labs/b2-simulator.git ../b2-simulator
+git -C ../b2-simulator checkout "<revision>"
+export B2_SIMULATOR_DIR="$(cd ../b2-simulator && pwd)"
+pnpm test
+```
+
+Without it, the simulator-backed tests fail with a message that names
+`B2_SIMULATOR_DIR`; they never skip. They are spread over the `unit`,
+`protocol-modern`, `protocol-legacy`, `runtime-security` and `observability`
+layers, so `pnpm test`, `pnpm run verify`, `pnpm run test:protocol`,
+`pnpm run test:coverage` and `pnpm run ci` all need it.
+
+How tests use it (`test-support/standalone-simulator.ts`):
+
+- Each test file that calls `startStandaloneSimulator` starts its own server in
+  `beforeAll` and stops it in `afterAll`, and its tests call `reset()` (the
+  control plane's `POST /reset`) in `beforeEach`, which empties the store,
+  faults and clock; part sizes and the Partner authorizer are chosen per reset.
+  Vitest runs files in separate workers, so files never share a store.
+- The server starts with `--profile ts-sdk --permissive-auth
+  --no-partner-authorize`, the SDK's in-process simulator defaults: any
+  credential authorizes and the account id is `sim_account_0001`.
+- `transport()` sends every SDK request to the server and answers as if the
+  server lived at the origin the client asked for (the old in-process transport
+  did the same), so the server's `https://*.backblazeb2.com` endpoint checks run
+  unchanged.
+- `injectFailure()` and `advanceTime()` map to `POST /faults` and `POST /clock`.
+- The protocol entrypoint (`tests/protocol/support/simulator-entrypoint.mjs`)
+  starts one server per credential pair on first use, as it did with in-process
+  simulators.
+- A server exits when the process that started it exits, `SIGKILL` included
+  (`test-support/exit-with-owner.mjs`).
+
+CI: `.github/actions/b2-simulator` checks the pinned revision out with the
+`SIMULATOR_DEPLOY_KEY` deploy key (read-only, credentials not persisted),
+verifies the revision, moves it to `$RUNNER_TEMP` and returns that directory as
+its `dir` output. Every job that runs a simulator-backed layer uses it, and each
+step that runs those tests sets `B2_SIMULATOR_DIR` from the output (the
+contract test above pins this). The release job runs it before it checks out
+the release tag, so no step or action from the tag is given the key. It reads
+the revision the tag pins with `git show` first, so a release is tested against
+the simulator its own CI used. A pull request from a fork cannot read that
+secret, so those jobs refuse it with a message asking for a branch in this
+repository; see `CONTRIBUTING.md`. Dependabot pull requests skip these jobs
+(they wait for the `runtime policy` job, which does not run for Dependabot), so
+the key is not needed as a Dependabot secret.
+
 ## Local Fake Endpoint
 
 Protocol tests can drive the real built server against a local HTTPS fake with
@@ -366,8 +426,8 @@ with no port, so a test-only override exists:
   native and S3 endpoint validators additionally accept that exact origin.
   Production hosts and every other rule are unchanged; there is no wildcard or
   suffix trust.
-- `test-support/fake-b2-endpoint.ts` serves the native API with the SDK's public
-  in-process `B2Simulator` transport and a minimal in-memory S3 handler
+- `test-support/fake-b2-endpoint.ts` serves the native API from a standalone
+  simulator (see [Standalone Simulator](#standalone-simulator)) and a minimal in-memory S3 handler
   (put, head, get, list, copy, delete, multipart) on a loopback HTTPS socket.
   The certificate is generated per run with the `openssl` CLI and is never
   committed; the spawned server trusts it through `NODE_EXTRA_CA_CERTS`.

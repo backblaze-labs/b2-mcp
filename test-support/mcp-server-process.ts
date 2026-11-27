@@ -17,6 +17,9 @@ const SAFE_ENV_NAMES = [
   "TMPDIR",
   "TMP",
   "TEMP",
+  // Not a credential: the local b2-simulator checkout the protocol entrypoint
+  // (tests/protocol/support/simulator-entrypoint.mjs) starts its servers from.
+  "B2_SIMULATOR_DIR",
 ];
 
 export function requireBuiltFiles(paths: string[], message: string): void {

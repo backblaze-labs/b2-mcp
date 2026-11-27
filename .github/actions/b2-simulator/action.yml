@@ -1,0 +1,63 @@
+name: Standalone B2 simulator
+description: >-
+  Check out the pinned backblaze-labs/b2-simulator revision with a read-only
+  deploy key and return its directory as the `dir` output. Each step that runs
+  simulator-backed tests sets B2_SIMULATOR_DIR from that output
+  (docs/TESTING.md, "Standalone Simulator"). Pull requests from forks are
+  refused, because GitHub does not give them the key.
+inputs:
+  deploy-key:
+    description: The SIMULATOR_DEPLOY_KEY secret, a read-only deploy key of backblaze-labs/b2-simulator.
+    required: true
+  revision:
+    description: Full commit of backblaze-labs/b2-simulator to test against. Change it only here.
+    required: false
+    default: 4052c6f8f45350486460d19bc796866cbdcdd3bc
+outputs:
+  dir:
+    description: Absolute path of the simulator checkout, outside the workspace, for B2_SIMULATOR_DIR.
+    value: ${{ steps.move.outputs.dir }}
+runs:
+  using: composite
+  steps:
+    - name: Require a pull request branch in this repository
+      shell: bash
+      env:
+        HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+      run: |
+        if [ "$HEAD_REPOSITORY" != "$GITHUB_REPOSITORY" ]; then
+          echo "::error::Simulator-backed tests are required and need the SIMULATOR_DEPLOY_KEY secret, which GitHub does not give to pull requests from forks. Push this change to a branch in $GITHUB_REPOSITORY (a maintainer can do it for you) and open the pull request from there."
+          exit 1
+        fi
+    # Checked by expression so the key never reaches a shell's environment.
+    - name: Require the simulator deploy key
+      if: ${{ inputs.deploy-key == '' }}
+      shell: bash
+      run: |
+        echo "::error::SIMULATOR_DEPLOY_KEY is not set. A repository admin must add it (a read-only deploy key of backblaze-labs/b2-simulator) as an Actions secret."
+        exit 1
+    # actions/checkout v7, reviewed 2026-08-25.
+    - name: Check out the pinned simulator
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        repository: backblaze-labs/b2-simulator
+        ref: ${{ inputs.revision }}
+        ssh-key: ${{ inputs.deploy-key }}
+        persist-credentials: false
+        path: .b2-simulator
+    # Moved out of the workspace so lint, format and spelling never scan it,
+    # and so a later checkout in the same job does not remove it.
+    - name: Verify the simulator revision and move it out of the workspace
+      id: move
+      shell: bash
+      env:
+        SIMULATOR_REVISION: ${{ inputs.revision }}
+      run: |
+        set -euo pipefail
+        test "$(git -C .b2-simulator rev-parse HEAD)" = "$SIMULATOR_REVISION"
+        test -z "$(git -C .b2-simulator status --short)"
+        dest="$RUNNER_TEMP/b2-simulator"
+        rm -rf "$dest"
+        mv .b2-simulator "$dest"
+        if command -v cygpath >/dev/null 2>&1; then dest="$(cygpath -w "$dest")"; fi
+        echo "dir=$dest" >> "$GITHUB_OUTPUT"

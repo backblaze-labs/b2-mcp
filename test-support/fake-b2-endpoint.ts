@@ -6,7 +6,7 @@ import { createServer, type Server } from "node:https";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { B2Simulator } from "@backblaze-labs/b2-sdk/simulator";
+import { startStandaloneSimulator, type StandaloneSimulator } from "./standalone-simulator";
 
 /** Host the spawned server resolves to loopback; neither an IP literal nor `localhost`. */
 export const FAKE_HOST = "b2-fake.test";
@@ -20,8 +20,8 @@ export interface FakeB2Endpoint {
   readonly origin: string;
   /** PEM file to pass as `NODE_EXTRA_CA_CERTS` to the spawned server. */
   readonly caCertPath: string;
-  /** The SDK's public in-process simulator that serves the native API. */
-  readonly simulator: B2Simulator;
+  /** The standalone simulator (backblaze-labs/b2-simulator) that serves the native API. */
+  readonly simulator: StandaloneSimulator;
   /** Requests seen by the S3 handler, as `METHOD /path?query`. */
   readonly s3Requests: string[];
   /** Release the socket and remove the temporary certificate. */
@@ -229,25 +229,35 @@ class FakeS3 {
  * Start the fake endpoint on a loopback HTTPS socket.
  *
  * @remarks
- * Native B2 calls (authorize, buckets, upload/download URLs) are served by the
- * SDK's public in-process {@link B2Simulator} through its documented transport.
+ * Native B2 calls (authorize, buckets, upload/download URLs) are served by a
+ * standalone b2-simulator (started from `B2_SIMULATOR_DIR`; see
+ * `standalone-simulator.ts`) through a transport that answers at this
+ * endpoint's origin.
  * S3-style paths are served by a tiny in-memory handler. The server certificate
  * is generated per run with the `openssl` CLI and never committed.
  */
 export async function startFakeB2Endpoint(): Promise<FakeB2Endpoint> {
+  const simulator = await startStandaloneSimulator({
+    extraArgs: ["--min-part-size", "1024", "--recommended-part-size", "1024"],
+  });
   const dir = mkdtempSync(join(tmpdir(), "b2-fake-endpoint-"));
   const keyPath = join(dir, "key.pem");
   const caCertPath = join(dir, "cert.pem");
-  execFileSync(
-    "openssl",
-    [
-      ...["req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1", "-nodes"],
-      ...["-keyout", keyPath, "-out", caCertPath, "-days", "2", "-subj", `/CN=${FAKE_HOST}`],
-      ...["-addext", `subjectAltName=DNS:${FAKE_HOST}`],
-    ],
-    { stdio: "ignore" },
-  );
-  const simulator = new B2Simulator({ minimumPartSize: 1024, recommendedPartSize: 1024 });
+  try {
+    execFileSync(
+      "openssl",
+      [
+        ...["req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1", "-nodes"],
+        ...["-keyout", keyPath, "-out", caCertPath, "-days", "2", "-subj", `/CN=${FAKE_HOST}`],
+        ...["-addext", `subjectAltName=DNS:${FAKE_HOST}`],
+      ],
+      { stdio: "ignore" },
+    );
+  } catch (err) {
+    await simulator.stop();
+    rmSync(dir, { recursive: true, force: true });
+    throw err;
+  }
   const transport = simulator.transport();
   const s3Requests: string[] = [];
   const s3 = new FakeS3(s3Requests);
@@ -293,6 +303,7 @@ export async function startFakeB2Endpoint(): Promise<FakeB2Endpoint> {
         server.close(() => resolve());
       });
       rmSync(dir, { recursive: true, force: true });
+      await simulator.stop();
     },
   };
 }

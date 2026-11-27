@@ -8,7 +8,10 @@
 
 import { buildHttpServer, type HttpServerHandle } from "../../src/http-server";
 import { invalidateAuthManagerCache } from "../../src/server";
-import { B2Simulator } from "@backblaze-labs/b2-sdk/simulator";
+import {
+  startStandaloneSimulator,
+  type StandaloneSimulator,
+} from "../../test-support/standalone-simulator";
 import {
   JSON_HEADERS,
   closeHttpServer,
@@ -67,9 +70,19 @@ afterAll(() => {
   restoreEnv(savedEnv);
 });
 
-beforeEach(() => {
-  const simulator = new B2Simulator({ minimumPartSize: 1024, recommendedPartSize: 1024 });
-  installSdkTransport(withTrustedS3ApiUrl(simulator.transport()));
+let sim: StandaloneSimulator;
+
+beforeAll(async () => {
+  sim = await startStandaloneSimulator();
+});
+
+afterAll(async () => {
+  await sim?.stop();
+});
+
+beforeEach(async () => {
+  await sim.reset({ minimumPartSize: 1024, recommendedPartSize: 1024 });
+  installSdkTransport(withTrustedS3ApiUrl(sim.transport()));
   process.env.B2_HTTP_CREDENTIAL_MODE = "headers";
   delete process.env.B2_APPLICATION_KEY_ID;
   delete process.env.B2_APPLICATION_KEY;
