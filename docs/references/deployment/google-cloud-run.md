@@ -115,9 +115,9 @@ Use the shared security contract first:
 
 ## Verification Record
 
-- Last verified: 2026-09-29
-- Repository baseline commit: `74f2e5a`
-- Package version: `0.2.2`
+- Last verified: 2026-11-27
+- Repository baseline commit: `0a4aead`
+- Package version: `0.2.3`
 - MCP revision: 2026-07-28
 - Runtime: Cloud Run container
 - Documentation owner: Gonza

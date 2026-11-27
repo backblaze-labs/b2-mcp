@@ -1,5 +1,0 @@
-kind: Fixed
-body: |-
-  Allow omitted upload content types, reject mismatched inline download lengths,
-  validate multipart completion bounds, and omit the no-op multipart ACL. (Refs #587)
-time: 2026-11-21T22:50:00Z

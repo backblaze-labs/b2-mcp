@@ -1,4 +1,0 @@
-kind: Security
-body: |-
-  Renewed the dev-only `zod` advisory exception (#524) in `audit-policy.json` to 2026-12-05 — re-checked 2026-11-02, still no patched zod 3.x (latest 3.25.76); reached only through dev-only `@anthropic-ai/mcpb` / vercel tooling, not the published package or any runtime path.
-time: 2026-11-17T00:00:00Z

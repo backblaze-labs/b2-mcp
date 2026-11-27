@@ -1,3 +1,0 @@
-kind: Fixed
-body: Concurrent first report reads now reuse one S3 client, preventing an overwritten client from leaking. (#559)
-time: 2026-11-20T17:40:00Z

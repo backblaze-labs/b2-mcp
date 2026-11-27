@@ -1,3 +1,0 @@
-kind: Fixed
-body: Local filesystem policy refusals for `s3_put_object` `filePath` and `s3_get_object` `saveToPath`, including a configured `B2_FILE_ROOT` that does not exist, now return `bad_request` (HTTP 400) instead of `internal_error` (HTTP 500). (#452)
-time: 2026-11-20T17:00:00Z

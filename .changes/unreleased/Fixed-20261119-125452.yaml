@@ -1,3 +1,0 @@
-kind: Fixed
-body: Validate multipart copy source versions against their bucket and object key before copying. Versioned copies reject conflicting or malformed selectors; unversioned copy sources pass through unchanged. (#1927)
-time: 2026-11-19T12:54:52.411329-06:00

@@ -1,5 +1,0 @@
-kind: Fixed
-body: |-
-  Keep temporary S3 fallback clients alive until download bodies finish or are
-  closed, and release them during shutdown. (Refs #582)
-time: 2026-11-21T20:42:00Z
