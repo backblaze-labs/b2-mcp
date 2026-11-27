@@ -29,6 +29,8 @@ const ACTIONS_RUNTIME_ENV_KEYS = [
 ];
 const PAGES_DOCS_INSTALL_COMMAND = "pnpm install --frozen-lockfile --ignore-scripts";
 const PAGES_DOCS_BUILD_COMMAND = "pnpm run docs";
+const PAGES_PNPM_SETUP_COMMAND =
+  "npm install --global \"pnpm@$(node -p \"require('./package.json').packageManager.replace(/^pnpm@/, '').split('+')[0]\")\"";
 
 function read(relativePath) {
   return readFileSync(path.join(root, relativePath), "utf8");
@@ -608,6 +610,7 @@ function requirePagesPackageExecutionHardening() {
 
         const runsPnpmInstall = normalizedRunCommand === PAGES_DOCS_INSTALL_COMMAND;
         const runsDocsBuild = normalizedRunCommand === PAGES_DOCS_BUILD_COMMAND;
+        const runsPnpmSetup = normalizedRunCommand === PAGES_PNPM_SETUP_COMMAND;
 
         if (!uploadsPagesArtifact) {
           fail(`${workflow}: Pages job ${job.name} must not run shell commands`);
@@ -624,7 +627,11 @@ function requirePagesPackageExecutionHardening() {
           requireBlankActionsRuntimeEnv(workflow, stepBlock, "Pages docs build step");
         }
 
-        if (!runsPnpmInstall && !runsDocsBuild) {
+        if (runsPnpmSetup) {
+          requireBlankActionsRuntimeEnv(workflow, stepBlock, "Pages pnpm setup step");
+        }
+
+        if (!runsPnpmInstall && !runsDocsBuild && !runsPnpmSetup) {
           if (
             /\bpnpm\s+install\b/.test(normalizedRunCommand) &&
             !/(?:^|\s)--ignore-scripts(?:\s|$)/m.test(normalizedRunCommand)

@@ -15,6 +15,7 @@ mgmt
 # Tooling, libraries, runtimes
 biome
 biomejs
+binfmt
 buildx
 BuildKit
 cgroup
@@ -49,6 +50,7 @@ slsaprovenance
 SUIDSGID
 TDQS
 thiennq
+tonistiigi
 tmpfs
 toon
 tsx

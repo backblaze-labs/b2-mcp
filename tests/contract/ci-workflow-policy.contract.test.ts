@@ -13,7 +13,8 @@ const { workflowJobBlock, workflowJobBlocks, yamlMappingForKey, yamlValuesForKey
   yamlValuesForKey: (text: string, key: string) => Array<string | string[]>;
 };
 
-const pnpmSetupAction = "pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115";
+const pnpmSetupCommand =
+  "npm install --global \"pnpm@$(node -p \"require('./package.json').packageManager.replace(/^pnpm@/, '').split('+')[0]\")\"";
 const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
   packageManager?: string;
   scripts?: Record<string, string>;
@@ -353,17 +354,15 @@ describe("CI workflow policy", () => {
           /\bpnpm run\b/.test(block);
         if (!usesPnpm) continue;
 
-        const setupIndex = block.indexOf(pnpmSetupAction);
+        const setupIndex = block.indexOf(pnpmSetupCommand);
         const setupNodeIndex = block.indexOf("actions/setup-node");
-        expect(setupIndex, `${relativePath}:${name} missing pinned pnpm setup`).toBeGreaterThan(-1);
-        const setupStep = block.slice(setupIndex, setupNodeIndex);
-        expect(setupStep, `${relativePath}:${name} must disable action install`).toContain(
-          "run_install: false",
-        );
         expect(
-          setupStep,
-          `${relativePath}:${name} must use packageManager as the pnpm version source`,
-        ).not.toMatch(/^\s+version:/m);
+          setupIndex,
+          `${relativePath}:${name} must install pnpm from packageManager`,
+        ).toBeGreaterThan(-1);
+        expect(block, `${relativePath}:${name} must not use pnpm/action-setup`).not.toContain(
+          "pnpm/action-setup",
+        );
         expect(
           setupIndex,
           `${relativePath}:${name} pnpm setup must precede setup-node`,
@@ -576,9 +575,13 @@ describe("CI workflow policy", () => {
     expect(containerImageJob).toContain("ghcr.io/${{ github.repository }}");
     expect(containerImageJob).toContain("packages: write");
     expect(containerImageJob).toContain("id-token: write");
-    expect(containerImageJob).toContain("docker/setup-qemu-action");
-    expect(containerImageJob).toContain("docker/setup-buildx-action");
-    expect(containerImageJob).toContain("sigstore/cosign-installer");
+    expect(containerImageJob).toContain(
+      'docker run --rm --privileged "${BINFMT_IMAGE}" --install all',
+    );
+    expect(containerImageJob).toContain(
+      "docker buildx create --use --name builder --driver docker-container",
+    );
+    expect(containerImageJob).toContain("name: Install pinned cosign");
     expect(containerImageJob).toContain("node scripts/smoke-container-image.mjs");
     expect(containerImageJob).toContain("node scripts/publish-container-image.mjs");
     expect(githubReleaseJob).toContain("needs: [prepare, publish, container-image]");

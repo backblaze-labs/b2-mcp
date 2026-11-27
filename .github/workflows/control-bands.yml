@@ -146,11 +146,11 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      # pnpm/action-setup v6.1.0, reviewed 2026-09-13.
-      - if: steps.key.outputs.enabled == 'true'
-        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
-        with:
-          run_install: false
+      # pnpm version from package.json packageManager, via the runner npm.
+      - name: Install pnpm
+        if: steps.key.outputs.enabled == 'true'
+        shell: bash
+        run: npm install --global "pnpm@$(node -p "require('./package.json').packageManager.replace(/^pnpm@/, '').split('+')[0]")"
       # actions/setup-node v7, reviewed 2026-08-06.
       - if: steps.key.outputs.enabled == 'true'
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1

@@ -30,10 +30,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # pnpm/action-setup v6.1.0, reviewed 2026-09-13.
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-        with:
-          run_install: false
+      # pnpm version from package.json packageManager, via the runner npm.
+      - name: Install pnpm
+        shell: bash
+        run: npm install --global "pnpm@$(node -p "require('./package.json').packageManager.replace(/^pnpm@/, '').split('+')[0]")"
       # actions/setup-node v7, reviewed 2026-08-06.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -55,10 +55,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # pnpm/action-setup v6.1.0, reviewed 2026-09-13.
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-        with:
-          run_install: false
+      # pnpm version from package.json packageManager, via the runner npm.
+      - name: Install pnpm
+        shell: bash
+        run: npm install --global "pnpm@$(node -p "require('./package.json').packageManager.replace(/^pnpm@/, '').split('+')[0]")"
       # actions/setup-node v7, reviewed 2026-08-06.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -91,10 +91,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # pnpm/action-setup v6.1.0, reviewed 2026-09-13.
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-        with:
-          run_install: false
+      # pnpm version from package.json packageManager, via the runner npm.
+      - name: Install pnpm
+        shell: bash
+        run: npm install --global "pnpm@$(node -p "require('./package.json').packageManager.replace(/^pnpm@/, '').split('+')[0]")"
       # actions/setup-node v7, reviewed 2026-08-06.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -120,10 +120,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # pnpm/action-setup v6.1.0, reviewed 2026-09-13.
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-        with:
-          run_install: false
+      # pnpm version from package.json packageManager, via the runner npm.
+      - name: Install pnpm
+        shell: bash
+        run: npm install --global "pnpm@$(node -p "require('./package.json').packageManager.replace(/^pnpm@/, '').split('+')[0]")"
       # actions/setup-node v7, reviewed 2026-08-06.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -193,10 +193,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # pnpm/action-setup v6.1.0, reviewed 2026-09-13.
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-        with:
-          run_install: false
+      # pnpm version from package.json packageManager, via the runner npm.
+      - name: Install pnpm
+        shell: bash
+        run: npm install --global "pnpm@$(node -p "require('./package.json').packageManager.replace(/^pnpm@/, '').split('+')[0]")"
       # actions/setup-node v7, reviewed 2026-08-06.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -226,10 +226,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # pnpm/action-setup v6.1.0, reviewed 2026-09-13.
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-        with:
-          run_install: false
+      # pnpm version from package.json packageManager, via the runner npm.
+      - name: Install pnpm
+        shell: bash
+        run: npm install --global "pnpm@$(node -p "require('./package.json').packageManager.replace(/^pnpm@/, '').split('+')[0]")"
       # actions/setup-node v7, reviewed 2026-08-06.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -262,10 +262,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # pnpm/action-setup v6.1.0, reviewed 2026-09-13.
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-        with:
-          run_install: false
+      # pnpm version from package.json packageManager, via the runner npm.
+      - name: Install pnpm
+        shell: bash
+        run: npm install --global "pnpm@$(node -p "require('./package.json').packageManager.replace(/^pnpm@/, '').split('+')[0]")"
       # actions/setup-node v7, reviewed 2026-08-06.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -295,10 +295,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # pnpm/action-setup v6.1.0, reviewed 2026-09-13.
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-        with:
-          run_install: false
+      # pnpm version from package.json packageManager, via the runner npm.
+      - name: Install pnpm
+        shell: bash
+        run: npm install --global "pnpm@$(node -p "require('./package.json').packageManager.replace(/^pnpm@/, '').split('+')[0]")"
       # actions/setup-node v7, reviewed 2026-08-06.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -328,10 +328,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # pnpm/action-setup v6.1.0, reviewed 2026-09-13.
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-        with:
-          run_install: false
+      # pnpm version from package.json packageManager, via the runner npm.
+      - name: Install pnpm
+        shell: bash
+        run: npm install --global "pnpm@$(node -p "require('./package.json').packageManager.replace(/^pnpm@/, '').split('+')[0]")"
       # actions/setup-node v7, reviewed 2026-08-06.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -471,10 +471,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # pnpm/action-setup v6.1.0, reviewed 2026-09-13.
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-        with:
-          run_install: false
+      # pnpm version from package.json packageManager, via the runner npm.
+      - name: Install pnpm
+        shell: bash
+        run: npm install --global "pnpm@$(node -p "require('./package.json').packageManager.replace(/^pnpm@/, '').split('+')[0]")"
       # actions/setup-node v7, reviewed 2026-08-06.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -508,10 +508,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # pnpm/action-setup v6.1.0, reviewed 2026-09-13.
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-        with:
-          run_install: false
+      # pnpm version from package.json packageManager, via the runner npm.
+      - name: Install pnpm
+        shell: bash
+        run: npm install --global "pnpm@$(node -p "require('./package.json').packageManager.replace(/^pnpm@/, '').split('+')[0]")"
       # actions/setup-node v7, reviewed 2026-08-06.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -573,10 +573,10 @@ jobs:
             echo "::error::origin/main is missing from checkout; fetch-depth: 0 must fetch protected refs"
             exit 1
           fi
-      # pnpm/action-setup v6.1.0, reviewed 2026-09-13.
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-        with:
-          run_install: false
+      # pnpm version from package.json packageManager, via the runner npm.
+      - name: Install pnpm
+        shell: bash
+        run: npm install --global "pnpm@$(node -p "require('./package.json').packageManager.replace(/^pnpm@/, '').split('+')[0]")"
       # actions/setup-node v7, reviewed 2026-08-06.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -834,10 +834,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # pnpm/action-setup v6.1.0, reviewed 2026-09-13.
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-        with:
-          run_install: false
+      # pnpm version from package.json packageManager, via the runner npm.
+      - name: Install pnpm
+        shell: bash
+        run: npm install --global "pnpm@$(node -p "require('./package.json').packageManager.replace(/^pnpm@/, '').split('+')[0]")"
       # actions/setup-node v7, reviewed 2026-08-06.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -872,10 +872,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # pnpm/action-setup v6.1.0, reviewed 2026-09-13.
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-        with:
-          run_install: false
+      # pnpm version from package.json packageManager, via the runner npm.
+      - name: Install pnpm
+        shell: bash
+        run: npm install --global "pnpm@$(node -p "require('./package.json').packageManager.replace(/^pnpm@/, '').split('+')[0]")"
       # actions/setup-node v7, reviewed 2026-08-06.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:

@@ -694,9 +694,13 @@ describe("supply-chain audit policy", () => {
     expect(containerImageJob).toContain("packages: write");
     expect(containerImageJob).toContain("id-token: write");
     expect(containerImageJob).toContain("ghcr.io/${{ github.repository }}");
-    expect(containerImageJob).toContain("docker/setup-qemu-action");
-    expect(containerImageJob).toContain("docker/setup-buildx-action");
-    expect(containerImageJob).toContain("sigstore/cosign-installer");
+    expect(containerImageJob).toContain(
+      'docker run --rm --privileged "${BINFMT_IMAGE}" --install all',
+    );
+    expect(containerImageJob).toContain(
+      "docker buildx create --use --name builder --driver docker-container",
+    );
+    expect(containerImageJob).toContain("name: Install pinned cosign");
     expect(containerImageJob).toContain("node scripts/smoke-container-image.mjs");
     expect(containerImageJob).toContain("node scripts/publish-container-image.mjs");
     expect(mcpRegistryPreflightJob).toContain("needs: prepare");
@@ -706,7 +710,16 @@ describe("supply-chain audit policy", () => {
     expect(mcpRegistryPreflightJob).not.toContain("id-token: write");
     expect(mcpRegistryPreflightJob).toContain("Verify MCP registry manifest metadata");
     expect(mcpRegistryPreflightJob).not.toContain("mcp-publisher validate");
-    expect(mcpRegistryPreflightJob).toContain("sigstore/cosign-installer");
+    expect(mcpRegistryPreflightJob).toContain("name: Install pinned cosign");
+    expect(publishWorkflow).toContain("COSIGN_VERSION: v3.1.3");
+    expect(publishWorkflow).toMatch(/COSIGN_LINUX_AMD64_SHA256: [a-f0-9]{64}\n/);
+    expect(publishWorkflow).toMatch(
+      /BINFMT_IMAGE: docker\.io\/tonistiigi\/binfmt:latest@sha256:[a-f0-9]{64}\n/,
+    );
+    expect(publishWorkflow).not.toContain("sigstore/cosign-installer");
+    expect(
+      publishWorkflow.split('"${COSIGN_LINUX_AMD64_SHA256}" "${bin}" | sha256sum -c -').length - 1,
+    ).toBe(2);
     expect(mcpRegistryPreflightJob).toContain("cosign verify-blob");
     expect(mcpRegistryPreflightJob).toContain("--certificate-identity");
     expect(mcpRegistryPreflightJob).toContain("--certificate-oidc-issuer");
