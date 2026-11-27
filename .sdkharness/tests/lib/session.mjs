@@ -165,8 +165,25 @@ export function check(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+/**
+ * JSON text with every object's keys sorted, at every depth; array order is kept. B2 writes its
+ * JSON keys alphabetically (b2-simulator profile `b2` does too, ledger F-219) and the server
+ * passes B2's JSON through, so key order carries no meaning while values and list order do.
+ */
+function canonicalJson(value) {
+  return JSON.stringify(value, (_key, item) =>
+    item && typeof item === "object" && !Array.isArray(item)
+      ? Object.fromEntries(
+          Object.keys(item)
+            .sort()
+            .map((key) => [key, item[key]]),
+        )
+      : item,
+  );
+}
+
 export function eq(what, expected, actual) {
-  if (JSON.stringify(expected) !== JSON.stringify(actual)) {
+  if (canonicalJson(expected) !== canonicalJson(actual)) {
     throw new Error(`${what}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
   }
 }
