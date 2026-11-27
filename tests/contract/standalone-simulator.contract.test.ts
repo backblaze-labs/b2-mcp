@@ -42,6 +42,7 @@ describe("standalone simulator adoption", () => {
 
 interface WorkflowStep {
   id?: string;
+  if?: string;
   uses?: string;
   run?: string;
   with?: Record<string, string | boolean | number>;
@@ -133,7 +134,7 @@ describe("standalone simulator in CI", () => {
     const forkIndex = steps.findIndex((step) =>
       String(step.run).includes('"$HEAD_REPOSITORY" != "$GITHUB_REPOSITORY"'),
     );
-    const keyIndex = steps.findIndex((step) => String(step.run).includes('-z "$DEPLOY_KEY"'));
+    const keyIndex = steps.findIndex((step) => step.if === "${{ inputs.deploy-key == '' }}");
     expect(forkIndex).toBeGreaterThanOrEqual(0);
     expect(keyIndex).toBeGreaterThan(forkIndex);
     expect(checkoutIndex).toBeGreaterThan(keyIndex);
@@ -148,6 +149,19 @@ describe("standalone simulator in CI", () => {
     );
     expect(String(steps[forkIndex]?.run)).toContain("exit 1");
     expect(String(steps[keyIndex]?.run)).toContain("exit 1");
+  });
+
+  it("never hands the deploy key to a shell: only checkout reads it", () => {
+    // The missing-key check is an `if:` expression, so the secret is never put
+    // in a step's environment or script where a shell (or anything it runs)
+    // could read it.
+    const readers = action.runs.steps
+      .map((step) => ({ ...step, if: undefined }))
+      .filter((step) => JSON.stringify(step).includes("inputs.deploy-key"));
+    expect(readers.map((step) => step.uses ?? step.run)).toEqual([
+      expect.stringMatching(/^actions\/checkout@[0-9a-f]{40}$/),
+    ]);
+    expect(readers[0]?.with?.["ssh-key"]).toBe("${{ inputs.deploy-key }}");
   });
 
   it("gives every job that runs simulator-backed tests the simulator first", () => {

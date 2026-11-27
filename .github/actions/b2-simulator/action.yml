@@ -29,15 +29,13 @@ runs:
           echo "::error::Simulator-backed tests are required and need the SIMULATOR_DEPLOY_KEY secret, which GitHub does not give to pull requests from forks. Push this change to a branch in $GITHUB_REPOSITORY (a maintainer can do it for you) and open the pull request from there."
           exit 1
         fi
+    # Checked by expression so the key never reaches a shell's environment.
     - name: Require the simulator deploy key
+      if: ${{ inputs.deploy-key == '' }}
       shell: bash
-      env:
-        DEPLOY_KEY: ${{ inputs.deploy-key }}
       run: |
-        if [ -z "$DEPLOY_KEY" ]; then
-          echo "::error::SIMULATOR_DEPLOY_KEY is not set. A repository admin must add it (a read-only deploy key of backblaze-labs/b2-simulator) as an Actions secret and, for Dependabot pull requests, also as a Dependabot secret."
-          exit 1
-        fi
+        echo "::error::SIMULATOR_DEPLOY_KEY is not set. A repository admin must add it (a read-only deploy key of backblaze-labs/b2-simulator) as an Actions secret and, for Dependabot pull requests, also as a Dependabot secret."
+        exit 1
     # actions/checkout v7, reviewed 2026-08-25.
     - name: Check out the pinned simulator
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
