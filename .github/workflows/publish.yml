@@ -136,8 +136,12 @@ jobs:
           CHECKOUT_SHA: ${{ steps.ref.outputs.checkout_sha }}
         run: |
           set -euo pipefail
-          revision="$(git show "${CHECKOUT_SHA}:.github/actions/b2-simulator/action.yml" \
-            | awk '/^  revision:/ { found = 1; next } found && /^  [^ ]/ { exit } found && $1 == "default:" { print $2; exit }')"
+          action_file="${CHECKOUT_SHA}:.github/actions/b2-simulator/action.yml"
+          revision=""
+          if git cat-file -e "${action_file}" 2>/dev/null; then
+            revision="$(git show "${action_file}" \
+              | awk '/^  revision:/ { found = 1; next } found && /^  [^ ]/ { exit } found && $1 == "default:" { print $2; exit }')"
+          fi
           if [[ ! "${revision}" =~ ^[0-9a-f]{40}$ ]]; then
             echo "::error::The release tag does not pin a full b2-simulator revision in .github/actions/b2-simulator/action.yml"
             exit 1

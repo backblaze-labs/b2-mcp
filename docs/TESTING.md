@@ -407,8 +407,9 @@ the release tag, so no step or action from the tag is given the key. It reads
 the revision the tag pins with `git show` first, so a release is tested against
 the simulator its own CI used. A pull request from a fork cannot read that
 secret, so those jobs refuse it with a message asking for a branch in this
-repository; see `CONTRIBUTING.md`. Dependabot pull requests read Dependabot
-secrets, so the key must be stored there too.
+repository; see `CONTRIBUTING.md`. Dependabot pull requests skip these jobs
+(they wait for the `runtime policy` job, which does not run for Dependabot), so
+the key is not needed as a Dependabot secret.
 
 ## Local Fake Endpoint
 

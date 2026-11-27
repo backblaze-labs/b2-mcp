@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -151,6 +151,44 @@ describe("standalone simulator in CI", () => {
     expect(String(steps[keyIndex]?.run)).toContain("exit 1");
   });
 
+  it("never asks for a Dependabot secret, because Dependabot pull requests skip every simulator job", () => {
+    // Each job that uses the action must not run for a Dependabot pull request:
+    // in test.yml through `needs: runtime-policy`, whose `if:` excludes
+    // Dependabot; mutation.yml and publish.yml have no pull_request trigger.
+    const workflowsDir = join(ROOT, ".github/workflows");
+    for (const name of readdirSync(workflowsDir).filter((file) => /\.ya?ml$/.test(file))) {
+      const workflow = parse(readFileSync(join(workflowsDir, name), "utf8")) as {
+        on?: Record<string, unknown>;
+        jobs?: Record<string, { if?: string; needs?: string | string[]; steps?: WorkflowStep[] }>;
+      };
+      const jobs = workflow.jobs ?? {};
+      for (const [id, job] of Object.entries(jobs)) {
+        if (!(job.steps ?? []).some((step) => step.uses === SIMULATOR_ACTION)) continue;
+        if (
+          !("pull_request" in (workflow.on ?? {})) &&
+          !("pull_request_target" in (workflow.on ?? {}))
+        ) {
+          continue;
+        }
+        const needs = [job.needs ?? []].flat();
+        expect(needs, `${name}#${id} must wait for runtime-policy`).toContain("runtime-policy");
+        expect(String(job.if ?? ""), `${name}#${id} must not run with always()`).not.toContain(
+          "always()",
+        );
+        expect(jobs["runtime-policy"]?.if).toBe(
+          "${{ github.event.pull_request.user.login != 'dependabot[bot]' }}",
+        );
+      }
+    }
+    const missingKey = action.runs.steps.find(
+      (step) => step.if === "${{ inputs.deploy-key == '' }}",
+    );
+    expect(String(missingKey?.run)).not.toMatch(/Dependabot secret/i);
+    const testing = readFileSync(join(ROOT, "docs/TESTING.md"), "utf8");
+    expect(testing).not.toMatch(/key must be stored there too/);
+    expect(testing).toContain("Dependabot pull requests skip these jobs");
+  });
+
   it("never hands the deploy key to a shell: only checkout reads it", () => {
     // The missing-key check is an `if:` expression, so the secret is never put
     // in a step's environment or script where a shell (or anything it runs)
@@ -252,5 +290,18 @@ describe("standalone simulator in CI", () => {
       rmSync(dir, { recursive: true, force: true });
     }
     expect(String(read?.run)).toContain("[0-9a-f]{40}");
+
+    // A tag made before the action existed: git's empty tree has no such file.
+    // The step must fail with its own annotation, not only git's message.
+    const emptyTree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+    const result = spawnSync("bash", ["-c", String(read?.run)], {
+      cwd: ROOT,
+      encoding: "utf8",
+      env: { ...process.env, CHECKOUT_SHA: emptyTree, GITHUB_OUTPUT: "/dev/null" },
+    });
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain(
+      "::error::The release tag does not pin a full b2-simulator revision",
+    );
   });
 });

@@ -34,7 +34,7 @@ runs:
       if: ${{ inputs.deploy-key == '' }}
       shell: bash
       run: |
-        echo "::error::SIMULATOR_DEPLOY_KEY is not set. A repository admin must add it (a read-only deploy key of backblaze-labs/b2-simulator) as an Actions secret and, for Dependabot pull requests, also as a Dependabot secret."
+        echo "::error::SIMULATOR_DEPLOY_KEY is not set. A repository admin must add it (a read-only deploy key of backblaze-labs/b2-simulator) as an Actions secret."
         exit 1
     # actions/checkout v7, reviewed 2026-08-25.
     - name: Check out the pinned simulator
