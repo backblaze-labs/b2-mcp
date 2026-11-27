@@ -57,6 +57,10 @@ See [CONTRIBUTING.md](https://github.com/backblaze-labs/b2-mcp/blob/main/CONTRIB
   `v4.38.2`. `eslint` stays on `10.9.1` because `10.11.0` pulls the
   quarantined `@cacheable/*` packages. (#481)
 - Adopt Changie release fragments, require release milestones, and verify signed release tags before preparing artifacts. (#563)
+- Final MCP SDK versions in this release: `@modelcontextprotocol/server` and the dev-only
+  `@modelcontextprotocol/client` are `2.4.0`, which supersedes the `2.2.0` named in the earlier
+  entry; the dev-only `@modelcontextprotocol/node` adapter is `2.1.2`, whose peer range requires
+  `server` `^2.4.0`; and `@modelcontextprotocol/inspector` is `2.12.0`. (#525, #527)
 
 ### Fixed
 
@@ -69,9 +73,9 @@ See [CONTRIBUTING.md](https://github.com/backblaze-labs/b2-mcp/blob/main/CONTRIB
   object instead of answering "Either filePath or content must be provided."
   (#505)
 - Ignore non-CSV objects when choosing the comparison snapshot for usage growth. (#571)
-- Validate multipart copy source versions against their bucket and object key before copying. Versioned copies reject conflicting or malformed selectors; unversioned copy sources pass through unchanged. (#1927)
-- Treat an empty `copySourceVersionId` as omitted for compatibility; embedded source versions are still validated; omit both version selectors to copy the current version. (#1927)
-- Presigned uploads now bind the approved Content-Type header; results include `requiredHeaders` with the exact Content-Type the upload must send. (#1927)
+- Validate multipart copy source versions against their bucket and object key before copying. Versioned copies reject conflicting or malformed selectors; unversioned copy sources pass through unchanged.
+- Treat an empty `copySourceVersionId` as omitted for compatibility; embedded source versions are still validated; omit both version selectors to copy the current version.
+- Presigned uploads now bind the approved Content-Type header; results include `requiredHeaders` with the exact Content-Type the upload must send.
 - Stage save-to-path downloads before creating destination directories so transfer failures leave no new directories or partial files. Finalization errors preserve parent directories; a hard kill can leave a .part file while the final path remains unchanged.
 - Local filesystem policy refusals for `s3_put_object` `filePath` and `s3_get_object` `saveToPath`, including a configured `B2_FILE_ROOT` that does not exist, now return `bad_request` (HTTP 400) instead of `internal_error` (HTTP 500). (#452)
 - Concurrent first report reads now reuse one S3 client, preventing an overwritten client from leaking. (#559)
