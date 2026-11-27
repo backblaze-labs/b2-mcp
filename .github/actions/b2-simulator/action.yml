@@ -12,7 +12,7 @@ inputs:
   revision:
     description: Full commit of backblaze-labs/b2-simulator to test against. Change it only here.
     required: false
-    default: a1e1db373b71f2d5f40082c19bc716cb6b3c3675
+    default: 4052c6f8f45350486460d19bc796866cbdcdd3bc
 outputs:
   dir:
     description: Absolute path of the simulator checkout, outside the workspace, for B2_SIMULATOR_DIR.
