@@ -1,3 +1,0 @@
-kind: Changed
-body: Adopt Changie release fragments, require release milestones, and verify signed release tags before preparing artifacts. (#563)
-time: 2026-11-17T00:01:00Z

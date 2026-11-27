@@ -1,8 +1,0 @@
-kind: Fixed
-body: |-
-  `s3_copy_object` with `REPLACE` and `s3_create_multipart_upload` reject
-    browser-executable content types in the shared S3 adapter. Unlike
-    `s3_put_object`, copy still permits an omitted or empty `contentType`, which
-    lets S3 reset it to the default type instead of retaining the source type.
-    `COPY` continues to ignore a supplied content type. (#542)
-time: 2026-11-17T00:00:03Z

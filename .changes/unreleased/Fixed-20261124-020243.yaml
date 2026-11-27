@@ -1,3 +1,0 @@
-kind: Fixed
-body: "Isolate cached OAuth authorization metadata from mutations made by individual verifier callers."
-time: 2026-11-24T02:02:43-03:00

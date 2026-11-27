@@ -1,3 +1,0 @@
-kind: Fixed
-body: "Preserve durable-secret ledger write failure recovery, bounded replay, and ownership cleanup when synchronization fails."
-time: 2026-11-24T02:05:00-03:00

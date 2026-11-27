@@ -1,3 +1,0 @@
-kind: Security
-body: "Restrict durable-secret post-create logs to fixed operation context and allowlisted recovery statuses, preventing provider results and callback-controlled details from exposing minted values."
-time: 2026-11-23T22:57:36.778066-03:00

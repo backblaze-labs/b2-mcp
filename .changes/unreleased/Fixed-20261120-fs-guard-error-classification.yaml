@@ -1,3 +1,0 @@
-kind: Fixed
-body: Preserve unexpected filesystem failures as server errors and reject local paths containing NUL bytes as bad_request. (#452)
-time: 2026-11-20T23:11:00.461Z

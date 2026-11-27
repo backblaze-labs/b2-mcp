@@ -1,3 +1,0 @@
-kind: Fixed
-body: Return the biggest storage declines first when usage growth uses shrinking order with a limit. (#558)
-time: 2026-11-20T23:39:14Z

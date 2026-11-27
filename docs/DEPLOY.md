@@ -45,8 +45,8 @@ release/build examples use
 
 ## Deployment Matrix
 
-Verification baseline for this table: last verified `2026-09-29`, repository
-baseline commit `74f2e5a`, package version `0.2.2`, MCP revision
+Verification baseline for this table: last verified `2026-11-27`, repository
+baseline commit `0a4aead`, package version `0.2.3`, MCP revision
 `2026-07-28`, documentation owner `Gonza`.
 
 | Platform | Deployment model | Support level | Runtime | Required adapter or artifact | Authentication options | Secret storage | Local filesystem policy | Scaling and session behavior | Constraints to verify |

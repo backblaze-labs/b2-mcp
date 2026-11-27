@@ -1,3 +1,0 @@
-kind: Fixed
-body: Presigned uploads now bind the approved Content-Type header; results include `requiredHeaders` with the exact Content-Type the upload must send. (#1927)
-time: 2026-11-19T14:09:40.205281-06:00

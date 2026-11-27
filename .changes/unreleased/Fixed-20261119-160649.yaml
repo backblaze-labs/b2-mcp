@@ -1,3 +1,0 @@
-kind: Fixed
-body: Stage save-to-path downloads before creating destination directories so transfer failures leave no new directories or partial files. Finalization errors preserve parent directories; a hard kill can leave a .part file while the final path remains unchanged.
-time: 2026-11-19T16:06:49.690279-06:00
