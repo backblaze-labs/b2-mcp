@@ -156,30 +156,33 @@ describe("standalone simulator in CI", () => {
     // in test.yml through `needs: runtime-policy`, whose `if:` excludes
     // Dependabot; mutation.yml and publish.yml have no pull_request trigger.
     const workflowsDir = join(ROOT, ".github/workflows");
+    let pullRequestJobs = 0;
     for (const name of readdirSync(workflowsDir).filter((file) => /\.ya?ml$/.test(file))) {
       const workflow = parse(readFileSync(join(workflowsDir, name), "utf8")) as {
-        on?: Record<string, unknown>;
+        on?: string | string[] | Record<string, unknown>;
         jobs?: Record<string, { if?: string; needs?: string | string[]; steps?: WorkflowStep[] }>;
       };
+      // `on:` may be a string, a list or a map of events.
+      const on = workflow.on ?? [];
+      const events = typeof on === "string" ? [on] : Array.isArray(on) ? on : Object.keys(on);
+      const onPullRequests = events.some((event) => event.startsWith("pull_request"));
       const jobs = workflow.jobs ?? {};
       for (const [id, job] of Object.entries(jobs)) {
         if (!(job.steps ?? []).some((step) => step.uses === SIMULATOR_ACTION)) continue;
-        if (
-          !("pull_request" in (workflow.on ?? {})) &&
-          !("pull_request_target" in (workflow.on ?? {}))
-        ) {
-          continue;
-        }
+        if (!onPullRequests) continue;
+        pullRequestJobs += 1;
         const needs = [job.needs ?? []].flat();
         expect(needs, `${name}#${id} must wait for runtime-policy`).toContain("runtime-policy");
-        expect(String(job.if ?? ""), `${name}#${id} must not run with always()`).not.toContain(
-          "always()",
+        // Any status function lets a job run after runtime-policy was skipped.
+        expect(String(job.if ?? ""), `${name}#${id} must not override the skip`).not.toMatch(
+          /\b(always|cancelled|failure|success)\s*\(/,
         );
         expect(jobs["runtime-policy"]?.if).toBe(
           "${{ github.event.pull_request.user.login != 'dependabot[bot]' }}",
         );
       }
     }
+    expect(pullRequestJobs, "pull-request jobs that use the simulator action").toBeGreaterThan(0);
     const missingKey = action.runs.steps.find(
       (step) => step.if === "${{ inputs.deploy-key == '' }}",
     );
